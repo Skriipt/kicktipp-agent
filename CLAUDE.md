@@ -156,6 +156,7 @@ Overview `ansicht` values: `spieltagspunkte`, `platzierungen`, `platzierungsdiff
 |---|---|---|
 | `SimplePredictor` | DOMINATION=6, DRAW=1.2 | If odds diff < 1.2 → 1:1. Else threshold buckets → 1:0, 2:1, or 3:1 based on diff magnitude. Reverses for away favorite. |
 | `CalculationPredictor` | MAX_GOALS=5, DOMINATION=9, DRAW=1.3, NONLINEARITY=0.5 | If odds diff < 1.3 → 1:1. Else computes total goals from diff/domination ratio, splits via ratio formula with nonlinearity exponent. |
+| `ClaudePredictor` | N/A | Calls `claude -p` with team names and odds, parses H:G response. Requires Claude Code CLI installed with Max subscription. |
 
 ### Terminal UI
 
