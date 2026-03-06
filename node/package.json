@@ -1,0 +1,27 @@
+{
+  "name": "kicktipp-cli",
+  "version": "1.0.0",
+  "description": "CLI tool for kicktipp.com",
+  "type": "module",
+  "bin": {
+    "kicktipp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "commander": "^13.0.0",
+    "ini": "^5.0.0",
+    "ora": "^8.0.0",
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/ini": "^4.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
