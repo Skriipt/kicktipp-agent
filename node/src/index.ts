@@ -1,26 +1,18 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { getPredictors, choosePredictor } from './predictors/index.js';
-import { loadCommunity, saveCommunity, loadPlayer, savePlayer, logout } from './config.js';
+import { getPredictors } from './predictors/index.js';
+import { saveCommunity, savePlayer, logout } from './config.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
-import readline from 'readline';
+import { ask, ensureCommunity } from './shared.js';
+import { registerLeaderboardCommand } from './commands/leaderboard.js';
+import { registerOverviewCommand } from './commands/overview.js';
+import { registerScheduleCommand } from './commands/schedule.js';
+import { registerTableCommand } from './commands/table.js';
+import { registerBetsCommand } from './commands/bets.js';
+import { registerRulesCommand } from './commands/rules.js';
 
 const program = new Command();
-
-const ask = (question: string): Promise<string> => {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => rl.question(question, (a) => { rl.close(); resolve(a); }));
-};
-
-async function ensureCommunity(page: any): Promise<string> {
-  let community = loadCommunity();
-  if (!community) {
-    await setCommunityInteractive(page);
-    community = loadCommunity()!;
-  }
-  return community;
-}
 
 async function setCommunityInteractive(page: any): Promise<void> {
   const all = await getCommunities(page);
@@ -103,7 +95,12 @@ program
     await browser.close();
   });
 
-// Commands from Task 6 and 7 will be added here via imports
+registerLeaderboardCommand(program);
+registerOverviewCommand(program);
+registerScheduleCommand(program);
+registerTableCommand(program);
+registerBetsCommand(program);
+registerRulesCommand(program);
 
 export { program, ensureCommunity, ask };
 
