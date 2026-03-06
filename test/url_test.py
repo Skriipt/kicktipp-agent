@@ -1,18 +1,59 @@
 
 import pytest
+from bs4 import BeautifulSoup
 import kicktippbb
 
-def test_tippabgabeurl_wo_matchday():
-    actualUrl = kicktippbb.get_tippabgabe_url('mycomm')
-    assert actualUrl == 'http://www.kicktipp.de/mycomm/tippabgabe'
+def test_predict_url_wo_matchday():
+    actualUrl = kicktippbb.get_predict_url('mycomm')
+    assert actualUrl == 'https://www.kicktipp.com/mycomm/predict'
 
-def test_tippabgabeurl_with_matchday():
-    actualUrl = kicktippbb.get_tippabgabe_url('mycomm', 5)
-    assert actualUrl == 'http://www.kicktipp.de/mycomm/tippabgabe?&spieltagIndex=5'
+def test_predict_url_with_matchday():
+    actualUrl = kicktippbb.get_predict_url('mycomm', 5)
+    assert actualUrl == 'https://www.kicktipp.com/mycomm/predict?spieltagIndex=5'
 
-def test_tippabgabeurl_matchday_oob():
+def test_predict_url_matchday_oob():
     with pytest.raises(IndexError):
-        kicktippbb.get_tippabgabe_url('mycomm', 42)
+        kicktippbb.get_predict_url('mycomm', 42)
     with pytest.raises(IndexError):
-        kicktippbb.get_tippabgabe_url('mycomm', 0)
-    
+        kicktippbb.get_predict_url('mycomm', 0)
+
+def test_parse_odds():
+    html = '<td><div class="tippabgabe-quoten"><span class="quote quote-heim"><span class="quote-label">1</span><span class="quote-text">1.03</span></span><span class="quote quote-remis"><span class="quote-label">X</span><span class="quote-text">77.4</span></span><span class="quote quote-gast"><span class="quote-label">2</span><span class="quote-text">59.8</span></span></div></td>'
+    td = BeautifulSoup(html, 'html.parser').find('td')
+    assert kicktippbb.parse_odds(td) == ('1.03', '77.4', '59.8')
+
+
+def test_parse_bet_arg_valid():
+    home, away, h, g = kicktippbb.parse_bet_arg("FC Bayern München vs Borussia Dortmund=2:1")
+    assert home == "FC Bayern München"
+    assert away == "Borussia Dortmund"
+    assert h == 2
+    assert g == 1
+
+
+def test_parse_bet_arg_zero_zero():
+    home, away, h, g = kicktippbb.parse_bet_arg("Leipzig vs Leverkusen=0:0")
+    assert home == "Leipzig"
+    assert away == "Leverkusen"
+    assert h == 0
+    assert g == 0
+
+
+def test_parse_bet_arg_missing_vs():
+    with pytest.raises(SystemExit):
+        kicktippbb.parse_bet_arg("FC Bayern - Dortmund=2:1")
+
+
+def test_parse_bet_arg_missing_equals():
+    with pytest.raises(SystemExit):
+        kicktippbb.parse_bet_arg("FC Bayern vs Dortmund 2:1")
+
+
+def test_parse_bet_arg_invalid_result():
+    with pytest.raises(SystemExit):
+        kicktippbb.parse_bet_arg("FC Bayern vs Dortmund=abc")
+
+
+def test_parse_bet_arg_equals_in_no_result():
+    with pytest.raises(SystemExit):
+        kicktippbb.parse_bet_arg("FC Bayern vs Dortmund=")
