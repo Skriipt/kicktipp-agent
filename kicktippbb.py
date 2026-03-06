@@ -23,15 +23,10 @@ Usage:
     kicktippbb.py [ --auto-bets ] [--matchday <value>] [--predictor <value>] [--override-bets] [--dry-run]
     kicktippbb.py [ --rules ]
     kicktippbb.py [ --logout ]
-    kicktippbb.py [--dry-run] [--override-bets] [--deadline <duration>] [--predictor <value>] [--matchday <value>] [COMMUNITY]...
 
 Options:
-    COMMUNITY                   Name of the prediction game community to place bets on,
-                                one or more names can be specified.
-                                If no community name is given the saved community is used,
-                                or all available communities if none is saved.
     --list-communities          Display a list of all communities the user has access to.
-    --set-community             Select a community to use as default when no COMMUNITY is specified.
+    --set-community             Select a community to use as default.
     --list-players              Display a list of all players in the saved community.
     --set-player                Select which player you are and save it.
     --leaderboard               Show the leaderboard for the current (or specified) matchday.
@@ -51,8 +46,6 @@ Options:
     --away                      Show the away table (use with --table).
     --logout                    Remove stored credentials and session, then exit.
     --override-bets             Override already placed bets.
-    --deadline <duration>       Only place bets on matches that start in <duration> from now.
-                                The duration format is <number><unit[m,h,d]>, e.g. 10m,5h or 1d
     --list-predictors           Display a list of predictors available to be used with '--predictor' option
     --predictor <value>         A specific predictor name to be used during calculation
     --dry-run                   Dont place any bet just print out predicitons
@@ -61,11 +54,9 @@ Options:
 
 import sys
 import configparser
-import datetime
 import getpass
 import itertools
 import os
-import re
 import shutil
 import threading
 import time
@@ -75,7 +66,6 @@ from playwright.sync_api import sync_playwright, Page
 from bs4 import BeautifulSoup
 
 import predictors.base
-from helper.deadline import is_before_dealine, timedelta_tostring
 from helper.match import Match
 
 URL_BASE = 'https://www.kicktipp.com'
@@ -85,7 +75,6 @@ CONFIG_DIR = os.path.join(os.path.expanduser('~'), '.config', 'kicktipp-cli')
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.ini')
 SESSION_FILE = os.path.join(CONFIG_DIR, 'session.json')
 
-DEADLINE_REGEX = re.compile('([1-9][0-9]*)(m|h|d)')
 
 
 def load_credentials():
@@ -194,7 +183,7 @@ def set_player(page: Page, community):
 
 def set_community(page: Page):
     """Prompt user to select a community and save it."""
-    all_communities = get_communities(page, [])
+    all_communities = get_communities(page)
     status_clear()
     if not all_communities:
         exit("No communities found.")
@@ -413,7 +402,7 @@ def get_predict_url(community, matchday=None):
         return predict_url + '?spieltagIndex={matchday}'.format(matchday=matchday)
 
 
-def get_communities(page: Page, desired_communities: list):
+def get_communities(page: Page):
     """
     Get a list of all communities of the user
     """
@@ -436,61 +425,44 @@ def get_communities(page: Page, desired_communities: list):
             linkdiv = link.find('div', {'class': "menu-title-mit-tippglocke"})
             return linkdiv and linkdiv.get_text().lower() == hreftext.lower()
 
-    community_list = [gethreftext(link)
-                      for link in links if is_community(link)]
-    if len(desired_communities) > 0:
-        return intersection(community_list, desired_communities)
-    return community_list
+    return [gethreftext(link) for link in links if is_community(link)]
 
 
-def intersection(a, b):
-    i = [x for x in a if x in b]
-    return i
+def place_bets(page: Page, community, predictor, override=False, dryrun=False, matchday=None):
+    """Place bets on a community."""
+    status("Loading {0}...".format(community))
+    matches = parse_match_rows(page, community, matchday)
+    status_clear()
+    print("Community: {0}".format(community))
+    if not matches:
+        print("  No active matchday found.")
+        return
 
-
-def place_bets(page: Page, communities: list, predictor, override=False, deadline=None, dryrun=False, matchday=None):
-    """Place bets on all given communities."""
-    for com in communities:
-        status("Loading {0}...".format(com))
-        matches = parse_match_rows(page, com, matchday)
-        status_clear()
-        print("Community: {0}".format(com))
-        if not matches:
-            print("  No active matchday found, skipping.")
+    for input_name_heim, input_name_gast, match in matches:
+        if not input_name_heim or not input_name_gast:
+            print("{0} - no bets possible".format(match))
             continue
 
-        for input_name_heim, input_name_gast, match in matches:
-            if not input_name_heim or not input_name_gast:
-                print("{0} - no bets possible".format(match))
-                continue
+        heim_input = page.query_selector('input[name="{}"]'.format(input_name_heim))
+        gast_input = page.query_selector('input[name="{}"]'.format(input_name_gast))
+        input_hometeam_value = heim_input.input_value() if heim_input else ''
+        input_roadteam_value = gast_input.input_value() if gast_input else ''
 
-            heim_input = page.query_selector('input[name="{}"]'.format(input_name_heim))
-            gast_input = page.query_selector('input[name="{}"]'.format(input_name_gast))
-            input_hometeam_value = heim_input.input_value() if heim_input else ''
-            input_roadteam_value = gast_input.input_value() if gast_input else ''
+        if not override and (input_hometeam_value or input_roadteam_value):
+            print("{0} - skipped, already placed {1}:{2}".format(match,
+                                                                 input_hometeam_value, input_roadteam_value))
+            continue
 
-            if not override and (input_hometeam_value or input_roadteam_value):
-                print("{0} - skipped, already placed {1}:{2}".format(match,
-                                                                     input_hometeam_value, input_roadteam_value))
-                continue
+        homebet, roadbet = predictor.predict(match)
+        print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
+        heim_input.fill(str(homebet))
+        gast_input.fill(str(roadbet))
 
-            if deadline is not None:
-                if not is_before_dealine(deadline, match.match_date):
-                    time_to_match = match.match_date - datetime.datetime.now()
-                    print("{0} - not betting yet, due in {1}".format(match,
-                                                                     timedelta_tostring(time_to_match)))
-                    continue
-
-            homebet, roadbet = predictor.predict(match)
-            print("{0} - betting {1}:{2}".format(match, homebet, roadbet))
-            heim_input.fill(str(homebet))
-            gast_input.fill(str(roadbet))
-
-        if not dryrun:
-            with page.expect_navigation():
-                page.click('button[name="submitbutton"]')
-        else:
-            print("INFO: Dry run, no bets were placed")
+    if not dryrun:
+        with page.expect_navigation():
+            page.click('button[name="submitbutton"]')
+    else:
+        print("INFO: Dry run, no bets were placed")
 
 
 def get_leaderboard_url(community, matchday=None, bonus=False):
@@ -1114,15 +1086,6 @@ def show_table(page: Page, community, option=None):
                 pos, team, played, pts, gf, ga, gd, w, d, l, tw=tw))
 
 
-def validate_arguments(arguments):
-    if arguments['--deadline']:
-        deadline_value = arguments['--deadline']
-
-        if not re.match(DEADLINE_REGEX, deadline_value):
-            exit("Invalid deadline value ({}), use <Number><Unit>, Unit=[m,h,d]".format(
-                deadline_value))
-
-
 def choose_predictor(predictor_param, predictors):
     if(predictor_param):
         if(predictor_param in predictors):
@@ -1137,7 +1100,6 @@ def choose_predictor(predictor_param, predictors):
 
 
 def main(arguments):
-    validate_arguments(arguments)
     predictors_ = predictors.base.get_predictors()
 
     # Just list the predictors at hand and exit
@@ -1179,7 +1141,7 @@ def main(arguments):
 
         # List all communities and exit
         if arguments['--list-communities']:
-            all_communities = get_communities(page, [])
+            all_communities = get_communities(page)
             status_clear()
             for com in all_communities:
                 print(com)
@@ -1232,9 +1194,8 @@ def main(arguments):
                 community = load_community()
             predictor_param = arguments['--predictor'] if '--predictor' in arguments else None
             predictor = choose_predictor(predictor_param, predictors_)
-            place_bets(page, [community], predictor,
+            place_bets(page, community, predictor,
                        override=arguments['--override-bets'],
-                       deadline=arguments['--deadline'],
                        dryrun=arguments['--dry-run'],
                        matchday=arguments['--matchday'])
             browser.close()
@@ -1315,32 +1276,6 @@ def main(arguments):
             show_leaderboard(page, community, matchday=arguments['--matchday'], bonus=arguments['--bonus'])
             browser.close()
             exit(0)
-
-        communities = arguments['COMMUNITY']
-
-        # Use saved community if none specified on command line
-        if not communities:
-            saved = load_community()
-            if saved:
-                communities = [saved]
-            else:
-                set_community(page)
-                communities = [load_community()]
-
-        # Which communities are considered, fail if no were found
-        communities = get_communities(page, communities)
-        if(len(communities) == 0):
-            browser.close()
-            exit("No community found!?")
-
-        # Which prediction method is used
-        status_clear()
-        predictor_param = arguments['--predictor'] if '--predictor' in arguments else None
-        predictor = choose_predictor(predictor_param, predictors_)
-
-        # Place bets
-        place_bets(page, communities, predictor,
-                   override=arguments['--override-bets'], deadline=arguments['--deadline'], dryrun=arguments['--dry-run'], matchday=arguments['--matchday'])
 
         browser.close()
 

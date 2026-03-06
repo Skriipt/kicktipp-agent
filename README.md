@@ -1,138 +1,122 @@
-![kicktipp-img]
+kicktipp-cli
+============
 
-[kicktipp-img]: https://www.kicktipp.de/assets/img/cb1059167120/assets/img/illu/startseite.png "Kicktipp"
-
-kicktipp-betbot
-===============
-
-A tool to place bets on www.kicktipp.de automatically
-
-kicktipp-betbot is a python based command-line tool that will place bets on www.kicktipp.de for you.
-
-Motivation
-----------
-
-I sometimes forget to place bets for the upcomming matchday. Therefore I wanted to create a 'simple' tool that places bets on the matchday right before the deadline. In conjunction with a raspberry pi server this tool should continously check whether i placed the current matchdays bets and in case i didn't it should place them automatically for me.
+A CLI tool to interact with [kicktipp.com](https://www.kicktipp.com) — view leaderboards, schedules, league tables, and place bets.
 
 Getting started
 ---------------
 
-The tool is designed as python command-line application and is intended to be used in conjunction with e.g. cron jobs.
-It is also possible to use it interactively.
-
-The main goal is to use this betbot non interactivly, therefore two steps are required to get it work.
-
-1. Generate a login token for later use
-2. Call the betbot with the generated login token
-
-### Generate a login token
-If yout dont want to use the betbot interactively you must generate a login token.
-The first task is to generate a login token. Fortunately the kicktipp website provides a login cookie that is used for this purpose.
-
-```console
-$ kicktippbb.py --get-login-token
-Username: myuser@mymail.com
-Password: ********
-```
-The result is a character seqence that is used as logint token for further requests.
-
-### Place bets
-In order to let the tool place bets for you just invoke it and pass it the generated login token.
-It will use the token and navigate to the 'tippabgabe' sub URL where the bets for the next matchday are placed.
-The result will be shown on the console.
-
-```console
-$ kicktippbb.py --use-login-token c3HfazFh6sd
-Community: testspiel
-02.10.2020 20:30 '1. FC Union Berlin' vs. 'FSV Mainz 05'  (2.15;3.5;3.3) - betting 1:2
-03.10.2020 15:30 'VfB Stuttgart' vs. 'Bayer 04 Leverkusen'  (3.0;3.75;2.2) - betting 1:0
-03.10.2020 15:30 'Eintracht Frankfurt' vs. '1899 Hoffenheim'  (2.8;3.75;2.35) - betting 1:1
-03.10.2020 15:30 '1. FC Köln' vs. 'Bor. Mönchengladbach'  (3.9;3.9;1.87) - betting 2:0
-03.10.2020 15:30 'Werder Bremen' vs. 'Arminia Bielefeld'  (2.15;3.6;3.3) - betting 3:1
-03.10.2020 15:30 'Borussia Dortmund' vs. 'SC Freiburg'  (1.4;5.0;7.25) - betting 3:1
-03.10.2020 18:30 'RB Leipzig' vs. 'FC Schalke 04'  (1.3;5.75;9.0) - betting 3:0
-04.10.2020 15:30 'VfL Wolfsburg' vs. 'FC Augsburg'  (1.91;3.75;3.8) - betting 2:1
-04.10.2020 18:00 'FC Bayern München' vs. 'Hertha BSC'  (1.14;9.25;16.5) - betting 3:1
+```bash
+pip install -r requirements.txt
+playwright install chromium
 ```
 
-All of your bet communities will be considered by the tool unless you specifiy the desired communities.
+On first run you will be prompted for your kicktipp.com credentials. They are stored in `~/.config/kicktipp-cli/` for subsequent runs.
+
+### Set up your community
 
 ```console
-$ kicktippbb.py --use-login-token c3HfazFh6sd mycommunityname
-...
+$ kicktippbb.py --set-community
+Available communities:
+  [1] testspiel
+  [2] bundesliga-tipps
+Select community (1-2): 1
+Saved 'testspiel' as default community.
 ```
 
-### Taming the daemon
-Some useful options to tweak the behavior of the betbot.
+### View bets
 
-#### Deadline:
-If you want the betbot to pick up the slack only in the last minute, there are some options you might consider using.
 ```console
-$ kicktippbb.py --use-login-token c3HfazFh6sd --dealine 10m mycommunityname
-...
-04.10.2020 18:00 'FC Bayern München' vs. 'Hertha BSC'  (1.17;10.0;21.0) - not betting yet, due in 00:37
-...
+$ kicktippbb.py --bets
 ```
 
-#### Override:
-By default the betbot doesn't override bets you already placed. So you may see an output like this:
+### Place bets by fixture
+
 ```console
-$ kicktippbb.py --use-login-token c3HfazFh6sd  mycommunityname
-...
-04.10.2020 18:00 'FC Bayern München' vs. 'Hertha BSC'  (1.16;8.5;14.5) - skipped, already placed 3:1
-...
+$ kicktippbb.py --set-all-bets "FC Bayern München vs Borussia Dortmund=2:1" "RB Leipzig vs Bayer 04 Leverkusen=0:0"
 ```
-Specifying the ```--override-bets``` option will ignore already placed bets and override former placed bets.
+
+### Auto-place bets using a predictor
+
+```console
+$ kicktippbb.py --auto-bets
+```
+
+### Options
+
+#### Override
+By default bets you already placed are not overridden. Use `--override-bets` to replace them.
 
 #### Matchday
-If you like to place bets on a specific matchday you can use the ```--matchday``` option.
-This comes in handy if a match is postponed and kicktipp.de just navigates to the matchday with the postponed open match instead of the current matchday.
-You can specify any matchday betweeen 1 and 34.
-```console
-$ kicktippbb.py --matchday=12 mycommunityname
-...
-```
+Use `--matchday` to target a specific matchday (1-34).
 
-#### Testing the outcome:
-If you don't want the betbot to carry out any operations on your games you can add the ```--dry-run``` parameter. This prevents the betbot from submitting any bets to your prediction games.
+#### Dry run
+Use `--dry-run` to preview predictions without submitting.
 
 ### Match Predictor Functions
-By default the betbot app uses the first (in alphabetically order) detected prediction algorithm in the prediction subfolder. You can also specify a predictor method by using the ```--predictor <predictorname>``` parameter.
+
+By default the first detected predictor is used. Specify one with `--predictor`:
 
 ```console
-$ kicktippbb.py --use-login-token c3HfazFh6sd --predictor CalculationPredictor mycommunityname
-...
+$ kicktippbb.py --auto-bets --predictor CalculationPredictor
 ```
 
-The prediction classes reside in the *predictors* subfolder. All predictors must be derived from *PredictorBase* class and must implement the *predict* method. The name of the predictor subclass can be used as ```--predictor``` input parameter.
+Predictors reside in the `predictors/` subfolder. All must subclass `PredictorBase` and implement `predict()`.
 
-### Usage 
+### Usage
 
-Here the usage:
 ```console
 $ kicktippbb.py --help
 KickTipp BetBot
-Automated kicktipp.de bet palcement.
+Automated kicktipp.com bet placement.
 
 Places bets to the upcomming matchday.
 Unless specified by parameter it places the bets on all prediction games of the account.
 
+On first run you will be prompted for your kicktipp.com credentials.
+They are stored in ~/.config/kicktipp-cli/ for subsequent runs.
+
 Usage:
-    kicktippbb.py [ --get-login-token ]
     kicktippbb.py [ --list-predictors ]
-    kicktippbb.py [--use-login-token <token> ] [--dry-run] [--override-bets] [--deadline <duration>] [--predictor <value>] [--matchday <value>] [COMMUNITY]...
+    kicktippbb.py [ --list-communities ]
+    kicktippbb.py [ --set-community ]
+    kicktippbb.py [ --list-players ]
+    kicktippbb.py [ --set-player ]
+    kicktippbb.py [ --leaderboard ] [--matchday <value>] [--bonus]
+    kicktippbb.py [ --overview ] [--view <value>]
+    kicktippbb.py [ --schedule ] [--matchday <value>]
+    kicktippbb.py [ --table ] [--home] [--away]
+    kicktippbb.py [ --bets ] [--matchday <value>]
+    kicktippbb.py [ --set-bets ] [--matchday <value>]
+    kicktippbb.py [ --set-all-bets BETS... ] [--matchday <value>]
+    kicktippbb.py [ --auto-bets ] [--matchday <value>] [--predictor <value>] [--override-bets] [--dry-run]
+    kicktippbb.py [ --rules ]
+    kicktippbb.py [ --logout ]
 
 Options:
-    COMMUNITY                   Name of the prediction game comunity to place bets,
-                                one or more names ca be specified
-    --get-login-token           Just login and print the login token string
-                                for later use with '--use-login-token' option
-    --use-login-token <token>   Perform bets without interactive login, use login token insted.
+    --list-communities          Display a list of all communities the user has access to.
+    --set-community             Select a community to use as default.
+    --list-players              Display a list of all players in the saved community.
+    --set-player                Select which player you are and save it.
+    --leaderboard               Show the leaderboard for the current (or specified) matchday.
+    --bonus                     Show the bonus questions leaderboard instead of the matchday one.
+    --overview                  Show the season overview table.
+    --view <value>              Which overview to show [default: matchday-points].
+                                Options: matchday-points, standings, standings-diff,
+                                matchday-standings, points-from-leader
+    --bets                      Show your bets for the current (or specified) matchday.
+    --set-bets                  Manually set bets for editable matches. Press Enter to skip a match.
+    --set-all-bets BETS...      Set bets by fixture, e.g. "Home vs Away=2:1". Use --bets to see fixture names.
+    --auto-bets                 Automatically place bets using a predictor on the saved community.
+    --rules                     Show the game rules for the community.
+    --schedule                  Show the match schedule for the current (or specified) matchday.
+    --table                     Show the league table.
+    --home                      Show the home table (use with --table).
+    --away                      Show the away table (use with --table).
+    --logout                    Remove stored credentials and session, then exit.
     --override-bets             Override already placed bets.
-    --deadline <duration>       Place bets only on matches starting within the given duration.
-                                The duration format is <number><unit[m,h,d]>, e.g. 10m,5h or 1d
     --list-predictors           Display a list of predictors available to be used with '--predictor' option
     --predictor <value>         A specific predictor name to be used during calculation
     --dry-run                   Dont place any bet just print out predicitons
-    --matchday <value>          Choose a specific matchday in the range of 1 to 34 to place bets on  
+    --matchday <value>          Choose a specific matchday in the range of 1 to 34 to place bets on
 ```
