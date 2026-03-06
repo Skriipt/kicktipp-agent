@@ -104,6 +104,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.session.json
 env/
 venv/
 ENV/
@@ -130,3 +131,7 @@ dmypy.json
 
 #VSCode
 .vscode/
+
+# Node
+node_modules/
+node/dist/
