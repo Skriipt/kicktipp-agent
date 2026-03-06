@@ -19,7 +19,7 @@ Usage:
     kicktippbb.py [ --table ] [--home] [--away]
     kicktippbb.py [ --bets ] [--matchday <value>]
     kicktippbb.py [ --set-bets ] [--matchday <value>]
-    kicktippbb.py [ --set-all-bets BETS ] [--matchday <value>]
+    kicktippbb.py [ --set-all-bets BETS... ] [--matchday <value>]
     kicktippbb.py [ --auto-bets ] [--matchday <value>] [--predictor <value>] [--override-bets] [--dry-run]
     kicktippbb.py [ --rules ]
     kicktippbb.py [ --logout ]
@@ -42,7 +42,7 @@ Options:
                                 matchday-standings, points-from-leader
     --bets                      Show your bets for the current (or specified) matchday.
     --set-bets                  Manually set bets for editable matches. Press Enter to skip a match.
-    --set-all-bets BETS         Set all bets at once, e.g. "2:1 0:0 3:1 1:1 ...". Use - to skip a match.
+    --set-all-bets BETS...      Set bets by fixture, e.g. "Home vs Away=2:1". Use --bets to see fixture names.
     --auto-bets                 Automatically place bets using a predictor on the saved community.
     --rules                     Show the game rules for the community.
     --schedule                  Show the match schedule for the current (or specified) matchday.
