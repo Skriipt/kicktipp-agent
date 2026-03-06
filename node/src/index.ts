@@ -11,6 +11,9 @@ import { registerScheduleCommand } from './commands/schedule.js';
 import { registerTableCommand } from './commands/table.js';
 import { registerBetsCommand } from './commands/bets.js';
 import { registerRulesCommand } from './commands/rules.js';
+import { registerSetBetsCommand } from './commands/set-bets.js';
+import { registerSetAllBetsCommand } from './commands/set-all-bets.js';
+import { registerAutoBetsCommand } from './commands/auto-bets.js';
 
 const program = new Command();
 
@@ -101,6 +104,9 @@ registerScheduleCommand(program);
 registerTableCommand(program);
 registerBetsCommand(program);
 registerRulesCommand(program);
+registerSetBetsCommand(program);
+registerSetAllBetsCommand(program);
+registerAutoBetsCommand(program);
 
 export { program, ensureCommunity, ask };
 
