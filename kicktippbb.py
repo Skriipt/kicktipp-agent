@@ -1207,7 +1207,7 @@ def main(arguments):
             if not community:
                 set_community(page)
                 community = load_community()
-            set_all_bets(page, community, arguments['BETS'], matchday=arguments['--matchday'])
+            set_all_bets(page, community, arguments['--set-all-bets'], matchday=arguments['--matchday'])
             browser.close()
             exit(0)
 
