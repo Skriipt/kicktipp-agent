@@ -886,8 +886,8 @@ def set_bets(page: Page, community, matchday=None):
         print("\nNo changes made.")
 
 
-def set_all_bets(page: Page, community, bets_str, matchday=None):
-    """Set all bets at once from a string like '2:1 0:0 3:1'."""
+def set_all_bets(page: Page, community, bet_args, matchday=None):
+    """Set bets by fixture. bet_args is a list of 'Home vs Away=H:G' strings."""
     status("Loading bets...")
     page.goto(get_predict_url(community, matchday))
     page.wait_for_load_state('domcontentloaded')
@@ -921,39 +921,29 @@ def set_all_bets(page: Page, community, bets_str, matchday=None):
         print("No editable matches found.")
         return
 
-    bets = bets_str.split()
-    if len(bets) != len(editable):
-        exit("Expected {} bets but got {}. Editable matches:\n{}".format(
-            len(editable), len(bets),
-            '\n'.join("  {} vs {}".format(h, a) for h, a, _, _ in editable)))
+    # Parse and validate all bets before applying any
+    parsed = []
+    seen = set()
+    for arg in bet_args:
+        home, away, h, g = parse_bet_arg(arg)
+        key = (home.lower(), away.lower())
+        if key in seen:
+            exit('Duplicate fixture: "{} vs {}"'.format(home, away))
+        seen.add(key)
+        entry = match_fixture(home, away, editable)
+        parsed.append((entry, h, g))
 
-    changed = False
-    for i, (home, away, heim_name, gast_name) in enumerate(editable):
-        bet = bets[i]
-        if bet == '-':
-            print("  {} vs {} - skipped".format(home, away))
-            continue
-        parts = bet.replace('-', ':').split(':')
-        if len(parts) != 2:
-            exit("Invalid bet '{}' for {} vs {}. Use format like 2:1".format(bet, home, away))
-        try:
-            h = int(parts[0])
-            g = int(parts[1])
-        except ValueError:
-            exit("Invalid bet '{}' for {} vs {}. Use format like 2:1".format(bet, home, away))
+    # Apply bets
+    for (home, away, heim_name, gast_name), h, g in parsed:
         print("  {} vs {} - {}:{}".format(home, away, h, g))
         heim_el = page.query_selector('input[name="{}"]'.format(heim_name))
         gast_el = page.query_selector('input[name="{}"]'.format(gast_name))
         heim_el.fill(str(h))
         gast_el.fill(str(g))
-        changed = True
 
-    if changed:
-        with page.expect_navigation():
-            page.click('button[name="submitbutton"]')
-        print("\nBets saved.")
-    else:
-        print("\nNo changes made.")
+    with page.expect_navigation():
+        page.click('button[name="submitbutton"]')
+    print("\nBets saved.")
 
 
 def show_rules(page: Page, community):
@@ -1256,7 +1246,7 @@ def main(arguments):
             if not community:
                 set_community(page)
                 community = load_community()
-            set_all_bets(page, community, arguments['--set-all-bets'], matchday=arguments['--matchday'])
+            set_all_bets(page, community, arguments['BETS'], matchday=arguments['--matchday'])
             browser.close()
             exit(0)
 
