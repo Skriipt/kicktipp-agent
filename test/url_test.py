@@ -57,3 +57,28 @@ def test_parse_bet_arg_invalid_result():
 def test_parse_bet_arg_equals_in_no_result():
     with pytest.raises(SystemExit):
         kicktippbb.parse_bet_arg("FC Bayern vs Dortmund=")
+
+
+def test_match_fixture_exact():
+    editable = [
+        ("FC Bayern München", "Borussia Dortmund", "heim1", "gast1"),
+        ("RB Leipzig", "Bayer 04 Leverkusen", "heim2", "gast2"),
+    ]
+    result = kicktippbb.match_fixture("FC Bayern München", "Borussia Dortmund", editable)
+    assert result == ("FC Bayern München", "Borussia Dortmund", "heim1", "gast1")
+
+
+def test_match_fixture_case_insensitive():
+    editable = [
+        ("FC Bayern München", "Borussia Dortmund", "heim1", "gast1"),
+    ]
+    result = kicktippbb.match_fixture("fc bayern münchen", "borussia dortmund", editable)
+    assert result == ("FC Bayern München", "Borussia Dortmund", "heim1", "gast1")
+
+
+def test_match_fixture_not_found():
+    editable = [
+        ("FC Bayern München", "Borussia Dortmund", "heim1", "gast1"),
+    ]
+    with pytest.raises(SystemExit):
+        kicktippbb.match_fixture("Unknown FC", "Borussia Dortmund", editable)

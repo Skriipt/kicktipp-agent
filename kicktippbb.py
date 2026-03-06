@@ -353,6 +353,17 @@ def parse_bet_arg(arg):
     return (home, away, h, g)
 
 
+def match_fixture(home, away, editable):
+    """Find a fixture in editable list by case-insensitive exact match.
+    editable: list of (home, away, heim_name, gast_name) tuples.
+    Returns the matching tuple or exits with error.
+    """
+    for entry in editable:
+        if entry[0].lower() == home.lower() and entry[1].lower() == away.lower():
+            return entry
+    exit('No match found for "{} vs {}"'.format(home, away))
+
+
 def parse_match_rows(page: Page, community, matchday=None):
     """Fetch latest odds for each match
     Returns a list of tuples (input_name_heim, input_name_gast, match)
