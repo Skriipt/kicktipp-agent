@@ -1,4 +1,4 @@
-# kicktipp-cli-mcp
+# kicktipp-agent
 
 A CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — the German football prediction game. View leaderboards, schedules, league tables, and place bets from the terminal or through any MCP-compatible AI assistant.
 
@@ -30,14 +30,14 @@ This gives you two commands:
 
 ### First-time setup
 
-On first run, the CLI prompts for your kicktipp.com email and password. Credentials are stored locally in `~/.config/kicktipp-cli-mcp/config.ini` (chmod 600).
+On first run, the CLI prompts for your kicktipp.com email and password. Credentials are stored locally in `~/.config/kicktipp-agent/config.ini` (chmod 600).
 
 ```console
 $ kicktipp set-community
 No credentials found. Please enter your kicktipp.com login:
 Email: you@example.com
 Password: ********
-Credentials saved to ~/.config/kicktipp-cli-mcp/config.ini
+Credentials saved to ~/.config/kicktipp-agent/config.ini
 
 Available communities:
   [1] testspiel
@@ -164,7 +164,7 @@ Add to `.mcp.json` in your home directory or project:
 The MCP server accepts credentials in two ways (checked in this order):
 
 1. **Environment variables** — `KICKTIPP_EMAIL` and `KICKTIPP_PASSWORD` passed via the `env` block in your MCP client config
-2. **Config file** — `~/.config/kicktipp-cli-mcp/config.ini`, shared with the CLI
+2. **Config file** — `~/.config/kicktipp-agent/config.ini`, shared with the CLI
 
 If neither is found, the server returns an error guiding the agent to inform you.
 

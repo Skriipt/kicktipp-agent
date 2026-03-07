@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**kicktipp-cli-mcp** is a TypeScript CLI tool for interacting with [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It uses Playwright for headless browser automation, Cheerio for HTML parsing, and Commander.js for CLI argument parsing. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
+**kicktipp-agent** is a TypeScript CLI tool for interacting with [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It uses Playwright for headless browser automation, Cheerio for HTML parsing, and Commander.js for CLI argument parsing. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
 
 ## File Inventory
 
@@ -10,7 +10,7 @@
 src/
   index.ts                    # Entry point + Commander CLI setup + simple commands
   shared.ts                   # Shared helpers (ask, ensureCommunity)
-  config.ts                   # Credential/community/player storage (~/.config/kicktipp-cli-mcp/)
+  config.ts                   # Credential/community/player storage (~/.config/kicktipp-agent/)
   browser.ts                  # Playwright session management, login, consent, HTML parsing
   url.ts                      # URL constants and builders
   helpers/
@@ -74,7 +74,7 @@ Commander.js program with subcommands. Simple commands (logout, communities, set
 
 ### Credential & Config Storage: `src/config.ts`
 
-- **Dir:** `~/.config/kicktipp-cli-mcp/`
+- **Dir:** `~/.config/kicktipp-agent/`
 - **Config:** `config.ini` (ini format, chmod 600)
   - `[auth]` section: `email`, `password`
   - `[community]` section: `name` (saved default community)
@@ -132,4 +132,4 @@ Rules:        /{community}/rules
 - TypeScript with ES2022 target, Node16 module resolution
 - Matchday range: 1-34 (Bundesliga season)
 - Login form: `input[name="kennung"]`, `input[name="passwort"]`
-- Config shared at `~/.config/kicktipp-cli-mcp/config.ini`
+- Config shared at `~/.config/kicktipp-agent/config.ini`

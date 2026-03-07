@@ -1,5 +1,5 @@
 {
-  "name": "kicktipp-cli-mcp",
+  "name": "kicktipp-agent",
   "version": "1.0.0",
   "description": "CLI and MCP server for kicktipp.com",
   "type": "module",

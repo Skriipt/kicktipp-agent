@@ -11,7 +11,7 @@ are answered once before the season starts.
 ## Prerequisites
 
 A community must be set before most commands work. On first run the CLI
-prompts for kicktipp.com credentials (stored in ~/.config/kicktipp-cli-mcp/).
+prompts for kicktipp.com credentials (stored in ~/.config/kicktipp-agent/).
 
   kicktipp set-community          # interactive picker (prompts for number)
   kicktipp set-player             # interactive — identifies you in leaderboards

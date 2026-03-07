@@ -4,7 +4,7 @@ import os from 'os';
 import * as ini from 'ini';
 import readline from 'readline';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-cli-mcp');
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
 export const SESSION_FILE = path.join(CONFIG_DIR, 'session.json');
 
