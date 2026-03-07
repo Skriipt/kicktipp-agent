@@ -2,14 +2,16 @@
 
 ## Project Overview
 
-**kicktipp-agent** is a TypeScript CLI tool for interacting with [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It uses Playwright for headless browser automation, Cheerio for HTML parsing, and Commander.js for CLI argument parsing. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
+**kicktipp-agent** is a TypeScript CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It uses Playwright for headless browser automation, Cheerio for HTML parsing, Commander.js for CLI argument parsing, and the MCP SDK to expose tools to AI assistants. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
 
 ## File Inventory
 
 ```
 src/
-  index.ts                    # Entry point + Commander CLI setup + simple commands
-  shared.ts                   # Shared helpers (ask, ensureCommunity)
+  index.ts                    # CLI entry point + Commander setup + simple commands
+  server.ts                   # MCP server entry point (kicktipp-mcp binary)
+  core.ts                     # Shared business logic used by both CLI and MCP server
+  shared.ts                   # Shared CLI helpers (ask, ensureCommunity)
   config.ts                   # Credential/community/player storage (~/.config/kicktipp-agent/)
   browser.ts                  # Playwright session management, login, consent, HTML parsing
   url.ts                      # URL constants and builders
@@ -68,9 +70,11 @@ kicktipp logout
 
 ## Architecture
 
-### Entry Point: `src/index.ts`
+### Entry Points
 
-Commander.js program with subcommands. Simple commands (logout, communities, set-community, players, set-player) are defined inline. View and bet commands are registered via import from `src/commands/`.
+- **`src/index.ts`** — CLI. Commander.js program with subcommands. Simple commands (logout, communities, set-community, players, set-player) are defined inline. View and bet commands are registered via import from `src/commands/`.
+- **`src/server.ts`** — MCP server. Exposes the same functionality as the CLI through the Model Context Protocol. Uses a persistent browser session shared across tool calls.
+- **`src/core.ts`** — Shared business logic (fetching data, placing bets) used by both entry points. All functions take a Playwright `Page` and community name, return structured data.
 
 ### Credential & Config Storage: `src/config.ts`
 
