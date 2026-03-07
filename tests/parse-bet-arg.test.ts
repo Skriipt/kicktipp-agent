@@ -37,6 +37,11 @@ describe('parseBetArg', () => {
   it('exits on invalid result', () => {
     expect(() => parseBetArg('Bayern vs Dortmund=abc')).toThrow();
   });
+
+  it('rejects negative goal values', () => {
+    expect(() => parseBetArg('Bayern vs Dortmund=-1:0')).toThrow('negative');
+    expect(() => parseBetArg('Bayern vs Dortmund=0:-2')).toThrow('negative');
+  });
 });
 
 describe('matchFixture', () => {

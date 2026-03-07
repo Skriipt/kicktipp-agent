@@ -8,6 +8,7 @@ import {
   matchFixture,
   EditableMatch,
 } from './helpers/parse-bet-arg.js';
+import { escapeCssValue } from './helpers/escape-css-value.js';
 
 // ── Shared helpers ─────────────────────────────────────────────────
 
@@ -246,7 +247,7 @@ export async function fetchBets(page: Page, community: string, matchday?: number
 }
 
 export async function fetchSchedule(page: Page, community: string, matchday?: number): Promise<{ title: string; matches: ScheduleMatch[] }> {
-  let url = `${URL_BASE}/${community}/schedule`;
+  let url = `${URL_BASE}/${encodeURIComponent(community)}/schedule`;
   if (matchday !== undefined) {
     if (matchday < 1 || matchday > 34) throw new RangeError(`Matchday '${matchday}' is not valid, use 1-34.`);
     url += `?spieltagIndex=${matchday}`;
@@ -365,7 +366,7 @@ export async function fetchOverview(page: Page, community: string, view = 'match
     throw new Error(`Unknown view '${view}'. Options: ${OVERVIEW_VIEW_OPTIONS.join(', ')}`);
   }
   const [ansicht, label] = OVERVIEW_VIEWS[view];
-  const $ = await loadPage(page, `${URL_BASE}/${community}/overview?ansicht=${ansicht}`);
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/overview?ansicht=${ansicht}`);
   const content = $('#kicktipp-content');
   const savedPlayer = loadPlayer();
 
@@ -406,7 +407,7 @@ export async function fetchOverview(page: Page, community: string, view = 'match
 }
 
 export async function fetchTable(page: Page, community: string, option?: 'home' | 'away'): Promise<{ label: string; teams: TableTeam[] }> {
-  let url = `${URL_BASE}/${community}/tables`;
+  let url = `${URL_BASE}/${encodeURIComponent(community)}/tables`;
   let label = 'League Table';
   if (option === 'home') { url += '?option=heim'; label = 'League Table (Home)'; }
   else if (option === 'away') { url += '?option=gast'; label = 'League Table (Away)'; }
@@ -440,7 +441,7 @@ export async function fetchTable(page: Page, community: string, option?: 'home' 
 }
 
 export async function fetchRules(page: Page, community: string): Promise<RulesSection[]> {
-  const $ = await loadPage(page, `${URL_BASE}/${community}/rules`);
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/rules`);
   const pagecontent = $('#kicktipp-content div.pagecontent');
   if (!pagecontent.length) return [];
 
@@ -488,7 +489,7 @@ export async function fetchPlayers(page: Page, community: string): Promise<strin
 
 // ── Write operations ───────────────────────────────────────────────
 
-export async function placeBets(page: Page, community: string, bets: string[], matchday?: number): Promise<PlacedBet[]> {
+export async function placeBets(page: Page, community: string, bets: string[], matchday?: number, submit = true): Promise<PlacedBet[]> {
   const $ = await loadPage(page, getPredictUrl(community, matchday));
   const tbody = $('#kicktipp-content tbody');
   if (!tbody.length) throw new Error('No matches found.');
@@ -525,23 +526,25 @@ export async function placeBets(page: Page, community: string, bets: string[], m
 
   const placed: PlacedBet[] = [];
   for (const { entry, h, g } of parsed) {
-    const heimEl = await page.$(`input[name="${entry.heimName}"]`);
-    const gastEl = await page.$(`input[name="${entry.gastName}"]`);
+    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
+    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
     if (heimEl) await heimEl.fill(String(h));
     if (gastEl) await gastEl.fill(String(g));
     placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
   }
 
-  await Promise.all([
-    page.waitForNavigation(),
-    page.click('button[name="submitbutton"]'),
-  ]);
+  if (submit) {
+    await Promise.all([
+      page.waitForNavigation(),
+      page.click('button[name="submitbutton"]'),
+    ]);
+  }
 
   return placed;
 }
 
 export async function fetchBonusQuestions(page: Page, community: string): Promise<BonusQuestion[]> {
-  const $ = await loadPage(page, `${URL_BASE}/${community}/predict?bonus=true`);
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
   const content = $('#kicktipp-content');
   const table = content.find('table#tippabgabeFragen');
   if (!table.length) return [];
@@ -574,7 +577,7 @@ export async function fetchBonusQuestions(page: Page, community: string): Promis
   return questions;
 }
 
-export async function placeBonusBets(page: Page, community: string, bets: string[]): Promise<PlacedBonusBet[]> {
+export async function placeBonusBets(page: Page, community: string, bets: string[], submit = true): Promise<PlacedBonusBet[]> {
   const questions = await fetchBonusQuestions(page, community);
   if (!questions.length) throw new Error('No editable bonus questions found.');
 
@@ -620,15 +623,17 @@ export async function placeBonusBets(page: Page, community: string, bets: string
         const available = q.selects[i].options.map((o) => o.text).join(', ');
         throw new Error(`No option "${answers[i]}" for question "${q.question}". Available: ${available}`);
       }
-      await page.selectOption(`select[name="${q.selects[i].name}"]`, option.value);
+      await page.selectOption(`select[name="${escapeCssValue(q.selects[i].name)}"]`, option.value);
       placed.push({ question: q.question, answer: option.text });
     }
   }
 
-  await Promise.all([
-    page.waitForNavigation(),
-    page.click('button[name="submitbutton"]'),
-  ]);
+  if (submit) {
+    await Promise.all([
+      page.waitForNavigation(),
+      page.click('button[name="submitbutton"]'),
+    ]);
+  }
 
   return placed;
 }

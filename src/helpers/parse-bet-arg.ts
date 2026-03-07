@@ -45,6 +45,11 @@ export function parseBetArg(arg: string): {
       `Invalid result '${result}'. Use format H:G (e.g. 2:1)`,
     );
   }
+  if (h < 0 || g < 0) {
+    throw new Error(
+      `Invalid result '${result}'. Goal values must not be negative.`,
+    );
+  }
   return { home, away, h, g };
 }
 

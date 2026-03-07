@@ -35,6 +35,7 @@ export async function launchBrowser(): Promise<{ browser: Browser; page: Page; c
   await login(page, email, password);
   fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
   await context.storageState({ path: SESSION_FILE });
+  fs.chmodSync(SESSION_FILE, 0o600);
   return { browser, page, context };
 }
 

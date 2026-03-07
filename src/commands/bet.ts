@@ -9,6 +9,7 @@ import {
   matchFixture,
   EditableMatch,
 } from '../helpers/parse-bet-arg.js';
+import { escapeCssValue } from '../helpers/escape-css-value.js';
 
 // ── Bonus question types and helpers ───────────────────────────────
 
@@ -192,8 +193,8 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
       console.log('    Invalid format, skipping.');
       continue;
     }
-    const heimEl = await page.$(`input[name="${row.heimName}"]`);
-    const gastEl = await page.$(`input[name="${row.gastName}"]`);
+    const heimEl = await page.$(`input[name="${escapeCssValue(row.heimName)}"]`);
+    const gastEl = await page.$(`input[name="${escapeCssValue(row.gastName)}"]`);
     if (heimEl) await heimEl.fill(String(h));
     if (gastEl) await gastEl.fill(String(g));
     changed = true;
@@ -262,8 +263,8 @@ async function fixtureBets(page: any, community: string, bets: string[], matchda
 
   for (const { entry, h, g } of parsed) {
     console.log(`  ${entry.home} vs ${entry.away} - ${h}:${g}`);
-    const heimEl = await page.$(`input[name="${entry.heimName}"]`);
-    const gastEl = await page.$(`input[name="${entry.gastName}"]`);
+    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
+    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
     if (heimEl) await heimEl.fill(String(h));
     if (gastEl) await gastEl.fill(String(g));
   }
@@ -336,7 +337,7 @@ async function bonusBetsNonInteractive(
 
   for (const { selectName, value, questionText, answerText } of parsed) {
     console.log(`  ${questionText} → ${answerText}`);
-    await page.selectOption(`select[name="${selectName}"]`, value);
+    await page.selectOption(`select[name="${escapeCssValue(selectName)}"]`, value);
   }
 }
 
@@ -375,7 +376,7 @@ async function bonusBetsInteractive(
       }
 
       await page.selectOption(
-        `select[name="${sel.name}"]`,
+        `select[name="${escapeCssValue(sel.name)}"]`,
         sel.options[idx].value,
       );
       console.log(`    → ${sel.options[idx].text}`);
@@ -387,7 +388,7 @@ async function bonusBetsInteractive(
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
   status('Loading bonus questions...');
-  await page.goto(`${URL_BASE}/${community}/predict?bonus=true`);
+  await page.goto(`${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
   await page.waitForLoadState('domcontentloaded');
   await dismissConsent(page);
   statusClear();

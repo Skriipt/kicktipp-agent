@@ -239,30 +239,32 @@ server.tool(
 
 server.tool(
   'place_bets',
-  'Place match bets by fixture name. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
+  'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
   {
     bets: z.array(z.string()).min(1).describe('Bets in format "Home vs Away=H:G", e.g. ["FC Bayern München vs Borussia Dortmund=2:1"]'),
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
+    dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
   },
-  async ({ bets, matchday }) => {
+  async ({ bets, matchday, dry_run }) => {
     const page = await getPage();
     const community = await resolveCommunity(page);
-    const placed = await placeBets(page, community, bets, matchday);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, placed }, null, 2) }] };
+    const placed = await placeBets(page, community, bets, matchday, !dry_run);
+    return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
   },
 );
 
 server.tool(
   'place_bonus_bets',
-  'Place bonus question answers. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
+  'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
   {
     bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer", e.g. ["Who will be champion?=FC Bayern München"]'),
+    dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
   },
-  async ({ bets }) => {
+  async ({ bets, dry_run }) => {
     const page = await getPage();
     const community = await resolveCommunity(page);
-    const placed = await placeBonusBets(page, community, bets);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, placed }, null, 2) }] };
+    const placed = await placeBonusBets(page, community, bets, !dry_run);
+    return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
   },
 );
 

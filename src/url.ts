@@ -5,7 +5,7 @@ export function getPredictUrl(
   community: string,
   matchday?: number,
 ): string {
-  const base = `${URL_BASE}/${community}/predict`;
+  const base = `${URL_BASE}/${encodeURIComponent(community)}/predict`;
   if (matchday === undefined) return base;
   if (matchday < 1 || matchday > 34) {
     throw new RangeError(
@@ -30,6 +30,6 @@ export function getLeaderboardUrl(
     }
     params.push(`spieltagIndex=${matchday}`);
   }
-  const base = `${URL_BASE}/${community}/leaderboard`;
+  const base = `${URL_BASE}/${encodeURIComponent(community)}/leaderboard`;
   return params.length ? `${base}?${params.join('&')}` : base;
 }
