@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**kicktipp-cli** is a TypeScript CLI tool for interacting with [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It uses Playwright for headless browser automation, Cheerio for HTML parsing, and Commander.js for CLI argument parsing. The tool can view leaderboards, schedules, league tables, manage bets (manual and automatic), and use pluggable predictor algorithms.
+**kicktipp-cli-mcp** is a TypeScript CLI tool for interacting with [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It uses Playwright for headless browser automation, Cheerio for HTML parsing, and Commander.js for CLI argument parsing. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
 
 ## File Inventory
 
@@ -10,19 +10,12 @@
 src/
   index.ts                    # Entry point + Commander CLI setup + simple commands
   shared.ts                   # Shared helpers (ask, ensureCommunity)
-  config.ts                   # Credential/community/player storage (~/.config/kicktipp-cli/)
+  config.ts                   # Credential/community/player storage (~/.config/kicktipp-cli-mcp/)
   browser.ts                  # Playwright session management, login, consent, HTML parsing
   url.ts                      # URL constants and builders
   helpers/
-    match.ts                  # Match class (teams, date, odds)
     parse-bet-arg.ts          # parseBetArg + matchFixture
     spinner.ts                # Terminal spinner (ora wrapper)
-  predictors/
-    base.ts                   # Predictor interface
-    simple.ts                 # SimplePredictor (threshold-based)
-    calculation.ts            # CalculationPredictor (ratio/nonlinearity formula)
-    claude.ts                 # ClaudePredictor (calls claude -p CLI)
-    index.ts                  # Registry + choosePredictor
   commands/
     leaderboard.ts            # leaderboard command (--matchday, --bonus)
     overview.ts               # overview command (--view)
@@ -30,13 +23,11 @@ src/
     table.ts                  # table command (--home, --away)
     bets.ts                   # bets command (--matchday)
     rules.ts                  # rules command
-    set-bets.ts               # set-bets command (interactive)
-    set-all-bets.ts           # set-all-bets command (fixture-based)
-    auto-bets.ts              # auto-bets command (predictor-based)
+    bet.ts                    # unified bet command (interactive, fixture, bonus)
+    today.ts                  # today command (today's matches + bet status)
+    guide.ts                  # guide command (detailed usage for LLM agents)
 tests/
-  match.test.ts               # Match class tests
   parse-bet-arg.test.ts       # parseBetArg + matchFixture tests
-  predictors.test.ts          # Predictor tests
   url.test.ts                 # URL builder tests
 package.json
 tsconfig.json
@@ -57,19 +48,20 @@ npm test
 
 # CLI usage (after npm link)
 kicktipp --help
-kicktipp list-predictors
-kicktipp list-communities
+kicktipp communities
 kicktipp set-community
-kicktipp list-players
+kicktipp players
 kicktipp set-player
 kicktipp leaderboard [--matchday N] [--bonus]
 kicktipp overview [--view matchday-points|standings|standings-diff|matchday-standings|points-from-leader]
 kicktipp schedule [--matchday N]
 kicktipp table [--home|--away]
 kicktipp bets [--matchday N]
-kicktipp set-bets [--matchday N]
-kicktipp set-all-bets "Home vs Away=2:1" "Home2 vs Away2=0:0" [--matchday N]
-kicktipp auto-bets [--matchday N] [--predictor NAME] [--override-bets] [--dry-run]
+kicktipp bet [--matchday N]
+kicktipp bet "Home vs Away=2:1" [--matchday N]
+kicktipp bet --bonus ["Question=Answer"]
+kicktipp today
+kicktipp guide
 kicktipp rules
 kicktipp logout
 ```
@@ -78,11 +70,11 @@ kicktipp logout
 
 ### Entry Point: `src/index.ts`
 
-Commander.js program with subcommands. Simple commands (list-predictors, logout, list-communities, set-community, list-players, set-player) are defined inline. View and bet commands are registered via import from `src/commands/`.
+Commander.js program with subcommands. Simple commands (logout, communities, set-community, players, set-player) are defined inline. View and bet commands are registered via import from `src/commands/`.
 
 ### Credential & Config Storage: `src/config.ts`
 
-- **Dir:** `~/.config/kicktipp-cli/`
+- **Dir:** `~/.config/kicktipp-cli-mcp/`
 - **Config:** `config.ini` (ini format, chmod 600)
   - `[auth]` section: `email`, `password`
   - `[community]` section: `name` (saved default community)
@@ -112,6 +104,7 @@ All page parsing follows: `page.goto(url)` → `waitForLoadState('domcontentload
 - Schedule table: `table#spiele`
 - Player names: `div.mg_name`
 - Match result: `span.kicktipp-ergebnis > span.kicktipp-heim` / `span.kicktipp-gast`
+- Bonus questions table: `table#tippabgabeFragen`
 
 ### URL Structure: `src/url.ts`
 
@@ -120,6 +113,7 @@ Base:         https://www.kicktipp.com
 Login:        /info/profil/login
 Communities:  /info/profil/meinetipprunden
 Predict:      /{community}/predict[?spieltagIndex=N]
+Predict bonus: /{community}/predict?bonus=true
 Leaderboard:  /{community}/leaderboard[?spieltagIndex=N&bonus=true]
 Overview:     /{community}/overview?ansicht={view}
 Schedule:     /{community}/schedule[?spieltagIndex=N]
@@ -127,31 +121,10 @@ Tables:       /{community}/tables[?option=heim|gast]
 Rules:        /{community}/rules
 ```
 
-### Match Model: `src/helpers/match.ts`
-
-`new Match(hometeam, roadteam, matchDate, rateHome, rateDeuce, rateRoad)`
-
-- Odds stored as floats; `.odds` returns `[number, number, number]`
-- `parseDate()` tries US format (`M/D/YY h:mm AM/PM`) first, then DE format (`DD.MM.YY HH:MM`). Falls back to `null`.
-
 ### Bet Argument Parsing: `src/helpers/parse-bet-arg.ts`
 
 - `parseBetArg("Home vs Away=H:G")` — splits on last `=`, then on ` vs `, returns `{home, away, h, g}`. Throws on invalid format.
 - `matchFixture(home, away, editable)` — case-insensitive exact match. Throws if not found.
-
-### Predictor System: `src/predictors/`
-
-- `Predictor` interface with `predict(match): [number, number]`
-- `getPredictors()` returns `Record<string, Constructor>`
-- `choosePredictor(name?)` selects and instantiates
-
-**Built-in predictors:**
-
-| Predictor | Logic |
-|---|---|
-| `SimplePredictor` | Threshold buckets on odds diff → 1:1, 1:0, 2:1, or 3:1. Reverses for away favorite. |
-| `CalculationPredictor` | Ratio/nonlinearity formula with max 5 goals. |
-| `ClaudePredictor` | Calls `claude -p` with team names and odds, parses H:G response. Requires Claude Code CLI. |
 
 ## Key Details
 
@@ -159,4 +132,4 @@ Rules:        /{community}/rules
 - TypeScript with ES2022 target, Node16 module resolution
 - Matchday range: 1-34 (Bundesliga season)
 - Login form: `input[name="kennung"]`, `input[name="passwort"]`
-- Config shared at `~/.config/kicktipp-cli/config.ini`
+- Config shared at `~/.config/kicktipp-cli-mcp/config.ini`

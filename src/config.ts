@@ -4,7 +4,7 @@ import os from 'os';
 import * as ini from 'ini';
 import readline from 'readline';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-cli');
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-cli-mcp');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
 export const SESSION_FILE = path.join(CONFIG_DIR, 'session.json');
 
@@ -20,6 +20,9 @@ function writeConfig(config: Record<string, any>): void {
 }
 
 export async function loadCredentials(): Promise<{ email: string; password: string }> {
+  if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) {
+    return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
+  }
   const config = readConfig();
   if (config.auth?.email && config.auth?.password) {
     return { email: config.auth.email, password: config.auth.password };
@@ -84,6 +87,12 @@ export function savePlayer(name: string): void {
   const config = readConfig();
   config.player = { name };
   writeConfig(config);
+}
+
+export function hasCredentials(): boolean {
+  if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
+  const config = readConfig();
+  return !!(config.auth?.email && config.auth?.password);
 }
 
 export function logout(): void {

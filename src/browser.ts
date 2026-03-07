@@ -3,10 +3,9 @@ import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
 import path from 'path';
-import { URL_BASE, URL_LOGIN, getPredictUrl, getLeaderboardUrl } from './url.js';
+import { URL_BASE, URL_LOGIN, getLeaderboardUrl } from './url.js';
 import { SESSION_FILE, loadCredentials } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
-import { Match } from './helpers/match.js';
 
 export async function launchBrowser(): Promise<{ browser: Browser; page: Page; context: BrowserContext }> {
   const browser = await chromium.launch({ headless: true });
@@ -101,59 +100,6 @@ export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, 
   const draw = el.find('span.quote-remis span.quote-text').text().trim();
   const road = el.find('span.quote-gast span.quote-text').text().trim();
   return [home, draw, road];
-}
-
-export interface MatchRow {
-  heimName: string | null;
-  gastName: string | null;
-  match: Match;
-}
-
-export async function parseMatchRows(page: Page, community: string, matchday?: number): Promise<MatchRow[]> {
-  await page.goto(getPredictUrl(community, matchday));
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
-
-  const $ = cheerio.load(await page.content());
-  const rows = $('#kicktipp-content tbody tr');
-  const result: MatchRow[] = [];
-  let lastMatch: Match | null = null;
-
-  rows.each((_, tr) => {
-    const cols = $(tr).find('td');
-    if (cols.length < 5) return;
-
-    const heimInput = $(cols[3]).find('input[id$="_heimTipp"]');
-    const gastInput = $(cols[3]).find('input[id$="_gastTipp"]');
-
-    let rateHome: string, rateDeuce: string, rateRoad: string;
-    try {
-      [rateHome, rateDeuce, rateRoad] = parseOdds($, cols[4]);
-    } catch {
-      console.error('Error: Not enough data, maybe there are no rates yet.');
-      process.exit(1);
-    }
-
-    const match = new Match(
-      $(cols[1]).text().trim(),
-      $(cols[2]).text().trim(),
-      $(cols[0]).text().trim(),
-      rateHome, rateDeuce, rateRoad,
-    );
-
-    if (!match.matchDate && lastMatch) {
-      match.matchDate = lastMatch.matchDate;
-    }
-    lastMatch = match;
-
-    result.push({
-      heimName: heimInput.length ? heimInput.attr('name')! : null,
-      gastName: gastInput.length ? gastInput.attr('name')! : null,
-      match,
-    });
-  });
-
-  return result;
 }
 
 export async function getPlayers(page: Page, community: string): Promise<string[]> {

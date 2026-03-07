@@ -1,10 +1,8 @@
-kicktipp-cli
-============
+# kicktipp-cli-mcp
 
-A CLI tool to interact with [kicktipp.com](https://www.kicktipp.com) — view leaderboards, schedules, league tables, and place bets.
+A CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — the German football prediction game. View leaderboards, schedules, league tables, and place bets from the terminal or through any MCP-compatible AI assistant.
 
-Getting started
----------------
+## Installation
 
 ```bash
 npm install
@@ -13,12 +11,24 @@ npm run build
 npm link
 ```
 
-On first run you will be prompted for your kicktipp.com credentials. They are stored in `~/.config/kicktipp-cli/` for subsequent runs.
+This gives you two commands:
 
-### Set up your community
+- **`kicktipp`** — the CLI
+- **`kicktipp-mcp`** — the MCP server
+
+## CLI
+
+### First-time setup
+
+On first run, the CLI prompts for your kicktipp.com email and password. Credentials are stored locally in `~/.config/kicktipp-cli-mcp/config.ini` (chmod 600).
 
 ```console
 $ kicktipp set-community
+No credentials found. Please enter your kicktipp.com login:
+Email: you@example.com
+Password: ********
+Credentials saved to ~/.config/kicktipp-cli-mcp/config.ini
+
 Available communities:
   [1] testspiel
   [2] bundesliga-tipps
@@ -26,69 +36,135 @@ Select community (1-2): 1
 Saved 'testspiel' as default community.
 ```
 
-### View bets
+Optionally set your player name so the leaderboard highlights your position:
 
 ```console
-$ kicktipp bets
+$ kicktipp set-player
 ```
 
-### Place bets by fixture
-
-```console
-$ kicktipp set-all-bets "FC Bayern München vs Borussia Dortmund=2:1" "RB Leipzig vs Bayer 04 Leverkusen=0:0"
-```
-
-### Auto-place bets using a predictor
-
-```console
-$ kicktipp auto-bets
-```
-
-Commands
---------
+### Commands
 
 | Command | Description |
 |---------|-------------|
-| `list-predictors` | List available predictor algorithms |
-| `list-communities` | List all communities you belong to |
+| `communities` | List all communities you belong to |
 | `set-community` | Select a default community |
-| `list-players` | List players in the saved community |
+| `players` | List players in the saved community |
 | `set-player` | Select which player you are |
 | `leaderboard` | Show the matchday leaderboard |
 | `overview` | Show the season overview |
 | `schedule` | Show the match schedule |
 | `table` | Show the league table |
 | `bets` | Show your bets for a matchday |
-| `set-bets` | Manually set bets (interactive) |
-| `set-all-bets` | Set bets by fixture name |
-| `auto-bets` | Auto-place bets using a predictor |
+| `bet` | Place bets (interactive, by fixture, or bonus) |
+| `today` | Show today's matches and which still need bets |
 | `rules` | Show the game rules |
+| `guide` | Print a detailed usage guide (useful for LLM agents) |
 | `logout` | Remove stored credentials and session |
+
+### Placing bets
+
+```bash
+# Interactive — prompts for each match
+kicktipp bet
+
+# By fixture name (get exact names from `kicktipp bets`)
+kicktipp bet "FC Bayern München vs Borussia Dortmund=2:1"
+kicktipp bet "RB Leipzig vs Bayer 04 Leverkusen=0:0" --matchday 5
+
+# Bonus questions — interactive
+kicktipp bet --bonus
+
+# Bonus questions — by name
+kicktipp bet --bonus "Who will win the league?=FC Bayern München"
+```
 
 ### Options
 
 - `--matchday <n>` — Target a specific matchday (1-34)
-- `--bonus` — Show bonus questions (with `leaderboard`)
+- `--bonus` — Bonus question rankings (with `leaderboard`) or bonus bets (with `bet`)
 - `--view <value>` — Overview type (with `overview`)
-- `--home` / `--away` — Home/away table (with `table`)
-- `--predictor <name>` — Choose predictor (with `auto-bets`)
-- `--override-bets` — Replace already placed bets
-- `--dry-run` — Preview predictions without submitting
+- `--home` / `--away` — Home/away filter (with `table`)
 
-### Predictors
+## MCP Server
 
-By default the first predictor is used. Specify one with `--predictor`:
+The MCP server exposes the same functionality as the CLI through the [Model Context Protocol](https://modelcontextprotocol.io), allowing AI assistants like Claude to interact with kicktipp.com on your behalf.
 
-```console
-$ kicktipp auto-bets --predictor CalculationPredictor
+### Available tools
+
+| Tool | Description |
+|------|-------------|
+| `get_status` | Check if credentials and community are configured |
+| `get_today_matches` | Today's matches with bet status |
+| `get_bets` | Matches and current bets for a matchday |
+| `get_schedule` | Match schedule with results |
+| `get_leaderboard` | Player rankings for a matchday |
+| `get_overview` | Season overview across all matchdays |
+| `get_table` | League table (actual football standings) |
+| `get_rules` | Game rules and scoring system |
+| `get_communities` | List communities the user belongs to |
+| `get_players` | List players in the community |
+| `get_bonus_questions` | Bonus questions with options |
+| `set_community` | Set the active community |
+| `set_player` | Set which player you are |
+| `place_bets` | Place match bets by fixture name |
+| `place_bonus_bets` | Place bonus question answers |
+
+### Setup with Claude Desktop
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "kicktipp": {
+      "command": "kicktipp-mcp",
+      "env": {
+        "KICKTIPP_EMAIL": "you@example.com",
+        "KICKTIPP_PASSWORD": "yourpassword"
+      }
+    }
+  }
+}
 ```
 
-Available: `SimplePredictor`, `CalculationPredictor`, `ClaudePredictor`
+The `env` block passes credentials directly to the server process — Claude never sees them. If you prefer, you can omit `env` and set credentials via the CLI instead (`kicktipp set-community`).
 
-Development
------------
+After restarting Claude Desktop, the agent will have access to all kicktipp tools. It will call `get_status` first to check configuration, then prompt you to set a community if needed.
+
+### Setup with Claude Code
+
+Add to `.mcp.json` in your home directory or project:
+
+```json
+{
+  "mcpServers": {
+    "kicktipp": {
+      "command": "kicktipp-mcp",
+      "env": {
+        "KICKTIPP_EMAIL": "you@example.com",
+        "KICKTIPP_PASSWORD": "yourpassword"
+      }
+    }
+  }
+}
+```
+
+### Credentials
+
+The MCP server accepts credentials in two ways (checked in this order):
+
+1. **Environment variables** — `KICKTIPP_EMAIL` and `KICKTIPP_PASSWORD` passed via the `env` block in your MCP client config
+2. **Config file** — `~/.config/kicktipp-cli-mcp/config.ini`, shared with the CLI
+
+If neither is found, the server returns an error guiding the agent to inform you.
+
+## Development
 
 ```bash
 npm test          # run tests
 npm run build     # compile TypeScript
 ```
+
+## Credits
+
+Originally forked from [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot) by Stefan. The project has since been fully rewritten in TypeScript with a new CLI interface, MCP server, and Cheerio-based parsing.

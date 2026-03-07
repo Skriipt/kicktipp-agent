@@ -1,10 +1,11 @@
 {
-  "name": "kicktipp-cli",
+  "name": "kicktipp-cli-mcp",
   "version": "1.0.0",
-  "description": "CLI tool for kicktipp.com",
+  "description": "CLI and MCP server for kicktipp.com",
   "type": "module",
   "bin": {
-    "kicktipp": "./dist/index.js"
+    "kicktipp": "./dist/index.js",
+    "kicktipp-mcp": "./dist/server.js"
   },
   "scripts": {
     "build": "tsc",
@@ -12,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "cheerio": "^1.0.0",
     "commander": "^13.0.0",
     "ini": "^5.0.0",

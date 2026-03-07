@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { getPredictors } from './predictors/index.js';
 import { saveCommunity, savePlayer, logout } from './config.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
 import { ask, ensureCommunity } from './shared.js';
@@ -11,10 +10,9 @@ import { registerScheduleCommand } from './commands/schedule.js';
 import { registerTableCommand } from './commands/table.js';
 import { registerBetsCommand } from './commands/bets.js';
 import { registerRulesCommand } from './commands/rules.js';
-import { registerSetBetsCommand } from './commands/set-bets.js';
-import { registerSetAllBetsCommand } from './commands/set-all-bets.js';
-import { registerAutoBetsCommand } from './commands/auto-bets.js';
-import { registerSetBonusBetsCommand } from './commands/set-bonus-bets.js';
+import { registerBetCommand } from './commands/bet.js';
+import { registerTodayCommand } from './commands/today.js';
+import { registerGuideCommand } from './commands/guide.js';
 
 const program = new Command();
 
@@ -48,20 +46,13 @@ program
   .version('1.0.0');
 
 program
-  .command('list-predictors')
-  .description('Display a list of available predictors')
-  .action(() => {
-    Object.keys(getPredictors()).forEach((k) => console.log(k));
-  });
-
-program
   .command('logout')
   .description('Remove stored credentials and session')
   .action(() => logout());
 
 program
-  .command('list-communities')
-  .description('Display a list of all communities')
+  .command('communities')
+  .description('List all communities you belong to')
   .action(async () => {
     const { browser, page } = await launchBrowser();
     const communities = await getCommunities(page);
@@ -79,8 +70,8 @@ program
   });
 
 program
-  .command('list-players')
-  .description('Display a list of all players in the saved community')
+  .command('players')
+  .description('List players in the saved community')
   .action(async () => {
     const { browser, page } = await launchBrowser();
     const community = await ensureCommunity(page);
@@ -105,10 +96,9 @@ registerScheduleCommand(program);
 registerTableCommand(program);
 registerBetsCommand(program);
 registerRulesCommand(program);
-registerSetBetsCommand(program);
-registerSetAllBetsCommand(program);
-registerAutoBetsCommand(program);
-registerSetBonusBetsCommand(program);
+registerBetCommand(program);
+registerTodayCommand(program);
+registerGuideCommand(program);
 
 export { program, ensureCommunity, ask };
 
