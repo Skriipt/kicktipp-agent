@@ -14,6 +14,7 @@ import { registerRulesCommand } from './commands/rules.js';
 import { registerSetBetsCommand } from './commands/set-bets.js';
 import { registerSetAllBetsCommand } from './commands/set-all-bets.js';
 import { registerAutoBetsCommand } from './commands/auto-bets.js';
+import { registerSetBonusBetsCommand } from './commands/set-bonus-bets.js';
 
 const program = new Command();
 
@@ -107,6 +108,7 @@ registerRulesCommand(program);
 registerSetBetsCommand(program);
 registerSetAllBetsCommand(program);
 registerAutoBetsCommand(program);
+registerSetBonusBetsCommand(program);
 
 export { program, ensureCommunity, ask };
 
