@@ -163,7 +163,7 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
   const $ = await loadPage(page, getPredictUrl(community));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
-  const tbody = content.find('tbody');
+  const tbody = content.find('table#tippabgabeSpiele tbody');
   if (!tbody.length) return { title, matches: [] };
 
   const now = new Date();
@@ -171,7 +171,7 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
 
   tbody.children('tr').each((_, tr) => {
     const cols = $(tr).children('td');
-    if (cols.length < 5) return;
+    if (cols.length < 4) return;
     const dateText = $(cols[0]).text().trim();
     const matchDate = parseMatchDate(dateText);
     if (!matchDate || matchDate.getFullYear() !== now.getFullYear() ||
@@ -196,7 +196,8 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
     }
 
     const time = matchDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    const [rateHome, rateDraw, rateAway] = parseOdds($, cols[4]);
+    // The odds column is only present in communities that have odds enabled
+    const [rateHome, rateDraw, rateAway] = cols.length > 4 ? parseOdds($, cols[4]) : ['-', '-', '-'];
 
     matches.push({
       time, home, away, bet,
@@ -212,13 +213,13 @@ export async function fetchBets(page: Page, community: string, matchday?: number
   const $ = await loadPage(page, getPredictUrl(community, matchday));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
-  const tbody = content.find('tbody');
+  const tbody = content.find('table#tippabgabeSpiele tbody');
   if (!tbody.length) return { title, matches: [] };
 
   const matches: BetMatch[] = [];
   tbody.children('tr').each((_, tr) => {
     const cols = $(tr).children('td');
-    if (cols.length < 5) return;
+    if (cols.length < 4) return;
     const date = $(cols[0]).text().trim();
     const home = $(cols[1]).text().trim();
     const away = $(cols[2]).text().trim();
@@ -239,7 +240,8 @@ export async function fetchBets(page: Page, community: string, matchday?: number
       }
     }
 
-    const [rateHome, rateDraw, rateAway] = parseOdds($, cols[4]);
+    // The odds column is only present in communities that have odds enabled
+    const [rateHome, rateDraw, rateAway] = cols.length > 4 ? parseOdds($, cols[4]) : ['-', '-', '-'];
     matches.push({ date, home, away, bet, odds: { home: rateHome, draw: rateDraw, away: rateAway } });
   });
 
@@ -491,15 +493,14 @@ export async function fetchPlayers(page: Page, community: string): Promise<strin
 
 export async function placeBets(page: Page, community: string, bets: string[], matchday?: number, submit = true): Promise<PlacedBet[]> {
   const $ = await loadPage(page, getPredictUrl(community, matchday));
-  const tbody = $('#kicktipp-content tbody');
+  const tbody = $('#kicktipp-content table#tippabgabeSpiele tbody');
   if (!tbody.length) throw new Error('No matches found.');
 
   const editable: EditableMatch[] = [];
   tbody.find('tr').each((_, tr) => {
     const cols = $(tr).find('td');
-    if (cols.length < 5) return;
+    if (cols.length < 4) return;
     const betTd = $(cols[3]);
-    if (betTd.hasClass('nichttippbar')) return;
     const heimInput = betTd.find('input[id$="_heimTipp"]');
     const gastInput = betTd.find('input[id$="_gastTipp"]');
     if (!heimInput.length || !gastInput.length) return;
