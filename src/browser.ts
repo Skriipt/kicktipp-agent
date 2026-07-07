@@ -6,6 +6,7 @@ import path from 'path';
 import { URL_BASE, URL_LOGIN, getLeaderboardUrl } from './url.js';
 import { SESSION_FILE, loadCredentials } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
+import { normalizeSlug } from './helpers/normalize-slug.js';
 
 export async function launchBrowser(): Promise<{ browser: Browser; page: Page; context: BrowserContext }> {
   const browser = await chromium.launch({ headless: true });
@@ -85,8 +86,8 @@ export async function getCommunities(page: Page): Promise<string[]> {
     const text = $(el).text().trim();
     const menuDiv = $(el).find('div.menu-title-mit-tippglocke');
     if (
-      href.toLowerCase() === text.toLowerCase() ||
-      (menuDiv.length && menuDiv.text().trim().toLowerCase() === href.toLowerCase())
+      normalizeSlug(href) === normalizeSlug(text) ||
+      (menuDiv.length && normalizeSlug(menuDiv.text().trim()) === normalizeSlug(href))
     ) {
       communities.push(href);
     }
