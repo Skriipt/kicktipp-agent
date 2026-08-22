@@ -17,19 +17,21 @@ export function registerTableCommand(program: Command): void {
         const community = await ensureCommunity(page);
 
         status('Loading table...');
-        let option: string | null = null;
-        if (opts.home) option = 'heim';
-        else if (opts.away) option = 'gast';
-        await page.goto(getTableUrl(community, opts.home ? 'home' : opts.away ? 'away' : undefined));
+        const option: 'home' | 'away' | undefined = opts.home
+          ? 'home'
+          : opts.away
+            ? 'away'
+            : undefined;
+        await page.goto(getTableUrl(community, option));
         statusClear();
 
         const $ = cheerio.load(await page.content());
         const content = $('#kicktipp-content');
 
         let label = 'League Table';
-        if (option === 'heim') {
+        if (option === 'home') {
           label = 'League Table (Home)';
-        } else if (option === 'gast') {
+        } else if (option === 'away') {
           label = 'League Table (Away)';
         }
         console.log(label);
