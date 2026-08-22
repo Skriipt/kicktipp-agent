@@ -1,6 +1,5 @@
-import { Page } from 'playwright';
 import * as cheerio from 'cheerio';
-import { dismissConsent, parseOdds, getCommunities, getPlayers } from './browser.js';
+import { Page, parseOdds, getCommunities, getPlayers } from './browser.js';
 import {
   getBonusPredictUrl,
   getLeaderboardUrl,
@@ -18,12 +17,39 @@ import {
 } from './helpers/parse-bet-arg.js';
 import { escapeCssValue } from './helpers/escape-css-value.js';
 
+// ── Errors ─────────────────────────────────────────────────────────
+
+/** The session is gone or was never valid — logging in again may help. */
+export class AuthError extends Error {}
+
+/** The page does not exist — usually a wrong community name. */
+export class NotFoundError extends Error {}
+
+/** The page exists but requires Spielleiter (admin) rights. */
+export class AdminRequiredError extends Error {}
+
 // ── Shared helpers ─────────────────────────────────────────────────
 
 async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   await page.goto(url);
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
+
+  // Kicktipp answers an invalid session with a redirect to its login page,
+  // and a wrong community with a "not found" page. Keep them apart: only
+  // the first one is worth throwing away the session over.
+  if (page.isAdminRequired()) {
+    throw new AdminRequiredError(
+      `Spielleiter (admin) rights are required for ${url}.`,
+    );
+  }
+  if (page.isAuthRedirect()) {
+    throw new AuthError(
+      `Kicktipp session is not authenticated (redirected to ${page.url()}). Verify credentials.`,
+    );
+  }
+  if (page.isNotFound()) {
+    throw new NotFoundError(`Kicktipp page not found: ${url}. Check the community name.`);
+  }
+
   return cheerio.load(await page.content());
 }
 
@@ -536,10 +562,7 @@ export async function placeBets(page: Page, community: string, bets: string[], m
   }
 
   if (submit) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
+    await page.click('button[name="submitbutton"]');
   }
 
   return placed;
@@ -631,10 +654,7 @@ export async function placeBonusBets(page: Page, community: string, bets: string
   }
 
   if (submit) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
+    await page.click('button[name="submitbutton"]');
   }
 
   return placed;

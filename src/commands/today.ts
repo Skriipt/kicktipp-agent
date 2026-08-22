@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent, parseOdds } from '../browser.js';
+import { launchBrowser, parseOdds } from '../browser.js';
 import { getPredictUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
@@ -38,14 +38,12 @@ export function registerTodayCommand(program: Command): void {
     .command('today')
     .description("Show today's matches and which still need bets")
     .action(async () => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
         status('Loading matches...');
         await page.goto(getPredictUrl(community));
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -134,7 +132,7 @@ export function registerTodayCommand(program: Command): void {
           console.log('\nAll bets placed.');
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

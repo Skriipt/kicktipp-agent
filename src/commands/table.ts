@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
+import { launchBrowser } from '../browser.js';
 import { getTableUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
@@ -12,7 +12,7 @@ export function registerTableCommand(program: Command): void {
     .option('--home', 'Show home table only')
     .option('--away', 'Show away table only')
     .action(async (opts) => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
@@ -21,8 +21,6 @@ export function registerTableCommand(program: Command): void {
         if (opts.home) option = 'heim';
         else if (opts.away) option = 'gast';
         await page.goto(getTableUrl(community, opts.home ? 'home' : opts.away ? 'away' : undefined));
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -76,7 +74,7 @@ export function registerTableCommand(program: Command): void {
           }
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

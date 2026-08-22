@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent, parseOdds } from '../browser.js';
+import { launchBrowser, parseOdds } from '../browser.js';
 import { getPredictUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
@@ -11,15 +11,13 @@ export function registerBetsCommand(program: Command): void {
     .description('Show bets/predictions for a matchday')
     .option('--matchday <n>', 'Matchday number (1-34)')
     .action(async (opts) => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         const matchday = opts.matchday !== undefined ? parseInt(opts.matchday) : undefined;
 
         status('Loading bets...');
         await page.goto(getPredictUrl(community, matchday));
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -85,7 +83,7 @@ export function registerBetsCommand(program: Command): void {
           }
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

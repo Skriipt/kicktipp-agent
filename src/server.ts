@@ -3,10 +3,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { Browser, Page, BrowserContext } from 'playwright';
-import { launchBrowser } from './browser.js';
+import { Page, launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials } from './config.js';
 import {
+  AuthError,
   resolveCommunity,
   fetchTodayMatches,
   fetchBets,
@@ -23,31 +23,39 @@ import {
   OVERVIEW_VIEW_OPTIONS,
 } from './core.js';
 
-// ── Persistent browser session ─────────────────────────────────────
+// ── Persistent Kicktipp session ────────────────────────────────────
 
-let browserInstance: Browser | null = null;
 let pageInstance: Page | null = null;
-let contextInstance: BrowserContext | null = null;
 
 async function getPage(): Promise<Page> {
-  if (pageInstance) {
-    try {
-      await pageInstance.evaluate(() => true);
-      return pageInstance;
-    } catch {
-      browserInstance = null;
-      pageInstance = null;
-      contextInstance = null;
-    }
-  }
+  if (pageInstance && !pageInstance.isClosed()) return pageInstance;
   if (!hasCredentials()) {
     throw new Error('No credentials found. Set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal.');
   }
-  const { browser, page, context } = await launchBrowser();
-  browserInstance = browser;
+  const { page } = await launchBrowser();
   pageInstance = page;
-  contextInstance = context;
   return page;
+}
+
+async function discardSession(): Promise<void> {
+  const stale = pageInstance;
+  pageInstance = null;
+  if (stale) await stale.close();
+}
+
+/**
+ * Run a read-only tool body, retrying once with a fresh login if the cached
+ * session turned out to be expired. Mutating tools must not use this: their
+ * first attempt may already have submitted data.
+ */
+async function withFreshSession<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!(err instanceof AuthError)) throw err;
+    await discardSession();
+    return fn();
+  }
 }
 
 // ── MCP Server ─────────────────────────────────────────────────────
@@ -88,36 +96,36 @@ server.tool(
   'get_today_matches',
   "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
   {},
-  async () => {
+  async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchTodayMatches(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
   'get_bets',
   'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
   { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
-  async ({ matchday }) => {
+  async ({ matchday }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchBets(page, community, matchday);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
   'get_schedule',
   'Get the match schedule with results for a matchday.',
   { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
-  async ({ matchday }) => {
+  async ({ matchday }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchSchedule(page, community, matchday);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
@@ -127,71 +135,71 @@ server.tool(
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
     bonus: z.boolean().optional().describe('Show bonus question rankings instead of match rankings.'),
   },
-  async ({ matchday, bonus }) => {
+  async ({ matchday, bonus }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchLeaderboard(page, community, matchday, bonus);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
   'get_overview',
   'Get the season overview showing all players and their points across matchdays.',
   { view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') },
-  async ({ view }) => {
+  async ({ view }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchOverview(page, community, view);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
   'get_table',
   'Get the league table (standings of the actual football teams, not the prediction game).',
   { option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') },
-  async ({ option }) => {
+  async ({ option }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchTable(page, community, option);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
   'get_rules',
   'Get the game rules and scoring system.',
   {},
-  async () => {
+  async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchRules(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
   'get_communities',
   'List all kicktipp communities the user belongs to.',
   {},
-  async () => {
+  async () => withFreshSession(async () => {
     const page = await getPage();
     const data = await fetchCommunities(page);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
   'get_players',
   'List all players in the saved community.',
   {},
-  async () => {
+  async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchPlayers(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(
@@ -229,12 +237,12 @@ server.tool(
   'get_bonus_questions',
   'Get available bonus questions with their options and current selections.',
   {},
-  async () => {
+  async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchBonusQuestions(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-  },
+  }),
 );
 
 server.tool(

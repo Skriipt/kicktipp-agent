@@ -1,0 +1,334 @@
+import * as cheerio from 'cheerio';
+import type { AnyNode, Element } from 'domhandler';
+import fs from 'fs';
+import path from 'path';
+import { URL_BASE, getAlternateUrls } from '../url.js';
+import { CookieJar } from './cookie-jar.js';
+
+export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
+
+const MAX_REDIRECTS = 8;
+
+// Kicktipp bounces unauthenticated requests to its login page.
+const LOGIN_URL_PATTERN = /\/(profil|profile)\/login(\?|$|\/)/i;
+// Spielleiter-only pages redirect to the login page with this marker.
+const ADMIN_REQUIRED_PATTERN = /[?&]spielleiter=1\b/i;
+const NOT_FOUND_PATTERN = /Seite\s+wurde\s+nicht\s+gefunden|Page\s+not\s+found/i;
+
+const DEFAULT_HEADERS: Record<string, string> = {
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+  'User-Agent': 'kicktipp-agent (+https://github.com/christianheidorn/kicktipp-agent)',
+};
+
+/** A handle to one element, mirroring the small slice of Playwright's API we used. */
+export class ElementHandle {
+  constructor(
+    private readonly page: Page,
+    private readonly selector: string,
+  ) {}
+
+  async fill(value: string): Promise<void> {
+    this.page.setInputValue(this.selector, value);
+  }
+
+  async click(): Promise<void> {
+    await this.page.click(this.selector);
+  }
+}
+
+/**
+ * A browserless stand-in for a Playwright page: it fetches server-rendered
+ * Kicktipp pages, keeps cookies, follows redirects, and can fill in and
+ * submit the forms on the page. Only the surface the CLI and MCP server
+ * actually used is implemented.
+ */
+export class Page {
+  private currentUrl = URL_BASE;
+  private html = '';
+  private $dom: cheerio.CheerioAPI | null = null;
+  private lastStatus = 0;
+  private closed = false;
+
+  constructor(
+    readonly jar: CookieJar = new CookieJar(),
+    private readonly fetchImpl: FetchLike = ((input, init) =>
+      fetch(input, init)) as FetchLike,
+  ) {}
+
+  // ── Navigation ───────────────────────────────────────────────────
+
+  async goto(url: string): Promise<void> {
+    this.ensureOpen();
+    const target = this.absoluteUrl(url);
+    await this.navigate('GET', target);
+    if (!this.isNotFound()) return;
+
+    // Some communities only exist on one host, or only under the German
+    // route spelling. Try the equivalents before giving up.
+    for (const alternate of getAlternateUrls(target)) {
+      await this.navigate('GET', alternate);
+      if (!this.isNotFound()) return;
+    }
+  }
+
+  private async navigate(
+    method: 'GET' | 'POST',
+    url: string,
+    body?: URLSearchParams,
+    referer?: string,
+  ): Promise<void> {
+    let currentUrl = url;
+    let currentMethod = method;
+    let currentBody = body;
+    let currentReferer = referer;
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const headers = new Headers(DEFAULT_HEADERS);
+      const cookie = this.jar.header(currentUrl);
+      if (cookie) headers.set('Cookie', cookie);
+      if (currentReferer) headers.set('Referer', currentReferer);
+      if (currentMethod === 'POST') {
+        headers.set('Content-Type', 'application/x-www-form-urlencoded');
+      }
+
+      const res = await this.fetchImpl(currentUrl, {
+        method: currentMethod,
+        headers,
+        body: currentMethod === 'POST' ? currentBody : undefined,
+        redirect: 'manual',
+      });
+      this.jar.store(currentUrl, res.headers);
+
+      const location = res.headers.get('location');
+      if (location && [301, 302, 303, 307, 308].includes(res.status)) {
+        currentReferer = currentUrl;
+        currentUrl = this.absoluteUrl(location, currentUrl);
+        // 301/302/303 turn the follow-up into a GET; 307/308 keep the method.
+        if (![307, 308].includes(res.status)) {
+          currentMethod = 'GET';
+          currentBody = undefined;
+        }
+        continue;
+      }
+
+      this.currentUrl = currentUrl;
+      this.lastStatus = res.status;
+      this.html = await res.text();
+      this.$dom = cheerio.load(this.html);
+      return;
+    }
+
+    throw new Error(`Too many redirects while requesting ${url}`);
+  }
+
+  // ── Reading ──────────────────────────────────────────────────────
+
+  async content(): Promise<string> {
+    this.ensureOpen();
+    return this.$dom ? this.$dom.html() : this.html;
+  }
+
+  url(): string {
+    return this.currentUrl;
+  }
+
+  status(): number {
+    return this.lastStatus;
+  }
+
+  isClosed(): boolean {
+    return this.closed;
+  }
+
+  /** True when the last response was Kicktipp's "page not found". */
+  isNotFound(): boolean {
+    return this.lastStatus === 404 || NOT_FOUND_PATTERN.test(this.html);
+  }
+
+  /** True when the last response bounced us to the login page. */
+  isAuthRedirect(): boolean {
+    return LOGIN_URL_PATTERN.test(this.currentUrl);
+  }
+
+  /** True when the login bounce carried the Spielleiter-required marker. */
+  isAdminRequired(): boolean {
+    return this.isAuthRedirect() && ADMIN_REQUIRED_PATTERN.test(this.currentUrl);
+  }
+
+  has(selector: string): boolean {
+    return this.find(selector).length > 0;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+
+  // ── Mutating the current page ────────────────────────────────────
+
+  async $(selector: string): Promise<ElementHandle | null> {
+    this.ensureOpen();
+    return this.has(selector) ? new ElementHandle(this, selector) : null;
+  }
+
+  async fill(selector: string, value: string): Promise<void> {
+    this.setInputValue(selector, value);
+  }
+
+  setInputValue(selector: string, value: string): void {
+    this.ensureOpen();
+    const input = this.find(selector);
+    if (!input.length) throw new Error(`Input not found: ${selector}`);
+    input.attr('value', value);
+  }
+
+  async selectOption(selector: string, value: string): Promise<void> {
+    this.ensureOpen();
+    const $ = this.dom();
+    const select = this.find(selector);
+    if (!select.length) throw new Error(`Select not found: ${selector}`);
+    const option = select
+      .find('option')
+      .filter((_, el) => ($(el).attr('value') || '') === value)
+      .first();
+    if (!option.length) {
+      throw new Error(`Option value "${value}" not found for ${selector}`);
+    }
+    if (select.attr('multiple') === undefined) {
+      select.find('option').removeAttr('selected');
+    }
+    option.attr('selected', 'selected');
+  }
+
+  /** Replace the page body, e.g. after building a form by hand. */
+  replaceContent(html: string): void {
+    this.html = html;
+    this.$dom = cheerio.load(html);
+  }
+
+  // ── Submitting ───────────────────────────────────────────────────
+
+  /** Submit the form containing `selector`, using it as the submitter. */
+  async click(selector: string): Promise<void> {
+    this.ensureOpen();
+    const submitter = this.find(selector);
+    if (!submitter.length) throw new Error(`Element not found: ${selector}`);
+    await this.submit(submitter.closest('form'), submitter);
+  }
+
+  /**
+   * Submit the form that contains `anchorSelector`, picking the form's own
+   * submit button as the submitter. Used where the button has no stable
+   * selector of its own.
+   */
+  async submitForm(anchorSelector: string): Promise<void> {
+    this.ensureOpen();
+    const anchor = this.find(anchorSelector);
+    if (!anchor.length) throw new Error(`Element not found: ${anchorSelector}`);
+    const form = anchor.closest('form');
+    if (!form.length) throw new Error(`${anchorSelector} is not inside a form.`);
+    const submitter = form
+      .find('button[type="submit"], input[type="submit"], button[name], button')
+      .first();
+    await this.submit(form, submitter);
+  }
+
+  private async submit(
+    form: cheerio.Cheerio<AnyNode>,
+    submitter: cheerio.Cheerio<AnyNode>,
+  ): Promise<void> {
+    if (!form.length) throw new Error('Submit target is not inside a form.');
+    const method = (form.attr('method') || 'get').toLowerCase();
+    const action = this.absoluteUrl(form.attr('action') || this.currentUrl);
+    const body = this.serializeForm(form, submitter);
+
+    if (method === 'post') {
+      await this.navigate('POST', action, body, this.currentUrl);
+      return;
+    }
+    const target = new URL(action);
+    for (const [key, value] of body) target.searchParams.append(key, value);
+    await this.navigate('GET', target.toString(), undefined, this.currentUrl);
+  }
+
+  /** Serialize a form the way a browser would for urlencoded submission. */
+  private serializeForm(
+    form: cheerio.Cheerio<AnyNode>,
+    submitter: cheerio.Cheerio<AnyNode>,
+  ): URLSearchParams {
+    const $ = this.dom();
+    const body = new URLSearchParams();
+    const submitterNode = submitter.get(0);
+
+    form.find('input, select, textarea, button').each((_, node) => {
+      const el = $(node);
+      const tag = (node as Element).tagName.toLowerCase();
+      const name = el.attr('name');
+      if (!name || el.attr('disabled') !== undefined) return;
+
+      if (tag === 'button') {
+        // Only the button that submitted the form contributes a value.
+        if (node === submitterNode) body.append(name, el.attr('value') || '');
+        return;
+      }
+
+      if (tag === 'textarea') {
+        body.append(name, el.text());
+        return;
+      }
+
+      if (tag === 'select') {
+        let selected = el.find('option[selected]');
+        if (!selected.length && el.attr('multiple') === undefined) {
+          selected = el.find('option').first();
+        }
+        selected.each((__, option) => {
+          const opt = $(option);
+          body.append(name, opt.attr('value') ?? opt.text());
+        });
+        return;
+      }
+
+      const type = (el.attr('type') || 'text').toLowerCase();
+      if (['button', 'image', 'reset', 'file'].includes(type)) return;
+      if (['checkbox', 'radio'].includes(type) && el.attr('checked') === undefined) return;
+      if (type === 'submit') {
+        if (node === submitterNode) body.append(name, el.attr('value') || '');
+        return;
+      }
+      body.append(name, el.attr('value') || '');
+    });
+
+    return body;
+  }
+
+  // ── Session persistence ──────────────────────────────────────────
+
+  saveSession(file: string): void {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmpFile = `${file}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(this.jar.toJSON(), null, 2));
+    fs.chmodSync(tmpFile, 0o600);
+    fs.renameSync(tmpFile, file);
+  }
+
+  // ── Internals ────────────────────────────────────────────────────
+
+  private find(selector: string): cheerio.Cheerio<AnyNode> {
+    return this.dom()(selector).first();
+  }
+
+  private dom(): cheerio.CheerioAPI {
+    this.ensureOpen();
+    if (!this.$dom) this.$dom = cheerio.load(this.html);
+    return this.$dom;
+  }
+
+  private absoluteUrl(url: string, base = this.currentUrl || URL_BASE): string {
+    return new URL(url, base).toString();
+  }
+
+  private ensureOpen(): void {
+    if (this.closed) throw new Error('Kicktipp session is closed.');
+  }
+}

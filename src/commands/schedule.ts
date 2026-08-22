@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
+import { launchBrowser } from '../browser.js';
 import { getScheduleUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
@@ -11,7 +11,7 @@ export function registerScheduleCommand(program: Command): void {
     .description('Display the match schedule')
     .option('--matchday <n>', 'Matchday number (1-34)')
     .action(async (opts) => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
@@ -25,8 +25,6 @@ export function registerScheduleCommand(program: Command): void {
           }
         }
         await page.goto(getScheduleUrl(community, matchday));
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -76,7 +74,7 @@ export function registerScheduleCommand(program: Command): void {
           }
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }
