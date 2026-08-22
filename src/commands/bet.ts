@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
 import { launchBrowser, dismissConsent } from '../browser.js';
-import { getPredictUrl, URL_BASE } from '../url.js';
+import { getBonusPredictUrl, getPredictUrl } from '../url.js';
 import { ensureCommunity, ask } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import {
@@ -388,7 +388,7 @@ async function bonusBetsInteractive(
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
   status('Loading bonus questions...');
-  await page.goto(`${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
+  await page.goto(getBonusPredictUrl(community));
   await page.waitForLoadState('domcontentloaded');
   await dismissConsent(page);
   statusClear();

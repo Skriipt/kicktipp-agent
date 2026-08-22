@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
 import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { getTableUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 
@@ -17,16 +17,10 @@ export function registerTableCommand(program: Command): void {
         const community = await ensureCommunity(page);
 
         status('Loading table...');
-        let url = `${URL_BASE}/${community}/tables`;
         let option: string | null = null;
-        if (opts.home) {
-          option = 'heim';
-          url += '?option=heim';
-        } else if (opts.away) {
-          option = 'gast';
-          url += '?option=gast';
-        }
-        await page.goto(url);
+        if (opts.home) option = 'heim';
+        else if (opts.away) option = 'gast';
+        await page.goto(getTableUrl(community, opts.home ? 'home' : opts.away ? 'away' : undefined));
         await page.waitForLoadState('domcontentloaded');
         await dismissConsent(page);
         statusClear();
