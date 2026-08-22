@@ -24,7 +24,10 @@ const COMMUNITY_LIST = htmlPage(`
   <div id="kicktipp-content">
     <a href="/mycomm/">MyComm</a>
     <a href="/other">Other</a>
+    <a href="/mein_pool">Mein Pool</a>
+    <a href="/langtipp-wc-26"><div class="menu-title-mit-tippglocke">Langtipp WC 26</div></a>
     <a href="/service">Service</a>
+    <a href="/hilfe">Something Else</a>
     <a href="/info/profil/meinetipprunden">Profil</a>
     <a href="/mycomm/tippabgabe">Tippabgabe</a>
     <a href="https://example.com/">External</a>
@@ -72,7 +75,7 @@ describe('launchBrowser', () => {
     const { page } = await launchBrowser({ sessionFile, fetchImpl });
 
     expect(calls.some((c) => c.method === 'POST' && c.url === LOGIN)).toBe(true);
-    await expect(getCommunities(page)).resolves.toEqual(['mycomm', 'other']);
+    await expect(getCommunities(page)).resolves.toContain('mycomm');
   });
 
   it('sends the login form complete with its hidden fields', async () => {
@@ -120,7 +123,7 @@ describe('launchBrowser', () => {
     const { page } = await launchBrowser({ sessionFile, fetchImpl: second.fetchImpl });
 
     expect(second.calls.some((c) => c.method === 'POST')).toBe(false);
-    await expect(getCommunities(page)).resolves.toEqual(['mycomm', 'other']);
+    await expect(getCommunities(page)).resolves.toContain('mycomm');
   });
 
   it('logs in again when the stored session has expired', async () => {
@@ -134,7 +137,7 @@ describe('launchBrowser', () => {
     const { page } = await launchBrowser({ sessionFile, fetchImpl });
 
     expect(calls.some((c) => c.method === 'POST' && c.url === LOGIN)).toBe(true);
-    await expect(getCommunities(page)).resolves.toEqual(['mycomm', 'other']);
+    await expect(getCommunities(page)).resolves.toContain('mycomm');
   });
 
   it('logs in again when the stored session file is corrupt', async () => {
@@ -182,7 +185,22 @@ describe('getCommunities', () => {
 
     // Nested pages, the reserved /service link and external links are not
     // communities; /mycomm and /other are.
-    await expect(getCommunities(page)).resolves.toEqual(['mycomm', 'other']);
+    await expect(getCommunities(page)).resolves.toEqual([
+      'mycomm',
+      'other',
+      'mein_pool',
+      'langtipp-wc-26',
+    ]);
+  });
+
+  it('leaves out single-segment links that are not communities', async () => {
+    const { fetchImpl } = mockFetch(kicktipp());
+    const { page } = await launchBrowser({ sessionFile: null, fetchImpl });
+
+    const found = await getCommunities(page);
+    // /service is reserved; /hilfe's label does not match its slug.
+    expect(found).not.toContain('service');
+    expect(found).not.toContain('hilfe');
   });
 
   it('decodes an escaped community slug', async () => {

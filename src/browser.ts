@@ -4,6 +4,7 @@ import fs from 'fs';
 import { URL_LOGIN, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
 import { SESSION_FILE, loadCredentials } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
+import { normalizeSlug } from './helpers/normalize-slug.js';
 import { CookieJar } from './http/cookie-jar.js';
 import { Page } from './http/page.js';
 import type { FetchLike } from './http/page.js';
@@ -82,15 +83,24 @@ export async function getCommunities(page: Page): Promise<string[]> {
 
   const $ = cheerio.load(await page.content());
   const communities = new Set<string>();
-  // Community links are a single path segment: "/<slug>" or "/<slug>/".
+  // A community link is a single path segment ("/<slug>" or "/<slug>/") whose
+  // slug matches the link's own label. Kicktipp derives the slug from the
+  // community name — dropping underscores and turning spaces into hyphens —
+  // so the comparison has to be made on normalized forms.
   const reserved = new Set(['info', 'service']);
   $('#kicktipp-content a').each((_, el) => {
     const href = $(el).attr('href') || '';
     const match = href.match(/^\/([^/?#]+)\/?$/);
     if (!match) return;
-    const slug = match[1];
+    const slug = decodeURIComponent(match[1]);
     if (reserved.has(slug.toLowerCase())) return;
-    communities.add(decodeURIComponent(slug));
+    const menuDiv = $(el).find('div.menu-title-mit-tippglocke');
+    if (
+      normalizeSlug(slug) === normalizeSlug($(el).text().trim()) ||
+      (menuDiv.length && normalizeSlug(menuDiv.text().trim()) === normalizeSlug(slug))
+    ) {
+      communities.add(slug);
+    }
   });
   statusClear();
   return Array.from(communities);
