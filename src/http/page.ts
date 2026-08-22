@@ -21,6 +21,39 @@ const DEFAULT_HEADERS: Record<string, string> = {
   'User-Agent': 'kicktipp-agent (+https://github.com/christianheidorn/kicktipp-agent)',
 };
 
+function charsetFromContentType(contentType: string | null): string | null {
+  const match = contentType?.match(/charset=["']?([\w-]+)/i);
+  return match ? match[1] : null;
+}
+
+function charsetFromMeta(bytes: Uint8Array): string | null {
+  // The declaration is ASCII either way, so a latin1 peek at the head of the
+  // document is enough to find it.
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, 2048));
+  const match =
+    head.match(/<meta[^>]+charset=["']?([\w-]+)/i) ||
+    head.match(/<meta[^>]+content=["'][^"']*charset=([\w-]+)/i);
+  return match ? match[1] : null;
+}
+
+/**
+ * Decode a response body by its declared charset. Response.text() always
+ * assumes UTF-8, which would quietly mangle the umlauts in team and player
+ * names if Kicktipp ever answered in a legacy encoding.
+ */
+async function decodeBody(res: Response): Promise<string> {
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const charset =
+    charsetFromContentType(res.headers.get('content-type')) ||
+    charsetFromMeta(bytes) ||
+    'utf-8';
+  try {
+    return new TextDecoder(charset).decode(bytes);
+  } catch {
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+}
+
 /** A handle to one element, mirroring the small slice of Playwright's API we used. */
 export class ElementHandle {
   constructor(
@@ -114,7 +147,7 @@ export class Page {
 
       this.currentUrl = currentUrl;
       this.lastStatus = res.status;
-      this.html = await res.text();
+      this.html = await decodeBody(res);
       this.$dom = cheerio.load(this.html);
       return;
     }

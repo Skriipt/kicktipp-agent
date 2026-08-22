@@ -196,6 +196,62 @@ describe('route fallback', () => {
   });
 });
 
+describe('response decoding', () => {
+  // Team names carry umlauts and are matched by text, so a mis-decoded body
+  // would break fixture matching rather than just looking untidy.
+  const LATIN1 = new Uint8Array([
+    0x3c, 0x70, 0x3e, // <p>
+    0x4d, 0xfc, 0x6e, 0x63, 0x68, 0x65, 0x6e, // München in latin-1
+    0x3c, 0x2f, 0x70, 0x3e, // </p>
+  ]);
+
+  it('honors the charset from the Content-Type header', async () => {
+    const { fetchImpl } = mockFetch(() => ({
+      bytes: LATIN1,
+      headers: { 'content-type': 'text/html; charset=iso-8859-1' },
+    }));
+    const page = new Page(new CookieJar(), fetchImpl);
+    await page.goto(`${BASE}/c/rules`);
+
+    expect(await page.content()).toContain('München');
+  });
+
+  it('falls back to a meta charset declaration', async () => {
+    const meta = new TextEncoder().encode('<meta charset="iso-8859-1">');
+    const bytes = new Uint8Array([...meta, ...LATIN1]);
+    const { fetchImpl } = mockFetch(() => ({
+      bytes,
+      headers: { 'content-type': 'text/html' },
+    }));
+    const page = new Page(new CookieJar(), fetchImpl);
+    await page.goto(`${BASE}/c/rules`);
+
+    expect(await page.content()).toContain('München');
+  });
+
+  it('reads UTF-8 when nothing is declared', async () => {
+    const { fetchImpl } = mockFetch(() => ({
+      bytes: new TextEncoder().encode('<p>Mönchengladbach</p>'),
+      headers: { 'content-type': 'text/html' },
+    }));
+    const page = new Page(new CookieJar(), fetchImpl);
+    await page.goto(`${BASE}/c/rules`);
+
+    expect(await page.content()).toContain('Mönchengladbach');
+  });
+
+  it('does not fail on an unknown charset label', async () => {
+    const { fetchImpl } = mockFetch(() => ({
+      bytes: new TextEncoder().encode('<p>ok</p>'),
+      headers: { 'content-type': 'text/html; charset=not-a-charset' },
+    }));
+    const page = new Page(new CookieJar(), fetchImpl);
+    await page.goto(`${BASE}/c/rules`);
+
+    expect(await page.content()).toContain('ok');
+  });
+});
+
 describe('state detection', () => {
   it('recognises a bounce to the login page', async () => {
     const { fetchImpl } = mockFetch(routes({

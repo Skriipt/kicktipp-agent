@@ -10,6 +10,8 @@ export interface RecordedRequest {
 export interface MockResponse {
   status?: number;
   body?: string;
+  /** Raw bytes, for exercising non-UTF-8 responses. Wins over `body`. */
+  bytes?: Uint8Array;
   location?: string;
   setCookies?: string[];
   headers?: Record<string, string>;
@@ -49,7 +51,7 @@ export function mockFetch(handler: Handler): {
     if (result.location) headers.set('location', result.location);
     for (const cookie of result.setCookies || []) headers.append('set-cookie', cookie);
 
-    return new Response(result.body ?? '', {
+    return new Response(result.bytes ?? result.body ?? '', {
       status: result.status ?? 200,
       headers,
     });
