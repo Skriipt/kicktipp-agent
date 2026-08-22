@@ -1,6 +1,7 @@
 # Spec: Browserless HTTP migration (Playwright removal)
 
-**Status:** Proposed
+**Status:** Implemented on this branch (see §9 for where the result differs
+from the plan below)
 **Branch:** `claude/playwright-http-migration-mmw2vh`
 **Origin:** Extracted from PR #5 by @nhoelterhoff, with fixes for the issues raised in the maintainer review of 2026-07-07. Commits that reuse his work will credit him as co-author.
 
@@ -204,3 +205,36 @@ half of PR #5, with the security-sensitive multi-tenant surface gone.
 - Decision on whether the project ever wants a hosted HTTP mode; if yes, it
   needs a real design (per-user tokens minted out-of-band, rate limiting,
   locking) rather than password-forwarding bearer values.
+
+## 9. What shipped, and where it differs from the plan
+
+- **The shim is split out of `browser.ts`** into `src/http/cookie-jar.ts` and
+  `src/http/page.ts`, leaving `browser.ts` as session/login/parsing only.
+  Both new files are unit-testable in isolation, which the plan's
+  single-file version was not.
+- **Charset decoding was added** (not in the original plan). `Response.text()`
+  decodes as UTF-8 unconditionally, so a legacy-encoded page would arrive with
+  mangled umlauts — and since team names are matched by text, that breaks
+  fixture matching rather than merely looking wrong. Bodies are now decoded by
+  the `Content-Type` charset, falling back to a `<meta>` declaration, then
+  UTF-8.
+- **Node floor is `>=20`, not `>=18`.** Node 18 is end-of-life; the
+  `getSetCookie()` fallback still covers older runtimes if anyone needs one.
+- **Validation is offline, not live.** A live smoke test against a real
+  Kicktipp account was not possible here (no credentials, and using someone's
+  account for a test is not something to do unasked). In its place the
+  compiled CLI is driven end-to-end over real HTTP against a stand-in
+  Kicktipp server: login with a hidden CSRF field, cookie-gated pages, the
+  German route table, reading schedule/table/bets, submitting a bet through
+  the real form path, session reuse across runs (3 runs → 1 login), stale
+  session → exactly one re-login, a rejected login reported as a plain
+  message with exit code 1, and the MCP server listing its 15 tools.
+  **A live run against a real account is still worth doing before merge.**
+- **CLI commands keep their own inline parsing** and so do not go through
+  `loadPage()`'s error classification — a mistyped community still prints
+  "No schedule found." there, exactly as before this change. Only the MCP
+  path gets the typed errors. Unifying the two is a reasonable follow-up but
+  would have widened this change.
+- 103 tests pass (`npm test`); `npm run build` is clean. The `npm audit`
+  findings that remain come from the MCP SDK and vitest transitives and
+  predate this work.
