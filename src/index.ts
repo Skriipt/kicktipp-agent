@@ -18,6 +18,7 @@ import { registerSyncCommand } from './commands/sync.js';
 import { registerCacheCommand } from './commands/cache.js';
 import { registerStatsCommand } from './commands/stats.js';
 import { registerRivalCommand } from './commands/rival.js';
+import { registerSuggestCommand } from './commands/suggest.js';
 
 const program = new Command();
 
@@ -108,6 +109,7 @@ registerSyncCommand(program);
 registerCacheCommand(program);
 registerStatsCommand(program);
 registerRivalCommand(program);
+registerSuggestCommand(program);
 
 export { program, ensureCommunity, ask };
 
