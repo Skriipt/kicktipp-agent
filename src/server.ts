@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Page, launchBrowser } from './browser.js';
@@ -76,6 +76,22 @@ async function withFreshSession<T>(fn: () => Promise<T>): Promise<T> {
 
 // ── MCP Server ─────────────────────────────────────────────────────
 
+/**
+ * Every tool answers twice: human-readable text for clients that render text,
+ * and structuredContent for clients that consume typed data. The structured
+ * form is uniformly wrapped under `data`, so one output schema describes
+ * every tool while the text payload keeps the tool's own shape.
+ */
+function jsonResult(data: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    structuredContent: { data },
+  };
+}
+
+const OUTPUT_SCHEMA = { data: z.unknown() };
+
+
 const readOnly = isReadOnly();
 
 const server = new McpServer(
@@ -83,18 +99,18 @@ const server = new McpServer(
   { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on kicktipp.com. Do not offer to place bets. ' : '') + 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.' },
 );
 
-server.tool(
+server.registerTool(
   'get_status',
-  'Check current configuration. Call this first to see if a community and player are set. Most tools require a community. Use set_community and set_player if not configured.',
-  {},
+  {
+    description: 'Check current configuration. Call this first to see if a community and player are set. Most tools require a community. Use set_community and set_player if not configured.',
+    inputSchema: {},
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async () => {
     const credentials = hasCredentials();
     const community = loadCommunity();
     const player = loadPlayer();
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
+    return jsonResult({
           read_only: readOnly,
           profile: getActiveProfile(),
           credentials_saved: credentials,
@@ -106,145 +122,176 @@ server.tool(
             : !community
               ? 'No community set. Call get_communities then set_community.'
               : null,
-        }, null, 2),
-      }],
-    };
+        });
   },
 );
 
-server.tool(
+server.registerTool(
   'get_today_matches',
-  "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
-  {},
+  {
+    description: "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
+    inputSchema: {},
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchTodayMatches(page, community);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_bets',
-  'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
-  { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
+  {
+    description: 'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
+    inputSchema: { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async ({ matchday }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchBets(page, community, matchday);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_schedule',
-  'Get the match schedule with results for a matchday.',
-  { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
+  {
+    description: 'Get the match schedule with results for a matchday.',
+    inputSchema: { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async ({ matchday }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchSchedule(page, community, matchday);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_leaderboard',
-  'Get player rankings for a matchday. Includes matches/results and ranking table with points.',
   {
+    description: 'Get player rankings for a matchday. Includes matches/results and ranking table with points.',
+    inputSchema: {
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
     bonus: z.boolean().optional().describe('Show bonus question rankings instead of match rankings.'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday, bonus }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchLeaderboard(page, community, matchday, bonus);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_overview',
-  'Get the season overview showing all players and their points across matchdays.',
-  { view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') },
+  {
+    description: 'Get the season overview showing all players and their points across matchdays.',
+    inputSchema: { view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') },
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async ({ view }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchOverview(page, community, view);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_table',
-  'Get the league table (standings of the actual football teams, not the prediction game).',
-  { option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') },
+  {
+    description: 'Get the league table (standings of the actual football teams, not the prediction game).',
+    inputSchema: { option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') },
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async ({ option }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchTable(page, community, option);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_rules',
-  'Get the game rules and scoring system.',
-  {},
+  {
+    description: 'Get the game rules and scoring system.',
+    inputSchema: {},
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchRules(page, community);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_communities',
-  'List all kicktipp communities the user belongs to.',
-  {},
+  {
+    description: 'List all kicktipp communities the user belongs to.',
+    inputSchema: {},
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async () => withFreshSession(async () => {
     const page = await getPage();
     const data = await fetchCommunities(page);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_players',
-  'List all players in the saved community.',
-  {},
+  {
+    description: 'List all players in the saved community.',
+    inputSchema: {},
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchPlayers(page, community);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
 if (!readOnly) {
-  server.tool(
-    'set_community',
-    'Set the active community. Use get_communities first to see available options, then pass the exact name.',
-    { name: z.string().describe('Exact community name as returned by get_communities.') },
-    async ({ name }) => {
+  server.registerTool(
+  'set_community',
+  {
+    description: 'Set the active community. Use get_communities first to see available options, then pass the exact name.',
+    inputSchema: { name: z.string().describe('Exact community name as returned by get_communities.') },
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async ({ name }) => {
       const page = await getPage();
       const communities = await fetchCommunities(page);
       if (!communities.includes(name)) {
         return { content: [{ type: 'text', text: JSON.stringify({ error: `Community "${name}" not found. Available: ${communities.join(', ')}` }, null, 2) }], isError: true };
       }
       saveCommunity(name);
-      return { content: [{ type: 'text', text: JSON.stringify({ success: true, community: name }, null, 2) }] };
+      return jsonResult({ success: true, community: name });
     },
-  );
+);
 }
 
 if (!readOnly) {
-  server.tool(
-    'set_player',
-    'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
-    { name: z.string().describe('Exact player name as returned by get_players.') },
-    async ({ name }) => {
+  server.registerTool(
+  'set_player',
+  {
+    description: 'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
+    inputSchema: { name: z.string().describe('Exact player name as returned by get_players.') },
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async ({ name }) => {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const players = await fetchPlayers(page, community);
@@ -252,29 +299,35 @@ if (!readOnly) {
         return { content: [{ type: 'text', text: JSON.stringify({ error: `Player "${name}" not found. Available: ${players.join(', ')}` }, null, 2) }], isError: true };
       }
       savePlayer(name);
-      return { content: [{ type: 'text', text: JSON.stringify({ success: true, player: name }, null, 2) }] };
+      return jsonResult({ success: true, player: name });
     },
-  );
+);
 }
 
-server.tool(
+server.registerTool(
   'get_bonus_questions',
-  'Get available bonus questions with their options and current selections.',
-  {},
+  {
+    description: 'Get available bonus questions with their options and current selections.',
+    inputSchema: {},
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchBonusQuestions(page, community);
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    return jsonResult(data);
   }),
 );
 
-server.tool(
+server.registerTool(
   'whatif',
-  "Replay the cached season as if the player had followed a different strategy, and compare with what they actually scored. Strategies: a fixed scoreline such as '2:1', one of " + REPLAY_STRATEGIES.join(', ') + ", or suggest:safe|ev|contrarian. Needs a synced cache. Treat final_rank as an estimate — other players are compared on recorded totals that include bonus points the replay does not model.",
   {
+    description: "Replay the cached season as if the player had followed a different strategy, and compare with what they actually scored. Strategies: a fixed scoreline such as '2:1', one of " + REPLAY_STRATEGIES.join(', ') + ", or suggest:safe|ev|contrarian. Needs a synced cache. Treat final_rank as an estimate — other players are compared on recorded totals that include bonus points the replay does not model.",
+    inputSchema: {
     strategy: z.string().describe('A scoreline like "2:1", a named strategy, or "suggest:ev".'),
     player: z.string().optional().describe('Player to replay (default: the configured player).'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ strategy, player }) => {
     const community = loadCommunity();
@@ -286,29 +339,25 @@ server.tool(
     const store = new CacheStore(community);
     const season = loadSeason(store);
     if (!season.matchdays.length) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
+      return jsonResult({
             error: 'empty_cache',
             message: 'No season history cached yet. Call sync_history first.',
-          }, null, 2),
-        }],
-      };
+          });
     }
 
     const rules = resolveRulesFromCache(store);
     const result = replaySeason(season, who, rules.values, strategy, ownPlayer);
     const baseline =
       strategy === 'actual' ? null : replaySeason(season, who, rules.values, 'actual', ownPlayer);
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, result, baseline }, null, 2) }] };
+    return jsonResult({ rules, result, baseline });
   },
 );
 
-server.tool(
+server.registerTool(
   'get_standings_scenarios',
-  "Project the whole leaderboard under hypothetical results, or search for what has to happen for a player to reach a target rank. This answers questions like 'what do I need this weekend to take first?' in one call. Matches left unspecified come back as a rank range rather than a number, and the projection is exact only when every open match is given. Check the note field: before the deadline Kicktipp hides everyone's bets and nothing can be projected.",
   {
+    description: "Project the whole leaderboard under hypothetical results, or search for what has to happen for a player to reach a target rank. This answers questions like 'what do I need this weekend to take first?' in one call. Matches left unspecified come back as a rank range rather than a number, and the projection is exact only when every open match is given. Check the note field: before the deadline Kicktipp hides everyone's bets and nothing can be projected.",
+    inputSchema: {
     results: z
       .array(z.object({
         home: z.string().describe('Home team, exactly as get_bets names it.'),
@@ -320,6 +369,8 @@ server.tool(
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
     target_rank: z.number().int().min(1).optional().describe('Search for combinations reaching this rank instead of projecting.'),
     player: z.string().optional().describe('Player for target_rank (default: the configured player).'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ results, matchday, target_rank, player }) => withFreshSession(async () => {
     const page = await getPage();
@@ -333,20 +384,23 @@ server.tool(
       const who = player || loadPlayer();
       if (!who) throw new Error('No player set. Call get_players then set_player, or pass a player.');
       const search = findTargetCombinations(grid, leaderboard, rules.values, who, target_rank);
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, search }, null, 2) }] };
+      return jsonResult({ rules, search });
     }
 
     const projection = projectStandings(grid, leaderboard, rules.values, results ?? []);
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, projection }, null, 2) }] };
+    return jsonResult({ rules, projection });
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_bet_log',
-  'Show what this agent has actually submitted to Kicktipp, with timestamps and which entry point did it. Use this to answer "what have you placed?" from the record rather than from memory. Records marked dry-run or intent never reached Kicktipp.',
   {
+    description: 'Show what this agent has actually submitted to Kicktipp, with timestamps and which entry point did it. Use this to answer "what have you placed?" from the record rather than from memory. Records marked dry-run or intent never reached Kicktipp.',
+    inputSchema: {
     matchday: z.number().int().min(1).max(34).optional().describe('Only this matchday.'),
     include_all: z.boolean().optional().describe('Include dry runs, intents and failures (default: submitted only).'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday, include_all }) => {
     const community = loadCommunity();
@@ -354,16 +408,19 @@ server.tool(
     let records = readAudit(community);
     if (!include_all) records = records.filter((r) => r.outcome === 'submitted');
     if (matchday !== undefined) records = records.filter((r) => r.matchday === matchday);
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ community, records }, null, 2) }] };
+    return jsonResult({ community, records });
   },
 );
 
-server.tool(
+server.registerTool(
   'get_deadline',
-  "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Times are interpreted in the time_zone field's zone, which is assumed rather than reported by Kicktipp — mention it if a countdown looks surprising.",
   {
+    description: "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Times are interpreted in the time_zone field's zone, which is assumed rather than reported by Kicktipp — mention it if a countdown looks surprising.",
+    inputSchema: {
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
     warn_hours: z.number().positive().optional().describe('Urgency window in hours (default 6).'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday, warn_hours }) => withFreshSession(async () => {
     const page = await getPage();
@@ -372,16 +429,19 @@ server.tool(
     const report = buildDeadlineReport(community, matchday ?? null, matches, {
       warnHours: warn_hours,
     });
-    return { content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }] };
+    return jsonResult(report);
   }),
 );
 
-server.tool(
+server.registerTool(
   'get_stats',
-  'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
   {
+    description: 'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
+    inputSchema: {
     player: z.string().optional().describe('Player name. Defaults to the configured player.'),
     compare: z.string().optional().describe('Optional second player to compute alongside.'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ player, compare }) => {
     const community = loadCommunity();
@@ -394,52 +454,48 @@ server.tool(
     const rules = resolveRulesFromCache(store);
 
     if (!season.matchdays.length) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
+      return jsonResult({
             error: 'empty_cache',
             message: 'No season history cached yet. Call sync_history first; it may take a minute.',
-          }, null, 2),
-        }],
-      };
+          });
     }
 
     const own = loadPlayer();
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
+    return jsonResult({
           rules,
           stats: computeSeasonStats(season, who, rules.values, own),
           compare: compare ? computeSeasonStats(season, compare, rules.values, own) : undefined,
-        }, null, 2),
-      }],
-    };
+        });
   },
 );
 
-server.tool(
+server.registerTool(
   'sync_history',
-  'Download this season into the local cache so get_stats has data to work with. Makes several requests per matchday and paces them politely, so the first run can take a minute. Safe to repeat: matchdays already complete are skipped.',
   {
+    description: 'Download this season into the local cache so get_stats has data to work with. Makes several requests per matchday and paces them politely, so the first run can take a minute. Safe to repeat: matchdays already complete are skipped.',
+    inputSchema: {
     from: z.number().int().min(1).max(34).optional().describe('First matchday (default 1).'),
     to: z.number().int().min(1).max(34).optional().describe('Last matchday (default: end of season).'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ from, to }) => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const result = await syncSeason(page, community, { from, to });
-    return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    return jsonResult(result);
   },
 );
 
-server.tool(
+server.registerTool(
   'get_rival_analysis',
-  "Compare the user with another player for one matchday: the points gap, how much each remaining match can still swing it, and what has to happen to overtake them. Check the 'mode' field before answering - 'exact' means both bet sets are known, 'bounds' means the rival's bets are still hidden and the figures are best/worst limits, not predictions. Also report rules.source, since the point values may be assumed defaults rather than this community's real ones.",
   {
+    description: "Compare the user with another player for one matchday: the points gap, how much each remaining match can still swing it, and what has to happen to overtake them. Check the 'mode' field before answering - 'exact' means both bet sets are known, 'bounds' means the rival's bets are still hidden and the figures are best/worst limits, not predictions. Also report rules.source, since the point values may be assumed defaults rather than this community's real ones.",
+    inputSchema: {
     rival: z.string().describe('Player to compare against, as named by get_players.'),
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
+  },
+    outputSchema: OUTPUT_SCHEMA,
   },
   async ({ rival, matchday }) => withFreshSession(async () => {
     const page = await getPage();
@@ -460,14 +516,15 @@ server.tool(
       rules.values,
       gapBeforeMatchday(leaderboard, player, rival),
     );
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, analysis }, null, 2) }] };
+    return jsonResult({ rules, analysis });
   }),
 );
 
-server.tool(
+server.registerTool(
   'suggest_bets',
-  "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
   {
+    description: "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
+    inputSchema: {
     strategy: z
       .enum(['safe', 'ev', 'contrarian', 'auto'])
       .optional()
@@ -482,6 +539,8 @@ server.tool(
       .describe('Picks the user has fixed; the strategy fills in the rest and leaves these alone.'),
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
   },
+    outputSchema: OUTPUT_SCHEMA,
+  },
   async ({ strategy, matchday, pin }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
@@ -493,56 +552,125 @@ server.tool(
     const chosen = (strategy ?? readDefaultStrategy() ?? 'safe') as StrategyName;
     const suggestions = suggestBets(toOddsMatches(matches), rules.values, chosen, pin ?? []);
 
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({
+    return jsonResult({
           strategy: chosen,
           matchday: matchday ?? null,
           rules,
           suggestions,
           expectedPointsTotal: suggestions.reduce((sum, s) => sum + s.expectedPoints, 0),
           note: 'Suggestions only - nothing has been submitted. Show these to the user and call place_bets only after they confirm.',
-        }, null, 2),
-      }],
-    };
+        });
   }),
 );
 
 if (!readOnly) {
-  server.tool(
-    'place_bets',
-    'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
-    {
+  server.registerTool(
+  'place_bets',
+  {
+    description: 'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
+    inputSchema: {
       bets: z.array(z.string()).min(1).describe('Bets in format "Home vs Away=H:G", e.g. ["FC Bayern München vs Borussia Dortmund=2:1"]'),
       matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
       dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
     },
-    async ({ bets, matchday, dry_run }) => {
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async ({ bets, matchday, dry_run }) => {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const placed = await placeBets(page, community, bets, matchday, !dry_run, 'mcp:place_bets');
-      return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
+      return jsonResult({ success: !dry_run, dry_run: !!dry_run, placed });
     },
-  );
+);
 }
 
 if (!readOnly) {
-  server.tool(
-    'place_bonus_bets',
-    'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
-    {
+  server.registerTool(
+  'place_bonus_bets',
+  {
+    description: 'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
+    inputSchema: {
       bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer", e.g. ["Who will be champion?=FC Bayern München"]'),
       dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
     },
-    async ({ bets, dry_run }) => {
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async ({ bets, dry_run }) => {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const placed = await placeBonusBets(page, community, bets, !dry_run, 'mcp:place_bonus_bets');
-      return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
+      return jsonResult({ success: !dry_run, dry_run: !!dry_run, placed });
     },
-  );
+);
 }
+
+
+// ── Resources ──────────────────────────────────────────────────────
+//
+// Slow-changing data is also exposed as MCP resources, so a client can pin or
+// re-read it without spending a tool call. They are served from the local
+// cache: reading a resource never triggers a login, and it reports an empty
+// cache rather than going to the network behind the user's back.
+
+function cachedResource(kind: 'rules' | 'leaderboard' | 'schedule', matchday?: number) {
+  const community = loadCommunity();
+  if (!community) {
+    return { error: 'no_community', message: 'No community set. Call set_community first.' };
+  }
+  const store = new CacheStore(community);
+  const cached = store.read(kind, matchday);
+  if (!cached) {
+    return {
+      error: 'not_cached',
+      message: `No cached ${kind}${matchday ? ` for matchday ${matchday}` : ''}. Call sync_history first.`,
+      community,
+    };
+  }
+  return { community, fetchedAt: cached.fetchedAt, data: cached.data };
+}
+
+function resourceContents(uri: URL, payload: unknown) {
+  return {
+    contents: [
+      { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(payload, null, 2) },
+    ],
+  };
+}
+
+server.registerResource(
+  'rules',
+  new ResourceTemplate('kicktipp://{community}/rules', { list: undefined }),
+  {
+    title: 'Scoring rules',
+    description: "The community's rules page, as cached locally.",
+    mimeType: 'application/json',
+  },
+  async (uri) => resourceContents(uri, cachedResource('rules')),
+);
+
+server.registerResource(
+  'leaderboard',
+  new ResourceTemplate('kicktipp://{community}/leaderboard/{matchday}', { list: undefined }),
+  {
+    title: 'Matchday leaderboard',
+    description: 'Cached standings for one matchday.',
+    mimeType: 'application/json',
+  },
+  async (uri, variables) =>
+    resourceContents(uri, cachedResource('leaderboard', Number(variables.matchday))),
+);
+
+server.registerResource(
+  'schedule',
+  new ResourceTemplate('kicktipp://{community}/schedule/{matchday}', { list: undefined }),
+  {
+    title: 'Matchday schedule',
+    description: 'Cached fixtures and results for one matchday.',
+    mimeType: 'application/json',
+  },
+  async (uri, variables) =>
+    resourceContents(uri, cachedResource('schedule', Number(variables.matchday))),
+);
 
 // ── Start ──────────────────────────────────────────────────────────
 
