@@ -73,6 +73,11 @@ $ kicktipp set-player
 | `today` | Show today's matches and which still need bets |
 | `rules` | Show the game rules |
 | `guide` | Print a detailed usage guide (useful for LLM agents) |
+| `sync` | Download this season into the local cache |
+| `cache status` / `cache clear` | Inspect or delete the cache |
+| `stats` | Season analytics for you or another player |
+| `rival` | What it would take to overtake another player |
+| `suggest` | Bet slip suggested from the published odds |
 | `logout` | Remove stored credentials and session |
 
 ### Placing bets
@@ -98,79 +103,6 @@ kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 - `--bonus` — Bonus question rankings (with `leaderboard`) or bonus bets (with `bet`)
 - `--view <value>` — Overview type (with `overview`)
 - `--home` / `--away` — Home/away filter (with `table`)
-
-## MCP Server
-
-The MCP server exposes the same functionality as the CLI through the [Model Context Protocol](https://modelcontextprotocol.io), allowing AI assistants like Claude to interact with kicktipp.com on your behalf.
-
-### Available tools
-
-| Tool | Description |
-|------|-------------|
-| `get_status` | Check if credentials and community are configured |
-| `get_today_matches` | Today's matches with bet status |
-| `get_bets` | Matches and current bets for a matchday |
-| `get_schedule` | Match schedule with results |
-| `get_leaderboard` | Player rankings for a matchday |
-| `get_overview` | Season overview across all matchdays |
-| `get_table` | League table (actual football standings) |
-| `get_rules` | Game rules and scoring system |
-| `get_communities` | List communities the user belongs to |
-| `get_players` | List players in the community |
-| `get_bonus_questions` | Bonus questions with options |
-| `set_community` | Set the active community |
-| `set_player` | Set which player you are |
-| `place_bets` | Place match bets by fixture name |
-| `place_bonus_bets` | Place bonus question answers |
-
-### Setup with Claude Desktop
-
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "kicktipp": {
-      "command": "kicktipp-mcp",
-      "env": {
-        "KICKTIPP_EMAIL": "you@example.com",
-        "KICKTIPP_PASSWORD": "yourpassword"
-      }
-    }
-  }
-}
-```
-
-The `env` block passes credentials directly to the server process — Claude never sees them. If you prefer, you can omit `env` and set credentials via the CLI instead (`kicktipp set-community`).
-
-After restarting Claude Desktop, the agent will have access to all kicktipp tools. It will call `get_status` first to check configuration, then prompt you to set a community if needed.
-
-### Setup with Claude Code
-
-Add to `.mcp.json` in your home directory or project:
-
-```json
-{
-  "mcpServers": {
-    "kicktipp": {
-      "command": "kicktipp-mcp",
-      "env": {
-        "KICKTIPP_EMAIL": "you@example.com",
-        "KICKTIPP_PASSWORD": "yourpassword"
-      }
-    }
-  }
-}
-```
-
-### Credentials
-
-The MCP server accepts credentials in two ways (checked in this order):
-
-1. **Environment variables** — `KICKTIPP_EMAIL` and `KICKTIPP_PASSWORD` passed via the `env` block in your MCP client config
-2. **Config file** — `~/.config/kicktipp-agent/config.ini`, shared with the CLI
-
-If neither is found, the server returns an error guiding the agent to inform you.
 
 ### Analytics
 
@@ -228,6 +160,84 @@ exact = 4
 diff = 3
 tendency = 2
 ```
+
+
+## MCP Server
+
+The MCP server exposes the same functionality as the CLI through the [Model Context Protocol](https://modelcontextprotocol.io), allowing AI assistants like Claude to interact with kicktipp.com on your behalf.
+
+### Available tools
+
+| Tool | Description |
+|------|-------------|
+| `get_status` | Check if credentials and community are configured |
+| `get_today_matches` | Today's matches with bet status |
+| `get_bets` | Matches and current bets for a matchday |
+| `get_schedule` | Match schedule with results |
+| `get_leaderboard` | Player rankings for a matchday |
+| `get_overview` | Season overview across all matchdays |
+| `get_table` | League table (actual football standings) |
+| `get_rules` | Game rules and scoring system |
+| `get_communities` | List communities the user belongs to |
+| `get_players` | List players in the community |
+| `get_bonus_questions` | Bonus questions with options |
+| `set_community` | Set the active community |
+| `set_player` | Set which player you are |
+| `place_bets` | Place match bets by fixture name |
+| `place_bonus_bets` | Place bonus question answers |
+| `sync_history` | Fill the local cache so the analytics tools have data |
+| `get_stats` | Season analytics for a player |
+| `get_rival_analysis` | Gap, swing and overtake conditions vs. another player |
+| `suggest_bets` | Suggested bet slip from the odds (read-only, never submits) |
+
+### Setup with Claude Desktop
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "kicktipp": {
+      "command": "kicktipp-mcp",
+      "env": {
+        "KICKTIPP_EMAIL": "you@example.com",
+        "KICKTIPP_PASSWORD": "yourpassword"
+      }
+    }
+  }
+}
+```
+
+The `env` block passes credentials directly to the server process — Claude never sees them. If you prefer, you can omit `env` and set credentials via the CLI instead (`kicktipp set-community`).
+
+After restarting Claude Desktop, the agent will have access to all kicktipp tools. It will call `get_status` first to check configuration, then prompt you to set a community if needed.
+
+### Setup with Claude Code
+
+Add to `.mcp.json` in your home directory or project:
+
+```json
+{
+  "mcpServers": {
+    "kicktipp": {
+      "command": "kicktipp-mcp",
+      "env": {
+        "KICKTIPP_EMAIL": "you@example.com",
+        "KICKTIPP_PASSWORD": "yourpassword"
+      }
+    }
+  }
+}
+```
+
+### Credentials
+
+The MCP server accepts credentials in two ways (checked in this order):
+
+1. **Environment variables** — `KICKTIPP_EMAIL` and `KICKTIPP_PASSWORD` passed via the `env` block in your MCP client config
+2. **Config file** — `~/.config/kicktipp-agent/config.ini`, shared with the CLI
+
+If neither is found, the server returns an error guiding the agent to inform you.
 
 ### Choosing the Kicktipp host
 
