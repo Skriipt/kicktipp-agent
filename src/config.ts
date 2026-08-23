@@ -240,6 +240,11 @@ export function readScoringOverride(): { exact: number; goalDiff: number; tenden
   return { exact, goalDiff, tendency };
 }
 
+/** Default suggestion strategy, from [suggest] strategy or the environment. */
+export function readDefaultStrategy(): string | null {
+  return process.env.KICKTIPP_SUGGEST_STRATEGY || readConfig().suggest?.strategy || null;
+}
+
 export function hasCredentials(): boolean {
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
   const config = readConfig();

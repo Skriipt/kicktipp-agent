@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Page, launchBrowser } from './browser.js';
-import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials, getActiveProfile } from './config.js';
+import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials, getActiveProfile, readDefaultStrategy } from './config.js';
 import { CacheStore } from './cache/store.js';
 import { loadSeason } from './analytics/season.js';
 import { computeSeasonStats } from './analytics/season-stats.js';
@@ -19,7 +19,7 @@ import { analyseRival } from './analytics/rivals.js';
 import { gapBeforeMatchday } from './analytics/gap.js';
 import { resolveRules } from './rules/resolve.js';
 import { toOddsMatches } from './analytics/odds.js';
-import { STRATEGIES, suggestBets } from './analytics/strategies.js';
+import { STRATEGIES, suggestBets, type StrategyName } from './analytics/strategies.js';
 import {
   AuthError,
   resolveCommunity,
@@ -468,10 +468,21 @@ server.tool(
   'suggest_bets',
   "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
   {
-    strategy: z.enum(['safe', 'ev', 'contrarian']).optional().describe('Default: safe.'),
+    strategy: z
+      .enum(['safe', 'ev', 'contrarian', 'auto'])
+      .optional()
+      .describe('Defaults to the configured strategy, or safe.'),
+    pin: z
+      .array(z.object({
+        home: z.string(),
+        away: z.string(),
+        bet: z.string().describe('Scoreline as "H:G".'),
+      }))
+      .optional()
+      .describe('Picks the user has fixed; the strategy fills in the rest and leaves these alone.'),
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
   },
-  async ({ strategy, matchday }) => withFreshSession(async () => {
+  async ({ strategy, matchday, pin }) => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const store = new CacheStore(community);
@@ -479,8 +490,8 @@ server.tool(
 
     const { matches } = await fetchBets(page, community, matchday, cache);
     const rules = await resolveRules(page, community, cache);
-    const chosen = (strategy ?? 'safe') as (typeof STRATEGIES)[number];
-    const suggestions = suggestBets(toOddsMatches(matches), rules.values, chosen);
+    const chosen = (strategy ?? readDefaultStrategy() ?? 'safe') as StrategyName;
+    const suggestions = suggestBets(toOddsMatches(matches), rules.values, chosen, pin ?? []);
 
     return {
       content: [{

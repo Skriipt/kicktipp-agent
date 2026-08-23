@@ -6,11 +6,22 @@ import { CacheStore } from '../cache/store.js';
 import { fetchBets, placeBets } from '../core.js';
 import { resolveRules } from '../rules/resolve.js';
 import { toOddsMatches } from '../analytics/odds.js';
-import { STRATEGIES, suggestBets, type StrategyName, type SuggestedBet } from '../analytics/strategies.js';
+import { STRATEGIES, suggestBets, type PinnedBet, type StrategyName, type SuggestedBet } from '../analytics/strategies.js';
 import { offlineMatchday, requireCached } from '../cache/offline.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
-import { loadCommunity } from '../config.js';
+import { loadCommunity, readDefaultStrategy } from '../config.js';
 import { assertWritable } from '../read-only.js';
+
+/** "Bayern vs BVB=2:1" — same shape the bet command accepts. */
+function parsePins(args: string[]): PinnedBet[] {
+  return args.map((arg) => {
+    const eq = arg.lastIndexOf('=');
+    if (eq === -1) throw new Error(`Invalid --pin '${arg}'. Use "Home vs Away=H:G".`);
+    const parts = arg.slice(0, eq).split(/\s+vs\.?\s+/i);
+    if (parts.length !== 2) throw new Error(`Invalid --pin fixture in '${arg}'.`);
+    return { home: parts[0].trim(), away: parts[1].trim(), bet: arg.slice(eq + 1).trim() };
+  });
+}
 
 function render(
   suggestions: SuggestedBet[],
@@ -23,7 +34,9 @@ function render(
   lines.push(`Suggested bets — ${strategy} strategy`);
   lines.push('');
   for (const s of suggestions) {
-    const marker = s.existingBet ? ' (already bet ' + s.existingBet + ')' : '';
+    const marker =
+      (s.pinned ? ' [pinned]' : '') +
+      (s.existingBet ? ` (already bet ${s.existingBet})` : '');
     lines.push(`  ${`${s.home} vs ${s.away}`.padEnd(width)}  ${s.bet}${marker}`);
     lines.push(`  ${' '.repeat(width)}  ${s.reasoning}`);
   }
@@ -47,7 +60,11 @@ export function registerSuggestCommand(program: Command): void {
   program
     .command('suggest')
     .description('Suggest a bet slip from the published odds (prints only unless --place)')
-    .option('--strategy <name>', `One of: ${STRATEGIES.join(', ')}`, 'safe')
+    .option('--strategy <name>', `One of: ${STRATEGIES.join(', ')}`)
+    .option(
+      '--pin <bet...>',
+      'Fix a pick the strategy must not touch, as "Home vs Away=H:G"',
+    )
     .option('--matchday <n>', 'Matchday number (1-34). Omit for the current one.', parseInt)
     .option('--place', 'Submit the slip after confirmation')
     .option('--replace', 'Also overwrite matches that already have a bet')
@@ -56,7 +73,9 @@ export function registerSuggestCommand(program: Command): void {
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       if (opts.place) assertWritable('Placing bets');
-      const strategy = opts.strategy as StrategyName;
+      // Explicit flag wins, then the configured default, then safe.
+      const strategy = (opts.strategy ?? readDefaultStrategy() ?? 'safe') as StrategyName;
+      const pins = parsePins(opts.pin ?? []);
       if (!STRATEGIES.includes(strategy)) {
         console.error(`Unknown strategy '${strategy}'. Options: ${STRATEGIES.join(', ')}`);
         process.exit(1);
@@ -76,7 +95,7 @@ export function registerSuggestCommand(program: Command): void {
         const matchday = offlineMatchday(store, opts.matchday);
         const { matches } = requireCached(store, 'bets', matchday);
         const rules = resolveRulesFromCache(store);
-        const suggestions = suggestBets(toOddsMatches(matches), rules.values, strategy);
+        const suggestions = suggestBets(toOddsMatches(matches), rules.values, strategy, pins);
         if (opts.json) console.log(JSON.stringify({ strategy, rules, suggestions }, null, 2));
         else console.log(render(suggestions, strategy, rules.warning));
         return;
@@ -98,7 +117,7 @@ export function registerSuggestCommand(program: Command): void {
           return;
         }
 
-        const suggestions = suggestBets(toOddsMatches(matches), rules.values, strategy);
+        const suggestions = suggestBets(toOddsMatches(matches), rules.values, strategy, pins);
 
         if (opts.json) {
           console.log(JSON.stringify({ strategy, rules, suggestions }, null, 2));
