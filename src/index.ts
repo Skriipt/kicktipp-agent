@@ -5,6 +5,7 @@ import { saveCommunity, savePlayer, logout } from './config.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
 import { ask, ensureCommunity } from './shared.js';
 import { statusClear } from './helpers/spinner.js';
+import { emitError, emitJson, setJsonMode } from './helpers/output.js';
 import { registerLeaderboardCommand } from './commands/leaderboard.js';
 import { registerOverviewCommand } from './commands/overview.js';
 import { registerScheduleCommand } from './commands/schedule.js';
@@ -59,11 +60,17 @@ program
 program
   .command('communities')
   .description('List all communities you belong to')
-  .action(async () => {
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    if (opts.json) setJsonMode(true);
     const { page } = await launchBrowser();
-    const communities = await getCommunities(page);
-    communities.forEach((c) => console.log(c));
-    await page.close();
+    try {
+      const communities = await getCommunities(page);
+      if (opts.json) emitJson({ data: communities });
+      else communities.forEach((c) => console.log(c));
+    } finally {
+      await page.close();
+    }
   });
 
 program
@@ -78,12 +85,18 @@ program
 program
   .command('players')
   .description('List players in the saved community')
-  .action(async () => {
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    if (opts.json) setJsonMode(true);
     const { page } = await launchBrowser();
-    const community = await ensureCommunity(page);
-    const players = await getPlayers(page, community);
-    players.forEach((p) => console.log(p));
-    await page.close();
+    try {
+      const community = await ensureCommunity(page);
+      const players = await getPlayers(page, community);
+      if (opts.json) emitJson({ community, data: players });
+      else players.forEach((p) => console.log(p));
+    } finally {
+      await page.close();
+    }
   });
 
 program
@@ -117,6 +130,8 @@ export { program, ensureCommunity, ask };
 // community) are reported as plain messages rather than stack traces.
 program.parseAsync().catch((err) => {
   statusClear();
-  console.error(err instanceof Error ? err.message : String(err));
+  // In --json mode the failure has to be machine-readable too, so scripts
+  // can parse errors instead of guessing from the exit code alone.
+  emitError(err);
   process.exit(1);
 });
