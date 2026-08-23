@@ -32,6 +32,7 @@ import { registerDeadlineCommand } from './commands/deadline.js';
 import { registerNotifyCommand, registerRemindCommand } from './commands/remind.js';
 import { registerLogCommand } from './commands/log.js';
 import { registerScenarioCommand } from './commands/scenario.js';
+import { registerWhatifCommand } from './commands/whatif.js';
 
 const program = new Command();
 
@@ -170,6 +171,7 @@ registerRemindCommand(program);
 registerNotifyCommand(program);
 registerLogCommand(program);
 registerScenarioCommand(program);
+registerWhatifCommand(program);
 
 export { program, ensureCommunity, ask };
 

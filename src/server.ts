@@ -14,6 +14,7 @@ import { isReadOnly } from './read-only.js';
 import { buildDeadlineReport } from './analytics/deadline.js';
 import { readAudit } from './audit/log.js';
 import { findTargetCombinations, projectStandings } from './analytics/scenarios.js';
+import { replaySeason, REPLAY_STRATEGIES } from './analytics/replay.js';
 import { analyseRival } from './analytics/rivals.js';
 import { gapBeforeMatchday } from './analytics/gap.js';
 import { resolveRules } from './rules/resolve.js';
@@ -266,6 +267,42 @@ server.tool(
     const data = await fetchBonusQuestions(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
   }),
+);
+
+server.tool(
+  'whatif',
+  "Replay the cached season as if the player had followed a different strategy, and compare with what they actually scored. Strategies: a fixed scoreline such as '2:1', one of " + REPLAY_STRATEGIES.join(', ') + ", or suggest:safe|ev|contrarian. Needs a synced cache. Treat final_rank as an estimate — other players are compared on recorded totals that include bonus points the replay does not model.",
+  {
+    strategy: z.string().describe('A scoreline like "2:1", a named strategy, or "suggest:ev".'),
+    player: z.string().optional().describe('Player to replay (default: the configured player).'),
+  },
+  async ({ strategy, player }) => {
+    const community = loadCommunity();
+    if (!community) throw new Error('No community set. Call get_communities then set_community.');
+    const ownPlayer = loadPlayer();
+    const who = player || ownPlayer;
+    if (!who) throw new Error('No player set. Call get_players then set_player, or pass a player.');
+
+    const store = new CacheStore(community);
+    const season = loadSeason(store);
+    if (!season.matchdays.length) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            error: 'empty_cache',
+            message: 'No season history cached yet. Call sync_history first.',
+          }, null, 2),
+        }],
+      };
+    }
+
+    const rules = resolveRulesFromCache(store);
+    const result = replaySeason(season, who, rules.values, strategy, ownPlayer);
+    const baseline =
+      strategy === 'actual' ? null : replaySeason(season, who, rules.values, 'actual', ownPlayer);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, result, baseline }, null, 2) }] };
+  },
 );
 
 server.tool(
