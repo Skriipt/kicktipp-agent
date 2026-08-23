@@ -78,6 +78,13 @@ $ kicktipp set-player
 | `stats` | Season analytics for you or another player |
 | `rival` | What it would take to overtake another player |
 | `suggest` | Bet slip suggested from the published odds |
+| `scenario` | Project the leaderboard under hypothetical results |
+| `whatif` | Replay the season under a different strategy |
+| `deadline` | Time to kickoff and what still needs a bet |
+| `remind` / `notify` | Reminder artifacts and notifications |
+| `log` | What this agent submitted, and undo |
+| `profiles` | List configured profiles |
+| `admin` | Spielleiter tools (members, bets for a member) |
 | `logout` | Remove stored credentials and session |
 
 ### Placing bets
@@ -147,12 +154,67 @@ The cache lives in your platform's data directory (`~/.local/share/kicktipp-agen
 on Linux) and can be inspected with `kicktipp cache status` or removed with
 `kicktipp cache clear`.
 
+
+### Deadlines and reminders
+
+```bash
+kicktipp deadline                  # countdown and what still needs a bet
+kicktipp deadline --check          # exits 2 when something is due soon
+kicktipp remind --print cron       # a crontab line built on that exit code
+kicktipp remind --print systemd    # or user units; --install writes them
+kicktipp remind --ics season.ics   # a calendar with an alarm per kickoff
+kicktipp notify                    # notify now, if anything is urgent
+```
+
+Kicktipp prints kickoff times with no UTC offset, so they are read in this
+machine's timezone unless `KICKTIPP_TZ` names the site's zone. Every countdown
+says which zone it assumed.
+
+Notifications go through one backend, configured under `[notify]`:
+`desktop` (notify-send / osascript), `webhook` (a JSON POST — ntfy, Slack,
+Home Assistant, anything), or `command`. There is no default endpoint; a
+webhook only ever goes where you point it.
+
+### Scenarios, replays and the bet log
+
+```bash
+kicktipp scenario "Bayern vs BVB=2:1"     # project the table
+kicktipp scenario --target 1              # what would put you first
+kicktipp whatif "2:1"                     # replay the season on a fixed bet
+kicktipp whatif suggest:ev
+kicktipp log                              # what the agent submitted
+kicktipp log --undo                       # put the previous bets back
+```
+
+Every submission — CLI, TUI, suggestion or MCP — is appended to a local
+JSONL log with the bet it replaced, which is what makes `--undo` possible and
+what lets you audit an assistant after the fact.
+
+### Multiple pools and accounts
+
+```bash
+kicktipp -c other-pool schedule     # one-off, without changing the default
+kicktipp -p work stats              # a separate account and session
+kicktipp profiles
+```
+
+A profile is a `[profile.<name>]` section with its own account, community and
+player. Configs without profiles keep working exactly as before.
+
+### Spielleiter tools
+
+If you run a community, `kicktipp admin members`, `admin bets <member>` and
+`admin bet <member> "Home vs Away=H:G"` fill in bets for members who have no
+login of their own. Placing for someone else asks you to type their name back
+first, and refuses outright if the page would not carry their id.
+
 ### Scoring rules
 
 Features that count points read your community's rules page to learn what an
-exact result, a goal difference and a tendency are worth. If that page cannot be
-parsed, Kicktipp's 4/3/2 defaults are assumed and every affected output says so.
-You can also set them explicitly in `~/.config/kicktipp-agent/config.ini`:
+exact result, a goal difference and a tendency are worth, and whether any
+matchday counts double. If that page cannot be parsed, Kicktipp's 4/3/2
+defaults are assumed and every affected output says so. You can also set the
+values explicitly:
 
 ```ini
 [scoring]
@@ -161,6 +223,15 @@ diff = 3
 tendency = 2
 ```
 
+To find out whether the values are actually right:
+
+```bash
+kicktipp rules --verify        # recompute a finished matchday and compare
+```
+
+This recomputes every player's score for a finished matchday and checks it
+against the numbers Kicktipp itself reported — the only real proof the model
+matches the community. It exits 1 on a mismatch.
 
 ## MCP Server
 
@@ -189,6 +260,11 @@ The MCP server exposes the same functionality as the CLI through the [Model Cont
 | `get_stats` | Season analytics for a player |
 | `get_rival_analysis` | Gap, swing and overtake conditions vs. another player |
 | `suggest_bets` | Suggested bet slip from the odds (read-only, never submits) |
+| `get_deadline` | Countdown and which matches still need a bet |
+| `get_standings_scenarios` | Project the table under hypothetical results |
+| `whatif` | Replay the season under a different strategy |
+| `get_bet_log` | What this agent submitted, from the record |
+| `list_members` / `get_bets_for_member` / `place_bets_for_member` | Spielleiter tools |
 
 ### Setup with Claude Desktop
 
@@ -238,6 +314,14 @@ The MCP server accepts credentials in two ways (checked in this order):
 2. **Config file** — `~/.config/kicktipp-agent/config.ini`, shared with the CLI
 
 If neither is found, the server returns an error guiding the agent to inform you.
+
+### Read-only mode
+
+For a connection that provably cannot bet, set `KICKTIPP_READ_ONLY=1` in the
+`env` block (or `read_only = true` under `[server]`). The betting and settings
+tools are then never registered, so they do not appear in the tool list at all,
+and the submitting functions refuse independently. This is the recommended way
+to try the MCP server for the first time.
 
 ### Choosing the Kicktipp host
 
