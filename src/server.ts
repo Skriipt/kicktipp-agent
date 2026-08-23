@@ -10,6 +10,7 @@ import { loadSeason } from './analytics/season.js';
 import { computeSeasonStats } from './analytics/season-stats.js';
 import { resolveRulesFromCache } from './rules/resolve.js';
 import { syncSeason } from './cache/sync.js';
+import { isReadOnly } from './read-only.js';
 import { analyseRival } from './analytics/rivals.js';
 import { gapBeforeMatchday } from './analytics/gap.js';
 import { resolveRules } from './rules/resolve.js';
@@ -71,9 +72,11 @@ async function withFreshSession<T>(fn: () => Promise<T>): Promise<T> {
 
 // ── MCP Server ─────────────────────────────────────────────────────
 
+const readOnly = isReadOnly();
+
 const server = new McpServer(
   { name: 'kicktipp', version: '1.0.0' },
-  { instructions: 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.' },
+  { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on kicktipp.com. Do not offer to place bets. ' : '') + 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.' },
 );
 
 server.tool(
@@ -88,6 +91,7 @@ server.tool(
       content: [{
         type: 'text',
         text: JSON.stringify({
+          read_only: readOnly,
           credentials_saved: credentials,
           community: community || null,
           player: player || null,
@@ -213,36 +217,40 @@ server.tool(
   }),
 );
 
-server.tool(
-  'set_community',
-  'Set the active community. Use get_communities first to see available options, then pass the exact name.',
-  { name: z.string().describe('Exact community name as returned by get_communities.') },
-  async ({ name }) => {
-    const page = await getPage();
-    const communities = await fetchCommunities(page);
-    if (!communities.includes(name)) {
-      return { content: [{ type: 'text', text: JSON.stringify({ error: `Community "${name}" not found. Available: ${communities.join(', ')}` }, null, 2) }], isError: true };
-    }
-    saveCommunity(name);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, community: name }, null, 2) }] };
-  },
-);
+if (!readOnly) {
+  server.tool(
+    'set_community',
+    'Set the active community. Use get_communities first to see available options, then pass the exact name.',
+    { name: z.string().describe('Exact community name as returned by get_communities.') },
+    async ({ name }) => {
+      const page = await getPage();
+      const communities = await fetchCommunities(page);
+      if (!communities.includes(name)) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: `Community "${name}" not found. Available: ${communities.join(', ')}` }, null, 2) }], isError: true };
+      }
+      saveCommunity(name);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, community: name }, null, 2) }] };
+    },
+  );
+}
 
-server.tool(
-  'set_player',
-  'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
-  { name: z.string().describe('Exact player name as returned by get_players.') },
-  async ({ name }) => {
-    const page = await getPage();
-    const community = await resolveCommunity(page);
-    const players = await fetchPlayers(page, community);
-    if (!players.includes(name)) {
-      return { content: [{ type: 'text', text: JSON.stringify({ error: `Player "${name}" not found. Available: ${players.join(', ')}` }, null, 2) }], isError: true };
-    }
-    savePlayer(name);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, player: name }, null, 2) }] };
-  },
-);
+if (!readOnly) {
+  server.tool(
+    'set_player',
+    'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
+    { name: z.string().describe('Exact player name as returned by get_players.') },
+    async ({ name }) => {
+      const page = await getPage();
+      const community = await resolveCommunity(page);
+      const players = await fetchPlayers(page, community);
+      if (!players.includes(name)) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: `Player "${name}" not found. Available: ${players.join(', ')}` }, null, 2) }], isError: true };
+      }
+      savePlayer(name);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, player: name }, null, 2) }] };
+    },
+  );
+}
 
 server.tool(
   'get_bonus_questions',
@@ -378,36 +386,40 @@ server.tool(
   }),
 );
 
-server.tool(
-  'place_bets',
-  'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
-  {
-    bets: z.array(z.string()).min(1).describe('Bets in format "Home vs Away=H:G", e.g. ["FC Bayern München vs Borussia Dortmund=2:1"]'),
-    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
-    dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
-  },
-  async ({ bets, matchday, dry_run }) => {
-    const page = await getPage();
-    const community = await resolveCommunity(page);
-    const placed = await placeBets(page, community, bets, matchday, !dry_run);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
-  },
-);
+if (!readOnly) {
+  server.tool(
+    'place_bets',
+    'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
+    {
+      bets: z.array(z.string()).min(1).describe('Bets in format "Home vs Away=H:G", e.g. ["FC Bayern München vs Borussia Dortmund=2:1"]'),
+      matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
+      dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
+    },
+    async ({ bets, matchday, dry_run }) => {
+      const page = await getPage();
+      const community = await resolveCommunity(page);
+      const placed = await placeBets(page, community, bets, matchday, !dry_run);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
+    },
+  );
+}
 
-server.tool(
-  'place_bonus_bets',
-  'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
-  {
-    bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer", e.g. ["Who will be champion?=FC Bayern München"]'),
-    dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
-  },
-  async ({ bets, dry_run }) => {
-    const page = await getPage();
-    const community = await resolveCommunity(page);
-    const placed = await placeBonusBets(page, community, bets, !dry_run);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
-  },
-);
+if (!readOnly) {
+  server.tool(
+    'place_bonus_bets',
+    'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
+    {
+      bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer", e.g. ["Who will be champion?=FC Bayern München"]'),
+      dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
+    },
+    async ({ bets, dry_run }) => {
+      const page = await getPage();
+      const community = await resolveCommunity(page);
+      const placed = await placeBonusBets(page, community, bets, !dry_run);
+      return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
+    },
+  );
+}
 
 // ── Start ──────────────────────────────────────────────────────────
 

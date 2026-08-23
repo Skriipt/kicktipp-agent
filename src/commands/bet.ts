@@ -10,6 +10,7 @@ import {
   EditableMatch,
 } from '../helpers/parse-bet-arg.js';
 import { escapeCssValue } from '../helpers/escape-css-value.js';
+import { assertWritable } from '../read-only.js';
 
 // ── Bonus question types and helpers ───────────────────────────────
 
@@ -419,6 +420,7 @@ export function registerBetCommand(program: Command): void {
     .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
     .option('--bonus', 'Place bonus question bets')
     .action(async (bets: string[], opts) => {
+      assertWritable('Placing bets');
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);

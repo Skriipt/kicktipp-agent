@@ -10,6 +10,7 @@ import { STRATEGIES, suggestBets, type StrategyName, type SuggestedBet } from '.
 import { offlineMatchday, requireCached } from '../cache/offline.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
 import { loadCommunity } from '../config.js';
+import { assertWritable } from '../read-only.js';
 
 function render(
   suggestions: SuggestedBet[],
@@ -54,6 +55,7 @@ export function registerSuggestCommand(program: Command): void {
     .option('--offline', 'Use only cached data; make no requests (implies no --place)')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
+      if (opts.place) assertWritable('Placing bets');
       const strategy = opts.strategy as StrategyName;
       if (!STRATEGIES.includes(strategy)) {
         console.error(`Unknown strategy '${strategy}'. Options: ${STRATEGIES.join(', ')}`);

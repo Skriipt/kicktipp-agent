@@ -17,6 +17,7 @@ import {
 } from './helpers/parse-bet-arg.js';
 import { escapeCssValue } from './helpers/escape-css-value.js';
 import { throughCache, type CacheOptions } from './cache/cached-fetch.js';
+import { assertWritable } from './read-only.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
 
@@ -558,6 +559,9 @@ export async function fetchPlayers(page: Page, community: string): Promise<strin
 // ── Write operations ───────────────────────────────────────────────
 
 export async function placeBets(page: Page, community: string, bets: string[], matchday?: number, submit = true): Promise<PlacedBet[]> {
+  // Checked here as well as at the entry points: this is the last line before
+  // anything reaches Kicktipp.
+  if (submit) assertWritable('Placing bets');
   const $ = await loadPage(page, getPredictUrl(community, matchday));
   const tbody = $('#kicktipp-content table#tippabgabeSpiele tbody');
   if (!tbody.length) throw new Error('No matches found.');
@@ -642,6 +646,7 @@ export async function fetchBonusQuestions(page: Page, community: string): Promis
 }
 
 export async function placeBonusBets(page: Page, community: string, bets: string[], submit = true): Promise<PlacedBonusBet[]> {
+  if (submit) assertWritable('Placing bonus bets');
   const questions = await fetchBonusQuestions(page, community);
   if (!questions.length) throw new Error('No editable bonus questions found.');
 

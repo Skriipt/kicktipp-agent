@@ -42,7 +42,7 @@ function decrypt(encoded: string): string {
 
 // ── Config I/O ──────────────────────────────────────────────────────
 
-function readConfig(): Record<string, any> {
+export function readConfig(): Record<string, any> {
   if (!fs.existsSync(CONFIG_FILE)) return {};
   return ini.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
 }
