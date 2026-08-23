@@ -13,6 +13,7 @@ import { escapeCssValue } from '../helpers/escape-css-value.js';
 import { assertWritable } from '../read-only.js';
 import { placeBets } from '../core.js';
 import { appendAudit } from '../audit/log.js';
+import { runBettingTui } from '../tui/run.js';
 
 // ── Bonus question types and helpers ───────────────────────────────
 
@@ -398,8 +399,19 @@ export function registerBetCommand(program: Command): void {
     .argument('[bets...]', 'Bets: "Home vs Away=H:G" or with --bonus "Question=Answer"')
     .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
     .option('--bonus', 'Place bonus question bets')
+    .option('--tui', 'Full-screen matchday view (default on an interactive terminal)')
+    .option('--no-tui', 'Force the line-by-line prompts instead')
     .action(async (bets: string[], opts) => {
       assertWritable('Placing bets');
+
+      // The full-screen view is for interactive match betting only: with
+      // fixtures given as arguments there is nothing to navigate, and it
+      // needs a real terminal to read keys from.
+      const wantsTui = opts.tui !== false && !opts.bonus && (!bets || bets.length === 0);
+      if (wantsTui && (opts.tui === true || (process.stdin.isTTY && process.stdout.isTTY))) {
+        await runBettingTui({ matchday: opts.matchday });
+        return;
+      }
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
