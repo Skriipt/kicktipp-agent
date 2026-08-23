@@ -10,6 +10,9 @@ import { loadSeason } from './analytics/season.js';
 import { computeSeasonStats } from './analytics/season-stats.js';
 import { resolveRulesFromCache } from './rules/resolve.js';
 import { syncSeason } from './cache/sync.js';
+import { analyseRival } from './analytics/rivals.js';
+import { gapBeforeMatchday } from './analytics/gap.js';
+import { resolveRules } from './rules/resolve.js';
 import {
   AuthError,
   resolveCommunity,
@@ -23,6 +26,7 @@ import {
   fetchCommunities,
   fetchPlayers,
   fetchBonusQuestions,
+  fetchMatchdayBets,
   placeBets,
   placeBonusBets,
   OVERVIEW_VIEW_OPTIONS,

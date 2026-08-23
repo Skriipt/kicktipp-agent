@@ -17,6 +17,7 @@ import { registerGuideCommand } from './commands/guide.js';
 import { registerSyncCommand } from './commands/sync.js';
 import { registerCacheCommand } from './commands/cache.js';
 import { registerStatsCommand } from './commands/stats.js';
+import { registerRivalCommand } from './commands/rival.js';
 
 const program = new Command();
 
@@ -106,6 +107,7 @@ registerGuideCommand(program);
 registerSyncCommand(program);
 registerCacheCommand(program);
 registerStatsCommand(program);
+registerRivalCommand(program);
 
 export { program, ensureCommunity, ask };
 
