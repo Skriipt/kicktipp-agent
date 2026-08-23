@@ -20,6 +20,7 @@ import { registerCacheCommand } from './commands/cache.js';
 import { registerStatsCommand } from './commands/stats.js';
 import { registerRivalCommand } from './commands/rival.js';
 import { registerSuggestCommand } from './commands/suggest.js';
+import { registerDeadlineCommand } from './commands/deadline.js';
 
 const program = new Command();
 
@@ -123,6 +124,7 @@ registerCacheCommand(program);
 registerStatsCommand(program);
 registerRivalCommand(program);
 registerSuggestCommand(program);
+registerDeadlineCommand(program);
 
 export { program, ensureCommunity, ask };
 

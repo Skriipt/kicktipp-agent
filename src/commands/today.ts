@@ -3,7 +3,8 @@ import { launchBrowser } from '../browser.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
-import { fetchTodayMatches, type TodayMatch } from '../core.js';
+import { fetchTodayMatches, fetchBets, type TodayMatch } from '../core.js';
+import { buildDeadlineReport, urgencyWarning } from '../analytics/deadline.js';
 
 function render(matches: TodayMatch[]): string {
   if (!matches.length) return 'No matches today.';
@@ -41,8 +42,18 @@ export function registerTodayCommand(program: Command): void {
         const data = await fetchTodayMatches(page, community);
         statusClear();
 
-        if (opts.json) emitJson({ community, data });
-        else console.log(render(data.matches));
+        // Today's view only knows about today; the warning needs the whole
+        // matchday, since an unbetted match may kick off tomorrow morning.
+        const { matches } = await fetchBets(page, community);
+        const report = buildDeadlineReport(community, null, matches);
+
+        if (opts.json) {
+          emitJson({ community, data, deadline: report });
+        } else {
+          console.log(render(data.matches));
+          const warning = urgencyWarning(report);
+          if (warning) console.log(`\n${warning}`);
+        }
       } finally {
         await page.close();
       }

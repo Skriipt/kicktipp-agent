@@ -4,6 +4,7 @@ import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
 import { fetchBets, type BetMatch } from '../core.js';
+import { buildDeadlineReport, urgencyWarning } from '../analytics/deadline.js';
 
 function odds(match: BetMatch): string {
   const { home, draw, away } = match.odds;
@@ -42,8 +43,15 @@ export function registerBetsCommand(program: Command): void {
         const data = await fetchBets(page, community, opts.matchday);
         statusClear();
 
-        if (opts.json) emitJson({ community, matchday: opts.matchday ?? null, data });
-        else console.log(render(data.title, data.matches));
+        const report = buildDeadlineReport(community, opts.matchday ?? null, data.matches);
+
+        if (opts.json) {
+          emitJson({ community, matchday: opts.matchday ?? null, data, deadline: report });
+        } else {
+          console.log(render(data.title, data.matches));
+          const warning = urgencyWarning(report);
+          if (warning) console.log(`\n${warning}`);
+        }
       } finally {
         await page.close();
       }

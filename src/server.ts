@@ -11,6 +11,7 @@ import { computeSeasonStats } from './analytics/season-stats.js';
 import { resolveRulesFromCache } from './rules/resolve.js';
 import { syncSeason } from './cache/sync.js';
 import { isReadOnly } from './read-only.js';
+import { buildDeadlineReport } from './analytics/deadline.js';
 import { analyseRival } from './analytics/rivals.js';
 import { gapBeforeMatchday } from './analytics/gap.js';
 import { resolveRules } from './rules/resolve.js';
@@ -261,6 +262,24 @@ server.tool(
     const community = await resolveCommunity(page);
     const data = await fetchBonusQuestions(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }),
+);
+
+server.tool(
+  'get_deadline',
+  "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Times are interpreted in the time_zone field's zone, which is assumed rather than reported by Kicktipp — mention it if a countdown looks surprising.",
+  {
+    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
+    warn_hours: z.number().positive().optional().describe('Urgency window in hours (default 6).'),
+  },
+  async ({ matchday, warn_hours }) => withFreshSession(async () => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const { matches } = await fetchBets(page, community, matchday);
+    const report = buildDeadlineReport(community, matchday ?? null, matches, {
+      warnHours: warn_hours,
+    });
+    return { content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }] };
   }),
 );
 

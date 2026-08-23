@@ -18,6 +18,7 @@ import {
 import { escapeCssValue } from './helpers/escape-css-value.js';
 import { throughCache, type CacheOptions } from './cache/cached-fetch.js';
 import { assertWritable } from './read-only.js';
+import { parseMatchDate } from './helpers/match-date.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
 
@@ -55,25 +56,6 @@ async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   return cheerio.load(await page.content());
 }
 
-function parseMatchDate(dateStr: string): Date | null {
-  const trimmed = dateStr.trim();
-  const usMatch = trimmed.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)$/i,
-  );
-  if (usMatch) {
-    const [, m, d, y, h, min, ampm] = usMatch;
-    let hour = parseInt(h);
-    if (ampm.toUpperCase() === 'PM' && hour !== 12) hour += 12;
-    if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
-    return new Date(2000 + parseInt(y), parseInt(m) - 1, parseInt(d), hour, parseInt(min));
-  }
-  const deMatch = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})$/);
-  if (deMatch) {
-    const [, d, m, y, h, min] = deMatch;
-    return new Date(2000 + parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(h), parseInt(min));
-  }
-  return null;
-}
 
 export async function resolveCommunity(page: Page): Promise<string> {
   const saved = loadCommunity();
