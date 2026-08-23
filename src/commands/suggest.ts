@@ -105,7 +105,15 @@ export function registerSuggestCommand(program: Command): void {
           return;
         }
 
-        console.log(render(suggestions, strategy, rules.warning));
+        const note = [
+          rules.warning,
+          rules.confidence === 'assumed'
+            ? 'Scoring values are assumed; run `kicktipp rules --verify` to check them.'
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        console.log(render(suggestions, strategy, note || undefined));
         if (!opts.place) return;
 
         // Matches that already carry a bet are left alone unless asked for.

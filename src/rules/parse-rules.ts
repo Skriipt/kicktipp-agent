@@ -6,7 +6,10 @@ import { DEFAULT_RULES, type ResolvedRules, type ScoringRules } from './scoring.
  * English. Matching is done on a normalized (lowercased, punctuation-free)
  * form so spacing and articles do not matter.
  */
-const LABELS: { key: keyof ScoringRules; patterns: RegExp[] }[] = [
+/** The three numeric tiers; multipliers are parsed separately. */
+type PointKey = 'exact' | 'goalDiff' | 'tendency';
+
+const LABELS: { key: PointKey; patterns: RegExp[] }[] = [
   {
     key: 'exact',
     patterns: [/richtiges?ergebnis/, /exactresult/, /correctresult/],
@@ -43,7 +46,7 @@ function firstNumber(cells: string[]): number | null {
  * caller can fall back to the defaults and say so.
  */
 export function parseScoringRules(sections: RulesSection[]): ResolvedRules | null {
-  const found: Partial<ScoringRules> = {};
+  const found: Partial<Record<PointKey, number>> = {};
   let unsupported: string | undefined;
 
   for (const section of sections) {
@@ -86,9 +89,45 @@ export function parseScoringRules(sections: RulesSection[]): ResolvedRules | nul
     unsupported ?? '',
   ].filter(Boolean);
 
+  const multipliers = parseMultipliers(sections);
+  if (Object.keys(multipliers).length) values.multipliers = multipliers;
+
   return {
     values,
     source: 'parsed',
+    confidence: 'parsed',
     warning: warnings.length ? warnings.join(' ') : undefined,
   };
+}
+
+/**
+ * Communities sometimes double a matchday ("Spieltag 34 zählt doppelt").
+ * Only explicit numeric factors tied to a matchday number are taken; a
+ * vaguer statement is left alone rather than guessed at.
+ */
+export function parseMultipliers(sections: RulesSection[]): Record<number, number> {
+  const multipliers: Record<number, number> = {};
+  const patterns = [
+    /spieltag\s*(\d{1,2})[^.]{0,40}?(doppelt|zweifach|dreifach|x\s*([\d.]+)|(\d+)\s*[-–]?\s*fach)/gi,
+    /matchday\s*(\d{1,2})[^.]{0,40}?(double|triple|x\s*([\d.]+)|counts?\s+(\d+)\s*times)/gi,
+  ];
+
+  const text = sections
+    .map((s) => (s.type === 'table' ? (s.rows ?? []).map((r) => r.join(' ')).join(' ') : s.text ?? ''))
+    .join(' ');
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const matchday = Number(match[1]);
+      if (!Number.isInteger(matchday) || matchday < 1 || matchday > 34) continue;
+      const word = match[2].toLowerCase();
+      let factor: number | null = null;
+      if (/doppelt|zweifach|double/.test(word)) factor = 2;
+      else if (/dreifach|triple/.test(word)) factor = 3;
+      else if (match[3]) factor = Number(match[3]);
+      else if (match[4]) factor = Number(match[4]);
+      if (factor && Number.isFinite(factor) && factor > 0) multipliers[matchday] = factor;
+    }
+  }
+  return multipliers;
 }

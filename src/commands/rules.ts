@@ -3,7 +3,10 @@ import { launchBrowser } from '../browser.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
-import { fetchRules, type RulesSection } from '../core.js';
+import { fetchRules, fetchLeaderboard, fetchMatchdayBets, type RulesSection } from '../core.js';
+import { CacheStore } from '../cache/store.js';
+import { resolveRules } from '../rules/resolve.js';
+import { verifyRules } from '../rules/verify.js';
 
 function render(sections: RulesSection[]): string {
   if (!sections.length) return 'No rules found.';
@@ -35,16 +38,71 @@ function render(sections: RulesSection[]): string {
   return lines.join('\n').trim();
 }
 
+function renderVerification(
+  values: { exact: number; goalDiff: number; tendency: number },
+  result: ReturnType<typeof verifyRules>,
+): string {
+  const lines = [
+    `Checking ${values.exact}/${values.goalDiff}/${values.tendency} ` +
+      `(exact/difference/tendency) against matchday ${result.matchday ?? 'current'}`,
+    '',
+  ];
+
+  if (result.reason) {
+    lines.push(`Could not check: ${result.reason}`);
+    return lines.join('\n');
+  }
+
+  for (const player of result.players) {
+    const mark = player.reported === null ? '?' : player.agrees ? 'ok' : 'MISMATCH';
+    const reported = player.reported === null ? 'not on leaderboard' : String(player.reported);
+    lines.push(
+      `  ${player.player.padEnd(20)} computed ${String(player.computed).padStart(3)}  ` +
+        `reported ${reported.padStart(3)}  ${mark}`,
+    );
+  }
+
+  lines.push('');
+  lines.push(
+    result.verified
+      ? `Verified: the model reproduces all ${result.checked} reported scores.`
+      : `${result.checked - result.agreed} of ${result.checked} players do not match — ` +
+        'the point values are probably wrong. Set them explicitly under [scoring] in config.ini.',
+  );
+  return lines.join('\n');
+}
+
 export function registerRulesCommand(program: Command): void {
   program
     .command('rules')
     .description('Display the game rules')
+    .option('--verify [matchday]', 'Check the parsed point values against a finished matchday')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
+
+        if (opts.verify) {
+          const cache = { store: new CacheStore(community) };
+          const matchday = typeof opts.verify === 'string' ? parseInt(opts.verify, 10) : undefined;
+          status('Verifying scoring rules...');
+          const rules = await resolveRules(page, community, cache);
+          const grid = await fetchMatchdayBets(page, community, matchday, cache);
+          const leaderboard = await fetchLeaderboard(page, community, matchday, false, cache);
+          statusClear();
+
+          const result = verifyRules(grid, leaderboard, rules.values);
+          if (opts.json) {
+            emitJson({ community, rules, verification: result });
+          } else {
+            console.log(renderVerification(rules.values, result));
+          }
+          if (!result.verified) process.exitCode = 1;
+          return;
+        }
+
         status('Loading rules...');
         const data = await fetchRules(page, community);
         statusClear();
