@@ -34,6 +34,10 @@ import {
   fetchPlayers,
   fetchBonusQuestions,
   fetchMatchdayBets,
+  fetchMembers,
+  fetchBetsForMember,
+  placeBetsForMember,
+  resolveMember,
   placeBets,
   placeBonusBets,
   OVERVIEW_VIEW_OPTIONS,
@@ -434,6 +438,40 @@ server.registerTool(
 );
 
 server.registerTool(
+  'list_members',
+  {
+    description:
+      'ADMIN ONLY: list the community members with their tipperIds, and whether each is a dummy member with no login. Requires the logged-in user to be a Spielleiter. Use this to find the id or exact name before any of the other admin tools.',
+    inputSchema: {},
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async () => withFreshSession(async () => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    return jsonResult(await fetchMembers(page, community));
+  }),
+);
+
+server.registerTool(
+  'get_bets_for_member',
+  {
+    description:
+      "ADMIN ONLY: read another member's bets for a matchday through Tipps nachtragen. Requires Spielleiter rights.",
+    inputSchema: {
+      member: z.string().describe('Member name or tipperId, as listed by list_members.'),
+      matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
+    },
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async ({ member, matchday }) => withFreshSession(async () => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const resolved = resolveMember(await fetchMembers(page, community), member);
+    return jsonResult(await fetchBetsForMember(page, community, resolved, matchday));
+  }),
+);
+
+server.registerTool(
   'get_stats',
   {
     description: 'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
@@ -562,6 +600,50 @@ server.registerTool(
         });
   }),
 );
+
+if (!readOnly) {
+  server.registerTool(
+    'place_bets_for_member',
+    {
+      description:
+        "ADMIN ONLY and DESTRUCTIVE: submit bets on somebody else's account through Tipps nachtragen. Requires Spielleiter rights. This acts on another person's entry, so confirm with the user first and pass that person's exact name as confirm_member; a mismatch is refused and nothing is submitted. Use dry_run to preview. Format each bet as \"Home vs Away=H:G\".",
+      inputSchema: {
+        member: z.string().describe('Member name or tipperId, as listed by list_members.'),
+        confirm_member: z
+          .string()
+          .describe("The member's exact name, repeated as a deliberate confirmation of who is being acted for."),
+        bets: z.array(z.string()).min(1).describe('Bets as "Home vs Away=H:G".'),
+        matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
+        dry_run: z.boolean().optional().describe('Validate and report without submitting.'),
+      },
+      outputSchema: OUTPUT_SCHEMA,
+    },
+    async ({ member, confirm_member, bets, matchday, dry_run }) => {
+      const page = await getPage();
+      const community = await resolveCommunity(page);
+      const resolved = resolveMember(await fetchMembers(page, community), member);
+
+      // A second, explicit statement of who is being acted for: getting this
+      // wrong would place bets on the wrong person's account.
+      if (confirm_member.trim().toLowerCase() !== resolved.name.toLowerCase()) {
+        throw new Error(
+          `confirm_member ("${confirm_member}") does not match the resolved member ("${resolved.name}"). Nothing was submitted.`,
+        );
+      }
+
+      const placed = await placeBetsForMember(
+        page,
+        community,
+        resolved,
+        bets,
+        matchday,
+        !dry_run,
+        'mcp:place_bets_for_member',
+      );
+      return jsonResult({ success: !dry_run, dry_run: !!dry_run, member: resolved, placed });
+    },
+  );
+}
 
 if (!readOnly) {
   server.registerTool(

@@ -7,8 +7,10 @@ export type BetSource =
   | 'cli:bet'
   | 'cli:suggest'
   | 'cli:tui'
+  | 'cli:admin'
   | 'mcp:place_bets'
   | 'mcp:place_bonus_bets'
+  | 'mcp:place_bets_for_member'
   | 'unknown';
 
 export interface AuditBet {
@@ -27,6 +29,8 @@ export interface AuditRecord {
   dryRun: boolean;
   bets: AuditBet[];
   outcome: 'submitted' | 'dry-run' | 'intent' | `failed:${string}`;
+  /** Set when an admin placed these for somebody else. */
+  onBehalfOf?: string;
 }
 
 export function auditFile(community: string): string {

@@ -8,6 +8,8 @@ import {
   getRulesUrl,
   getScheduleUrl,
   getTableUrl,
+  getAdminMembersUrl,
+  getAdminTipsUrl,
 } from './url.js';
 import { loadCommunity, loadPlayer } from './config.js';
 import {
@@ -854,4 +856,230 @@ function normalizeBetCell(raw: string): string {
   const text = raw.replace(/\s+/g, '');
   const match = text.match(/(\d+):(\d+)/);
   return match ? `${match[1]}:${match[2]}` : '';
+}
+
+
+// ── Spielleiter (admin) ────────────────────────────────────────────
+//
+// Kicktipp lets a community admin fill in bets for another member through
+// "Tipps nachtragen". These functions all act with the admin's own session;
+// the member is named by the tipperId in the URL.
+
+export interface Member {
+  tipperId: string;
+  tippsaisonId: string;
+  name: string;
+  /** A placeholder member with no login of their own. */
+  dummy: boolean;
+}
+
+/** Read the community's member list, with the ids the admin pages need. */
+export async function fetchMembers(page: Page, community: string): Promise<Member[]> {
+  const $ = await loadPage(page, getAdminMembersUrl(community));
+  const members: Member[] = [];
+
+  $('#kicktipp-content a[href*="tipperId="]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const tipperId = new URL(href, 'https://x.invalid').searchParams.get('tipperId');
+    const tippsaisonId =
+      new URL(href, 'https://x.invalid').searchParams.get('tippsaisonId') || '';
+    if (!tipperId) return;
+    // The visible name is the row's first cell; the link itself usually just
+    // reads "Tipps nachtragen", so it is only a fallback.
+    const row = $(el).closest('tr');
+    const cellName = row.find('td').first().text().trim();
+    const name = (cellName || $(el).text().trim())
+      .replace(/\s*\(dummy\)\s*/i, '')
+      .trim();
+    if (!name) return;
+    if (members.some((m) => m.tipperId === tipperId)) return;
+    members.push({
+      tipperId,
+      tippsaisonId,
+      name,
+      dummy: /dummy/i.test(row.text()),
+    });
+  });
+
+  return members;
+}
+
+/** Resolve a member by numeric id or by name, and say so when ambiguous. */
+export function resolveMember(members: Member[], reference: string): Member {
+  const byId = members.find((m) => m.tipperId === reference);
+  if (byId) return byId;
+
+  const matches = members.filter(
+    (m) => m.name.toLowerCase() === reference.toLowerCase(),
+  );
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error(
+      `More than one member is called "${reference}". Use their tipperId instead: ` +
+        matches.map((m) => m.tipperId).join(', '),
+    );
+  }
+  throw new Error(
+    `No member "${reference}" in this community. Known members: ` +
+      members.map((m) => m.name).join(', '),
+  );
+}
+
+function parseEditableRows(
+  $: cheerio.CheerioAPI,
+): { editable: EditableMatch[]; bets: BetMatch[] } {
+  const editable: EditableMatch[] = [];
+  const bets: BetMatch[] = [];
+
+  $('#kicktipp-content tbody tr').each((_, tr) => {
+    const cols = $(tr).children('td');
+    if (cols.length < 4) return;
+    const betTd = $(cols[3]);
+    const heimInput = betTd.find('input[id$="_heimTipp"]');
+    const gastInput = betTd.find('input[id$="_gastTipp"]');
+    const home = $(cols[1]).text().trim();
+    const away = $(cols[2]).text().trim();
+    if (!home || !away) return;
+
+    const h = heimInput.attr('value') || '';
+    const g = gastInput.attr('value') || '';
+    bets.push({
+      date: $(cols[0]).text().trim(),
+      home,
+      away,
+      bet: h && g ? `${h}:${g}` : '-',
+      odds: cols.length > 4
+        ? (() => {
+            const [oh, od, oa] = parseOdds($, cols[4]);
+            return { home: oh, draw: od, away: oa };
+          })()
+        : { home: '-', draw: '-', away: '-' },
+    });
+
+    if (heimInput.length && gastInput.length) {
+      editable.push({
+        home,
+        away,
+        heimName: heimInput.attr('name')!,
+        gastName: gastInput.attr('name')!,
+      });
+    }
+  });
+
+  return { editable, bets };
+}
+
+/** One member's bets for a matchday, as the admin page shows them. */
+export async function fetchBetsForMember(
+  page: Page,
+  community: string,
+  member: Member,
+  matchday?: number,
+): Promise<{ member: Member; matches: BetMatch[] }> {
+  const $ = await loadPage(
+    page,
+    getAdminTipsUrl(community, member.tipperId, member.tippsaisonId, matchday),
+  );
+  return { member, matches: parseEditableRows($).bets };
+}
+
+/**
+ * Place bets on behalf of another member.
+ *
+ * Deliberately mirrors placeBets, including the audit record, so acting for
+ * someone else leaves the same trail as acting for yourself — with the
+ * member recorded alongside.
+ */
+export async function placeBetsForMember(
+  page: Page,
+  community: string,
+  member: Member,
+  bets: string[],
+  matchday?: number,
+  submit = true,
+  source: BetSource = 'unknown',
+): Promise<PlacedBet[]> {
+  if (submit) assertWritable('Placing bets for another member');
+
+  const $ = await loadPage(
+    page,
+    getAdminTipsUrl(community, member.tipperId, member.tippsaisonId, matchday),
+  );
+  const { editable } = parseEditableRows($);
+  if (!editable.length) {
+    throw new Error(`No editable matches on the Tipps-nachtragen page for ${member.name}.`);
+  }
+
+  const parsed: { entry: EditableMatch; h: number; g: number }[] = [];
+  const seen = new Set<string>();
+  for (const arg of bets) {
+    const { home, away, h, g } = parseBetArg(arg);
+    const key = `${home.toLowerCase()}|${away.toLowerCase()}`;
+    if (seen.has(key)) throw new Error(`Duplicate fixture: "${home} vs ${away}"`);
+    seen.add(key);
+    parsed.push({ entry: matchFixture(home, away, editable), h, g });
+  }
+
+  const placed: PlacedBet[] = [];
+  const audited: AuditBet[] = [];
+  for (const { entry, h, g } of parsed) {
+    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
+    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
+    const previousHome = $(`input[name="${escapeCssValue(entry.heimName)}"]`).attr('value') || '';
+    const previousAway = $(`input[name="${escapeCssValue(entry.gastName)}"]`).attr('value') || '';
+    if (heimEl) await heimEl.fill(String(h));
+    if (gastEl) await gastEl.fill(String(g));
+    placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
+    audited.push({
+      fixture: `${entry.home} vs ${entry.away}`,
+      bet: `${h}:${g}`,
+      previous: previousHome && previousAway ? `${previousHome}:${previousAway}` : null,
+    });
+  }
+
+  // The submission must carry the member's id, or Kicktipp would apply these
+  // bets to the admin's own entry. Rather than trust the page, check that the
+  // id travels either in the form action or as a hidden field.
+  if (submit) {
+    const action = $('#kicktipp-content form').attr('action') || '';
+    const hasHiddenId = $(`#kicktipp-content form input[name="tipperId"]`).length > 0;
+    if (!action.includes(`tipperId=${member.tipperId}`) && !hasHiddenId) {
+      throw new Error(
+        `Refusing to submit: the Tipps-nachtragen form for ${member.name} does not carry their ` +
+          'tipperId, so the bets could land on your own entry. This usually means Kicktipp ' +
+          'changed the page; please report it.',
+      );
+    }
+  }
+
+  const record = {
+    at: new Date().toISOString(),
+    source,
+    community,
+    matchday: matchday ?? null,
+    kind: 'match' as const,
+    dryRun: !submit,
+    bets: audited,
+    onBehalfOf: member.name,
+  };
+
+  if (!submit) {
+    appendAudit({ ...record, outcome: 'dry-run' });
+    return placed;
+  }
+
+  appendAudit({ ...record, outcome: 'intent' });
+  try {
+    await page.click('button[name="submitbutton"]');
+  } catch (err) {
+    appendAudit({
+      ...record,
+      at: new Date().toISOString(),
+      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
+    });
+    throw err;
+  }
+  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+
+  return placed;
 }

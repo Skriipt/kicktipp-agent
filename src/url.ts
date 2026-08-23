@@ -13,7 +13,9 @@ type RouteKey =
   | 'overview'
   | 'schedule'
   | 'table'
-  | 'rules';
+  | 'rules'
+  | 'adminMembers'
+  | 'adminTips';
 
 interface Route {
   de: string;
@@ -42,6 +44,16 @@ const ROUTES: Record<RouteKey, Route> = {
   schedule: { de: '/:community/tippspielplan', en: '/:community/schedule' },
   table: { de: '/:community/tabellen', en: '/:community/tables' },
   rules: { de: '/:community/spielregeln', en: '/:community/rules' },
+  // Kicktipp exposes no English aliases for the Spielleiter pages, so the
+  // German paths are used on both hosts.
+  adminMembers: {
+    de: '/:community/spielleiter/mitgliederliste',
+    en: '/:community/spielleiter/mitgliederliste',
+  },
+  adminTips: {
+    de: '/:community/spielleiter/tippsnachtragen',
+    en: '/:community/spielleiter/tippsnachtragen',
+  },
 };
 
 function normalizeBaseUrl(raw: string): string {
@@ -140,6 +152,26 @@ export function getTableUrl(community: string, option?: 'home' | 'away'): string
 
 export function getRulesUrl(community: string): string {
   return buildUrl('rules', community);
+}
+
+export function getAdminMembersUrl(community: string): string {
+  return buildUrl('adminMembers', community);
+}
+
+export function getAdminTipsUrl(
+  community: string,
+  tipperId: string,
+  tippsaisonId: string,
+  matchday?: number,
+  bonus = false,
+): string {
+  const params = new URLSearchParams({ tipperId, tippsaisonId });
+  if (bonus) params.set('bonus', 'true');
+  if (matchday !== undefined) {
+    assertMatchday(matchday);
+    params.set('spieltagIndex', String(matchday));
+  }
+  return buildUrl('adminTips', community, params);
 }
 
 function allSpellings(route: Route): string[] {
