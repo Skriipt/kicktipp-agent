@@ -7,6 +7,9 @@ import { fetchBets, placeBets } from '../core.js';
 import { resolveRules } from '../rules/resolve.js';
 import { toOddsMatches } from '../analytics/odds.js';
 import { STRATEGIES, suggestBets, type StrategyName, type SuggestedBet } from '../analytics/strategies.js';
+import { offlineMatchday, requireCached } from '../cache/offline.js';
+import { resolveRulesFromCache } from '../rules/resolve.js';
+import { loadCommunity } from '../config.js';
 
 function render(
   suggestions: SuggestedBet[],
@@ -48,12 +51,33 @@ export function registerSuggestCommand(program: Command): void {
     .option('--place', 'Submit the slip after confirmation')
     .option('--replace', 'Also overwrite matches that already have a bet')
     .option('--yes', 'Skip the confirmation prompt (for scripts)')
+    .option('--offline', 'Use only cached data; make no requests (implies no --place)')
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       const strategy = opts.strategy as StrategyName;
       if (!STRATEGIES.includes(strategy)) {
         console.error(`Unknown strategy '${strategy}'. Options: ${STRATEGIES.join(', ')}`);
         process.exit(1);
+      }
+
+      if (opts.offline) {
+        if (opts.place) {
+          console.error('--offline cannot be combined with --place.');
+          process.exit(1);
+        }
+        const community = loadCommunity();
+        if (!community) {
+          console.error('No community set. Run `kicktipp set-community` first.');
+          process.exit(1);
+        }
+        const store = new CacheStore(community);
+        const matchday = offlineMatchday(store, opts.matchday);
+        const { matches } = requireCached(store, 'bets', matchday);
+        const rules = resolveRulesFromCache(store);
+        const suggestions = suggestBets(toOddsMatches(matches), rules.values, strategy);
+        if (opts.json) console.log(JSON.stringify({ strategy, rules, suggestions }, null, 2));
+        else console.log(render(suggestions, strategy, rules.warning));
+        return;
       }
 
       const { page } = await launchBrowser();

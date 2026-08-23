@@ -78,7 +78,7 @@ function render(stats: SeasonStats, rulesNote: string | undefined): string {
     }
     lines.push('');
 
-    lines.push('Your predictions vs. what happened');
+    lines.push(`${stats.player}'s predictions vs. what happened`);
     lines.push(
       `  Home wins      ${pct(betProfile.predicted.home)} predicted   ${pct(betProfile.actual.home)} actual`,
     );
@@ -123,6 +123,7 @@ export function registerStatsCommand(program: Command): void {
     .description('Season analytics for you or another player, computed from the local cache')
     .option('--player <name>', 'Player to analyse (default: your saved player)')
     .option('--compare <name>', 'Show a second player side by side')
+    .option('--offline', 'Accepted for symmetry; stats always reads the cache only')
     .option('--json', 'Output raw JSON')
     .action((opts) => {
       const community = loadCommunity();

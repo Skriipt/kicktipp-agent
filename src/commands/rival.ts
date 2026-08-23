@@ -1,13 +1,15 @@
 import { Command } from 'commander';
 import { launchBrowser } from '../browser.js';
 import { ensureCommunity } from '../shared.js';
-import { loadPlayer } from '../config.js';
+import { loadCommunity, loadPlayer } from '../config.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { CacheStore } from '../cache/store.js';
 import { fetchLeaderboard, fetchMatchdayBets } from '../core.js';
 import { resolveRules } from '../rules/resolve.js';
 import { analyseRival, type RivalAnalysis } from '../analytics/rivals.js';
 import { gapBeforeMatchday } from '../analytics/gap.js';
+import { offlineMatchday, requireCached } from '../cache/offline.js';
+import { resolveRulesFromCache } from '../rules/resolve.js';
 
 function sign(value: number): string {
   return value > 0 ? `+${value}` : String(value);
@@ -63,8 +65,37 @@ export function registerRivalCommand(program: Command): void {
     .description('Work out what it would take to overtake another player')
     .argument('<name>', 'Player to compare against')
     .option('--matchday <n>', 'Matchday number (1-34). Omit for the current one.', parseInt)
+    .option('--offline', 'Use only cached data; make no requests')
     .option('--json', 'Output raw JSON')
     .action(async (name: string, opts) => {
+      if (opts.offline) {
+        const community = loadCommunity();
+        if (!community) {
+          console.error('No community set. Run `kicktipp set-community` first.');
+          process.exit(1);
+        }
+        const player = loadPlayer();
+        if (!player) {
+          console.error('No player set. Run `kicktipp set-player` first.');
+          process.exit(1);
+        }
+        const store = new CacheStore(community);
+        const matchday = offlineMatchday(store, opts.matchday);
+        const grid = requireCached(store, 'matchdayBets', matchday);
+        const leaderboard = store.read('leaderboard', matchday)?.data;
+        const rules = resolveRulesFromCache(store);
+        const analysis = analyseRival(
+          grid,
+          player,
+          name,
+          rules.values,
+          gapBeforeMatchday(leaderboard, player, name),
+        );
+        if (opts.json) console.log(JSON.stringify({ rules, analysis }, null, 2));
+        else console.log(render(analysis, rules.warning));
+        return;
+      }
+
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);

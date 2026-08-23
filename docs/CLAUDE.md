@@ -18,6 +18,24 @@ src/
   http/
     cookie-jar.ts             # Host-scoped cookie store
     page.ts                   # fetch-based page shim (navigate, fill, submit)
+  cache/
+    paths.ts                  # Platform data directory
+    store.ts                  # Versioned JSON snapshot store
+    cached-fetch.ts           # Write-through wrapper + offline mode
+    offline.ts                # Cache-only reads for --offline commands
+    sync.ts                   # Season backfill, shared by CLI and MCP
+  rules/
+    scoring.ts                # ScoringRules, scoreBet, hit classification
+    parse-rules.ts            # Reads point values off the rules page
+    resolve.ts                # config override -> parsed -> defaults
+  analytics/
+    season.ts                 # Assembles a season from the cache
+    season-stats.ts           # Form, breakdown, bet profile, consistency
+    rivals.ts                 # Points swing and overtake scenarios
+    gap.ts                    # Points gap before a matchday
+    odds.ts                   # Implied probabilities from decimal odds
+    score-map.ts              # Scoreline frequencies and typical scores
+    strategies.ts             # safe / ev / contrarian bet slips
   helpers/
     parse-bet-arg.ts          # parseBetArg + matchFixture
     spinner.ts                # Terminal spinner (ora wrapper)
@@ -31,6 +49,11 @@ src/
     bet.ts                    # unified bet command (interactive, fixture, bonus)
     today.ts                  # today command (today's matches + bet status)
     guide.ts                  # guide command (detailed usage for LLM agents)
+    sync.ts                   # sync command (fill the local cache)
+    cache.ts                  # cache status / cache clear
+    stats.ts                  # stats command (season analytics)
+    rival.ts                  # rival command (overtake scenarios)
+    suggest.ts                # suggest command (odds-based bet slips)
 tests/
   parse-bet-arg.test.ts       # parseBetArg + matchFixture tests
   url.test.ts                 # Route table + URL builder tests
@@ -39,6 +62,12 @@ tests/
   form-serialize.test.ts      # Form serialization and editing
   load-page.test.ts           # Auth / not-found / admin error classification
   session.test.ts             # Login + session restore round-trip
+  cache-store.test.ts         # Snapshot store, versioning, write-through
+  scoring.test.ts             # Hit classification and rules parsing
+  season-stats.test.ts        # Analytics against hand-checked fixtures
+  rivals.test.ts              # Swing and overtake scenarios
+  matchday-bets.test.ts       # Per-player bet grid parser
+  suggest.test.ts             # Odds maths and the three strategies
   helpers/
     mock-fetch.ts             # Injected fetch used by the tests above
 package.json
@@ -175,3 +204,32 @@ Tables:       /{community}/tabellen        Rules:       /{community}/spielregeln
 - Matchday range: 1-34 (Bundesliga season)
 - Login form: `input[name="kennung"]`, `input[name="passwort"]`
 - Config shared at `~/.config/kicktipp-agent/config.ini`
+
+## Analytics Layer
+
+Everything below the HTTP layer is pure and testable without a network.
+
+- **Cache (`src/cache/`)** — versioned JSON snapshots under the platform data
+  directory, one directory per community, atomic 0600 writes. The `core.ts`
+  fetch functions write through on success, so ordinary use fills it as a
+  side effect; `--offline` serves the snapshots instead. Variants that share a
+  URL but differ in payload (bonus leaderboard, home/away tables, alternate
+  overview views) are deliberately not cached so they cannot overwrite the
+  canonical copy.
+- **Rules (`src/rules/`)** — the community's point values, resolved from a
+  config override, then the parsed rules page, then Kicktipp's 4/3/2 defaults.
+  `ResolvedRules.source` records which, and every consumer surfaces it.
+  Only the standard three-tier scheme is modelled; odds-based or multiplier
+  scoring is detected and flagged rather than scored wrongly.
+- **Analytics (`src/analytics/`)** — pure functions over cached data. Stats
+  degrade per metric and report `completeness`. Another player's hit breakdown
+  comes from the per-player bet grid, never from the account owner's own bets
+  page. Rival scenarios evaluate representative scorelines per outcome class,
+  which is enough because the rules can only distinguish exact / difference /
+  tendency / miss.
+
+### New MCP tools
+
+`get_stats`, `sync_history`, `get_rival_analysis`, `suggest_bets`.
+`suggest_bets` is strictly read-only: it returns a slip plus an instruction to
+confirm with the user, and has no code path into `placeBets`.
