@@ -14,6 +14,8 @@ import { registerRulesCommand } from './commands/rules.js';
 import { registerBetCommand } from './commands/bet.js';
 import { registerTodayCommand } from './commands/today.js';
 import { registerGuideCommand } from './commands/guide.js';
+import { registerSyncCommand } from './commands/sync.js';
+import { registerCacheCommand } from './commands/cache.js';
 
 const program = new Command();
 
@@ -100,6 +102,8 @@ registerRulesCommand(program);
 registerBetCommand(program);
 registerTodayCommand(program);
 registerGuideCommand(program);
+registerSyncCommand(program);
+registerCacheCommand(program);
 
 export { program, ensureCommunity, ask };
 
