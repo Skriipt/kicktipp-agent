@@ -13,6 +13,7 @@ import { syncSeason } from './cache/sync.js';
 import { isReadOnly } from './read-only.js';
 import { buildDeadlineReport } from './analytics/deadline.js';
 import { readAudit } from './audit/log.js';
+import { findTargetCombinations, projectStandings } from './analytics/scenarios.js';
 import { analyseRival } from './analytics/rivals.js';
 import { gapBeforeMatchday } from './analytics/gap.js';
 import { resolveRules } from './rules/resolve.js';
@@ -264,6 +265,42 @@ server.tool(
     const community = await resolveCommunity(page);
     const data = await fetchBonusQuestions(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }),
+);
+
+server.tool(
+  'get_standings_scenarios',
+  "Project the whole leaderboard under hypothetical results, or search for what has to happen for a player to reach a target rank. This answers questions like 'what do I need this weekend to take first?' in one call. Matches left unspecified come back as a rank range rather than a number, and the projection is exact only when every open match is given. Check the note field: before the deadline Kicktipp hides everyone's bets and nothing can be projected.",
+  {
+    results: z
+      .array(z.object({
+        home: z.string().describe('Home team, exactly as get_bets names it.'),
+        away: z.string().describe('Away team.'),
+        result: z.string().describe('Hypothetical result as "H:G", e.g. "2:1".'),
+      }))
+      .optional()
+      .describe('Hypothetical results. Omit for the full open-ended range.'),
+    matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
+    target_rank: z.number().int().min(1).optional().describe('Search for combinations reaching this rank instead of projecting.'),
+    player: z.string().optional().describe('Player for target_rank (default: the configured player).'),
+  },
+  async ({ results, matchday, target_rank, player }) => withFreshSession(async () => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const cache = { store: new CacheStore(community) };
+    const grid = await fetchMatchdayBets(page, community, matchday, cache);
+    const leaderboard = await fetchLeaderboard(page, community, matchday, false, cache);
+    const rules = await resolveRules(page, community, cache);
+
+    if (target_rank !== undefined) {
+      const who = player || loadPlayer();
+      if (!who) throw new Error('No player set. Call get_players then set_player, or pass a player.');
+      const search = findTargetCombinations(grid, leaderboard, rules.values, who, target_rank);
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, search }, null, 2) }] };
+    }
+
+    const projection = projectStandings(grid, leaderboard, rules.values, results ?? []);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, projection }, null, 2) }] };
   }),
 );
 
