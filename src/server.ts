@@ -5,6 +5,11 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Page, launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials } from './config.js';
+import { CacheStore } from './cache/store.js';
+import { loadSeason } from './analytics/season.js';
+import { computeSeasonStats } from './analytics/season-stats.js';
+import { resolveRulesFromCache } from './rules/resolve.js';
+import { syncSeason } from './cache/sync.js';
 import {
   AuthError,
   resolveCommunity,
