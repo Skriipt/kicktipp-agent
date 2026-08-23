@@ -132,7 +132,7 @@ export function registerSuggestCommand(program: Command): void {
         }
 
         const args = toPlace.map((s) => `${s.home} vs ${s.away}=${s.bet}`);
-        const placed = await placeBets(page, community, args, opts.matchday, true);
+        const placed = await placeBets(page, community, args, opts.matchday, true, 'cli:suggest');
         console.log(`Submitted ${placed.length} bet(s).`);
       } finally {
         await page.close();

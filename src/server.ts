@@ -12,6 +12,7 @@ import { resolveRulesFromCache } from './rules/resolve.js';
 import { syncSeason } from './cache/sync.js';
 import { isReadOnly } from './read-only.js';
 import { buildDeadlineReport } from './analytics/deadline.js';
+import { readAudit } from './audit/log.js';
 import { analyseRival } from './analytics/rivals.js';
 import { gapBeforeMatchday } from './analytics/gap.js';
 import { resolveRules } from './rules/resolve.js';
@@ -266,6 +267,23 @@ server.tool(
 );
 
 server.tool(
+  'get_bet_log',
+  'Show what this agent has actually submitted to Kicktipp, with timestamps and which entry point did it. Use this to answer "what have you placed?" from the record rather than from memory. Records marked dry-run or intent never reached Kicktipp.',
+  {
+    matchday: z.number().int().min(1).max(34).optional().describe('Only this matchday.'),
+    include_all: z.boolean().optional().describe('Include dry runs, intents and failures (default: submitted only).'),
+  },
+  async ({ matchday, include_all }) => {
+    const community = loadCommunity();
+    if (!community) throw new Error('No community set. Call get_communities then set_community.');
+    let records = readAudit(community);
+    if (!include_all) records = records.filter((r) => r.outcome === 'submitted');
+    if (matchday !== undefined) records = records.filter((r) => r.matchday === matchday);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ community, records }, null, 2) }] };
+  },
+);
+
+server.tool(
   'get_deadline',
   "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Times are interpreted in the time_zone field's zone, which is assumed rather than reported by Kicktipp — mention it if a countdown looks surprising.",
   {
@@ -417,7 +435,7 @@ if (!readOnly) {
     async ({ bets, matchday, dry_run }) => {
       const page = await getPage();
       const community = await resolveCommunity(page);
-      const placed = await placeBets(page, community, bets, matchday, !dry_run);
+      const placed = await placeBets(page, community, bets, matchday, !dry_run, 'mcp:place_bets');
       return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
     },
   );
@@ -434,7 +452,7 @@ if (!readOnly) {
     async ({ bets, dry_run }) => {
       const page = await getPage();
       const community = await resolveCommunity(page);
-      const placed = await placeBonusBets(page, community, bets, !dry_run);
+      const placed = await placeBonusBets(page, community, bets, !dry_run, 'mcp:place_bonus_bets');
       return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
     },
   );

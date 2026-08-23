@@ -22,6 +22,7 @@ import { registerRivalCommand } from './commands/rival.js';
 import { registerSuggestCommand } from './commands/suggest.js';
 import { registerDeadlineCommand } from './commands/deadline.js';
 import { registerNotifyCommand, registerRemindCommand } from './commands/remind.js';
+import { registerLogCommand } from './commands/log.js';
 
 const program = new Command();
 
@@ -128,6 +129,7 @@ registerSuggestCommand(program);
 registerDeadlineCommand(program);
 registerRemindCommand(program);
 registerNotifyCommand(program);
+registerLogCommand(program);
 
 export { program, ensureCommunity, ask };
 

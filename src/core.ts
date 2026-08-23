@@ -19,6 +19,7 @@ import { escapeCssValue } from './helpers/escape-css-value.js';
 import { throughCache, type CacheOptions } from './cache/cached-fetch.js';
 import { assertWritable } from './read-only.js';
 import { parseMatchDate } from './helpers/match-date.js';
+import { appendAudit, type AuditBet, type BetSource } from './audit/log.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
 
@@ -540,7 +541,14 @@ export async function fetchPlayers(page: Page, community: string): Promise<strin
 
 // ── Write operations ───────────────────────────────────────────────
 
-export async function placeBets(page: Page, community: string, bets: string[], matchday?: number, submit = true): Promise<PlacedBet[]> {
+export async function placeBets(
+  page: Page,
+  community: string,
+  bets: string[],
+  matchday?: number,
+  submit = true,
+  source: BetSource = 'unknown',
+): Promise<PlacedBet[]> {
   // Checked here as well as at the entry points: this is the last line before
   // anything reaches Kicktipp.
   if (submit) assertWritable('Placing bets');
@@ -578,17 +586,52 @@ export async function placeBets(page: Page, community: string, bets: string[], m
   }
 
   const placed: PlacedBet[] = [];
+  const audited: AuditBet[] = [];
   for (const { entry, h, g } of parsed) {
     const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
     const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
+    // Read what was on the form before overwriting it, so the log can undo.
+    const previousHome = $(`input[name="${escapeCssValue(entry.heimName)}"]`).attr('value') || '';
+    const previousAway = $(`input[name="${escapeCssValue(entry.gastName)}"]`).attr('value') || '';
     if (heimEl) await heimEl.fill(String(h));
     if (gastEl) await gastEl.fill(String(g));
     placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
+    audited.push({
+      fixture: `${entry.home} vs ${entry.away}`,
+      bet: `${h}:${g}`,
+      previous: previousHome && previousAway ? `${previousHome}:${previousAway}` : null,
+    });
   }
 
-  if (submit) {
-    await page.click('button[name="submitbutton"]');
+  const record = {
+    at: new Date().toISOString(),
+    source,
+    community,
+    matchday: matchday ?? null,
+    kind: 'match' as const,
+    dryRun: !submit,
+    bets: audited,
+  };
+
+  if (!submit) {
+    appendAudit({ ...record, outcome: 'dry-run' });
+    return placed;
   }
+
+  // Written before and after: if the process dies mid-submit, the intent
+  // record still shows what was about to happen.
+  appendAudit({ ...record, outcome: 'intent' });
+  try {
+    await page.click('button[name="submitbutton"]');
+  } catch (err) {
+    appendAudit({
+      ...record,
+      at: new Date().toISOString(),
+      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
+    });
+    throw err;
+  }
+  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
 
   return placed;
 }
@@ -627,7 +670,13 @@ export async function fetchBonusQuestions(page: Page, community: string): Promis
   return questions;
 }
 
-export async function placeBonusBets(page: Page, community: string, bets: string[], submit = true): Promise<PlacedBonusBet[]> {
+export async function placeBonusBets(
+  page: Page,
+  community: string,
+  bets: string[],
+  submit = true,
+  source: BetSource = 'unknown',
+): Promise<PlacedBonusBet[]> {
   if (submit) assertWritable('Placing bonus bets');
   const questions = await fetchBonusQuestions(page, community);
   if (!questions.length) throw new Error('No editable bonus questions found.');
@@ -679,9 +728,33 @@ export async function placeBonusBets(page: Page, community: string, bets: string
     }
   }
 
-  if (submit) {
-    await page.click('button[name="submitbutton"]');
+  const record = {
+    at: new Date().toISOString(),
+    source,
+    community,
+    matchday: null,
+    kind: 'bonus' as const,
+    dryRun: !submit,
+    bets: placed.map((p) => ({ fixture: p.question, bet: p.answer, previous: null })),
+  };
+
+  if (!submit) {
+    appendAudit({ ...record, outcome: 'dry-run' });
+    return placed;
   }
+
+  appendAudit({ ...record, outcome: 'intent' });
+  try {
+    await page.click('button[name="submitbutton"]');
+  } catch (err) {
+    appendAudit({
+      ...record,
+      at: new Date().toISOString(),
+      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
+    });
+    throw err;
+  }
+  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
 
   return placed;
 }

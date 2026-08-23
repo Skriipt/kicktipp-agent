@@ -11,6 +11,8 @@ import {
 } from '../helpers/parse-bet-arg.js';
 import { escapeCssValue } from '../helpers/escape-css-value.js';
 import { assertWritable } from '../read-only.js';
+import { placeBets } from '../core.js';
+import { appendAudit } from '../audit/log.js';
 
 // ── Bonus question types and helpers ───────────────────────────────
 
@@ -174,7 +176,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
     return;
   }
 
-  let changed = false;
+  const chosen: string[] = [];
   for (const row of editable) {
     let prompt = `  ${row.date} ${row.home} vs ${row.away} `;
     if (row.current) prompt += `[${row.current}] `;
@@ -192,88 +194,43 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
       console.log('    Invalid format, skipping.');
       continue;
     }
-    const heimEl = await page.$(`input[name="${escapeCssValue(row.heimName)}"]`);
-    const gastEl = await page.$(`input[name="${escapeCssValue(row.gastName)}"]`);
-    if (heimEl) await heimEl.fill(String(h));
-    if (gastEl) await gastEl.fill(String(g));
-    changed = true;
+    chosen.push(`${row.home} vs ${row.away}=${h}:${g}`);
   }
 
-  if (changed) {
-    await page.click('button[name="submitbutton"]');
-    console.log('\nBets saved.');
-  } else {
+  if (!chosen.length) {
     console.log('\nNo changes made.');
+    return;
   }
+
+  // Same submission path as the non-interactive form, so the log records it.
+  await placeBets(page, community, chosen, matchday, true, 'cli:bet');
+  console.log('\nBets saved.');
 }
 
 async function fixtureBets(page: any, community: string, bets: string[], matchday?: number): Promise<void> {
+  // Delegates to core.placeBets rather than repeating its fixture matching
+  // and form filling, so this path is validated and audited like every other.
   status('Loading bets...');
-  await page.goto(getPredictUrl(community, matchday));
+  const placed = await placeBets(page, community, bets, matchday, true, 'cli:bet');
   statusClear();
-
-  const $ = cheerio.load(await page.content());
-  const tbody = $('#kicktipp-content tbody');
-  if (!tbody.length) {
-    console.log('No matches found.');
-    return;
+  for (const bet of placed) {
+    console.log(`  ${bet.home} vs ${bet.away} - ${bet.homeGoals}:${bet.awayGoals}`);
   }
-
-  const editable: EditableMatch[] = [];
-  tbody.find('tr').each((_, tr) => {
-    const cols = $(tr).find('td');
-    if (cols.length < 5) return;
-    const betTd = $(cols[3]);
-    if (betTd.hasClass('nichttippbar')) return;
-    const heimInput = betTd.find('input[id$="_heimTipp"]');
-    const gastInput = betTd.find('input[id$="_gastTipp"]');
-    if (!heimInput.length || !gastInput.length) return;
-    editable.push({
-      home: $(cols[1]).text().trim(),
-      away: $(cols[2]).text().trim(),
-      heimName: heimInput.attr('name')!,
-      gastName: gastInput.attr('name')!,
-    });
-  });
-
-  if (!editable.length) {
-    console.log('No editable matches found.');
-    return;
-  }
-
-  const parsed: { entry: EditableMatch; h: number; g: number }[] = [];
-  const seen = new Set<string>();
-  for (const arg of bets) {
-    const { home, away, h, g } = parseBetArg(arg);
-    const key = `${home.toLowerCase()}|${away.toLowerCase()}`;
-    if (seen.has(key)) {
-      console.error(`Duplicate fixture: "${home} vs ${away}"`);
-      process.exit(1);
-    }
-    seen.add(key);
-    const entry = matchFixture(home, away, editable);
-    parsed.push({ entry, h, g });
-  }
-
-  for (const { entry, h, g } of parsed) {
-    console.log(`  ${entry.home} vs ${entry.away} - ${h}:${g}`);
-    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
-    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
-    if (heimEl) await heimEl.fill(String(h));
-    if (gastEl) await gastEl.fill(String(g));
-  }
-
-  await page.click('button[name="submitbutton"]');
   console.log('\nBets saved.');
 }
 
 // ── Bonus betting helpers ──────────────────────────────────────────
 
+export interface AppliedBonusBet {
+  question: string;
+  answer: string;
+}
+
 async function bonusBetsNonInteractive(
   page: any,
   questions: BonusQuestion[],
   bets: string[],
-): Promise<void> {
+): Promise<AppliedBonusBet[]> {
   interface ParsedBet {
     selectName: string;
     value: string;
@@ -326,17 +283,20 @@ async function bonusBetsNonInteractive(
     }
   }
 
+  const applied: AppliedBonusBet[] = [];
   for (const { selectName, value, questionText, answerText } of parsed) {
     console.log(`  ${questionText} → ${answerText}`);
+    applied.push({ question: questionText, answer: answerText });
     await page.selectOption(`select[name="${escapeCssValue(selectName)}"]`, value);
   }
+  return applied;
 }
 
 async function bonusBetsInteractive(
   page: any,
   questions: BonusQuestion[],
-): Promise<boolean> {
-  let changed = false;
+): Promise<AppliedBonusBet[]> {
+  const applied: AppliedBonusBet[] = [];
   for (const q of questions) {
     console.log(`\n  ${q.question}`);
 
@@ -371,10 +331,10 @@ async function bonusBetsInteractive(
         sel.options[idx].value,
       );
       console.log(`    → ${sel.options[idx].text}`);
-      changed = true;
+      applied.push({ question: q.question, answer: sel.options[idx].text });
     }
   }
-  return changed;
+  return applied;
 }
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
@@ -391,21 +351,40 @@ async function bonusBets(page: any, community: string, bets: string[]): Promise<
     return;
   }
 
-  let changed = false;
+  const applied =
+    bets && bets.length > 0
+      ? await bonusBetsNonInteractive(page, questions, bets)
+      : await bonusBetsInteractive(page, questions);
 
-  if (bets && bets.length > 0) {
-    await bonusBetsNonInteractive(page, questions, bets);
-    changed = true;
-  } else {
-    changed = await bonusBetsInteractive(page, questions);
-  }
-
-  if (changed) {
-    await page.click('button[name="submitbutton"]');
-    console.log('\nBonus bets saved.');
-  } else {
+  if (!applied.length) {
     console.log('\nNo changes made.');
+    return;
   }
+
+  // The bonus flow drives the form directly rather than going through
+  // core.placeBonusBets, so it writes its own audit record.
+  const record = {
+    at: new Date().toISOString(),
+    source: 'cli:bet' as const,
+    community,
+    matchday: null,
+    kind: 'bonus' as const,
+    dryRun: false,
+    bets: applied.map((a) => ({ fixture: a.question, bet: a.answer, previous: null })),
+  };
+  appendAudit({ ...record, outcome: 'intent' });
+  try {
+    await page.click('button[name="submitbutton"]');
+  } catch (err) {
+    appendAudit({
+      ...record,
+      at: new Date().toISOString(),
+      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
+    });
+    throw err;
+  }
+  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+  console.log('\nBonus bets saved.');
 }
 
 // ── Command registration ───────────────────────────────────────────
