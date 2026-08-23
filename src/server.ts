@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Page, launchBrowser } from './browser.js';
-import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials } from './config.js';
+import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials, getActiveProfile } from './config.js';
 import { CacheStore } from './cache/store.js';
 import { loadSeason } from './analytics/season.js';
 import { computeSeasonStats } from './analytics/season-stats.js';
@@ -94,6 +94,7 @@ server.tool(
         type: 'text',
         text: JSON.stringify({
           read_only: readOnly,
+          profile: getActiveProfile(),
           credentials_saved: credentials,
           community: community || null,
           player: player || null,

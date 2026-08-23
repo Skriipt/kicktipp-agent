@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { saveCommunity, savePlayer, logout } from './config.js';
+import {
+  saveCommunity,
+  savePlayer,
+  logout,
+  listProfiles,
+  setActiveProfile,
+  setCommunityOverride,
+  getActiveProfile,
+} from './config.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
 import { ask, ensureCommunity } from './shared.js';
 import { statusClear } from './helpers/spinner.js';
@@ -53,7 +61,37 @@ async function setPlayerInteractive(page: any, community: string): Promise<void>
 program
   .name('kicktipp')
   .description('CLI tool for kicktipp.com')
-  .version('1.0.0');
+  .version('1.0.0')
+  .option('-c, --community <slug>', 'Act on this community instead of the saved default')
+  .option('-p, --profile <name>', 'Use this config profile (a separate account and session)')
+  .hook('preAction', (command) => {
+    // Applied before every subcommand so the flags work everywhere without
+    // each command having to know about them.
+    const opts = command.opts();
+    if (opts.profile) setActiveProfile(opts.profile);
+    if (opts.community) setCommunityOverride(opts.community);
+  });
+
+program
+  .command('profiles')
+  .description('List the configured profiles')
+  .option('--json', 'Output raw JSON')
+  .action((opts) => {
+    const profiles = listProfiles();
+    const active = getActiveProfile();
+    if (opts.json) {
+      emitJson({ active, profiles });
+      return;
+    }
+    if (!profiles.length) {
+      console.log('No profiles configured. The default [auth]/[community]/[player] sections are in use.');
+      console.log('Add one as a [profile.<name>] section in ~/.config/kicktipp-agent/config.ini.');
+      return;
+    }
+    for (const name of profiles) {
+      console.log(`${name === active ? '*' : ' '} ${name}`);
+    }
+  });
 
 program
   .command('logout')

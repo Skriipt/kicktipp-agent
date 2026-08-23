@@ -7,7 +7,84 @@ import readline from 'readline';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
+
+// ── Profiles ────────────────────────────────────────────────────────
+
+/**
+ * A profile is one Kicktipp account plus its saved community and player,
+ * stored as a [profile.<name>] section. The classic un-prefixed [auth],
+ * [community] and [player] sections remain the default profile, so existing
+ * configs keep working untouched.
+ */
+let activeProfile: string | null = null;
+
+export function setActiveProfile(name: string | null): void {
+  activeProfile = name;
+}
+
+export function getActiveProfile(): string | null {
+  return activeProfile ?? process.env.KICKTIPP_PROFILE ?? null;
+}
+
+/** Community override for a single invocation (the --community flag). */
+let communityOverride: string | null = null;
+
+export function setCommunityOverride(name: string | null): void {
+  communityOverride = name;
+}
+
+/**
+ * `ini` nests dotted section names, so [profile.work] parses to
+ * config.profile.work. The flat key is still accepted for robustness.
+ */
+function readProfileSection(config: Record<string, any>, name: string): Record<string, any> | undefined {
+  return config.profile?.[name] ?? config[`profile.${name}`];
+}
+
+function writeProfileSection(
+  config: Record<string, any>,
+  name: string,
+  patch: Record<string, any>,
+): void {
+  const existing = readProfileSection(config, name) ?? {};
+  const merged = { ...existing, ...patch };
+  if (config[`profile.${name}`]) config[`profile.${name}`] = merged;
+  else config.profile = { ...(config.profile ?? {}), [name]: merged };
+}
+
+function profileSection(config: Record<string, any>): Record<string, any> | null {
+  const name = getActiveProfile();
+  if (!name) return null;
+  const section = readProfileSection(config, name);
+  if (!section) {
+    throw new Error(
+      `No profile '${name}' in the config. Add a [profile.${name}] section, or run \`kicktipp profiles\` to see what exists.`,
+    );
+  }
+  return section;
+}
+
+/** Session cookies are per profile so two accounts never share a jar. */
+export function sessionFile(): string {
+  const name = getActiveProfile();
+  return name
+    ? path.join(CONFIG_DIR, `session-${name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
+    : path.join(CONFIG_DIR, 'session.json');
+}
+
+/** Kept for callers that want the default profile's path specifically. */
 export const SESSION_FILE = path.join(CONFIG_DIR, 'session.json');
+
+export function listProfiles(): string[] {
+  const config = readConfig();
+  const names = new Set<string>();
+  for (const key of Object.keys(config.profile ?? {})) names.add(key);
+  for (const key of Object.keys(config)) {
+    const match = key.match(/^profile\.(.+)$/);
+    if (match) names.add(match[1]);
+  }
+  return Array.from(names).sort();
+}
 
 // ── Password encryption ────────────────────────────────────────────
 
@@ -62,6 +139,10 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
   }
   const config = readConfig();
+  const profile = profileSection(config);
+  if (profile?.email && profile?.password) {
+    return { email: profile.email, password: decrypt(profile.password) };
+  }
   if (config.auth?.email && config.auth?.password) {
     const password = decrypt(config.auth.password);
     // Migrate plaintext passwords to encrypted on read
@@ -112,24 +193,31 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
 }
 
 export function loadCommunity(): string | null {
+  if (communityOverride) return communityOverride;
+  if (process.env.KICKTIPP_COMMUNITY) return process.env.KICKTIPP_COMMUNITY;
   const config = readConfig();
-  return config.community?.name || null;
+  return profileSection(config)?.community || config.community?.name || null;
 }
 
 export function saveCommunity(name: string): void {
   const config = readConfig();
-  config.community = { name };
+  const profile = getActiveProfile();
+  if (profile) writeProfileSection(config, profile, { community: name });
+  else config.community = { name };
   writeConfig(config);
 }
 
 export function loadPlayer(): string | null {
+  if (process.env.KICKTIPP_PLAYER) return process.env.KICKTIPP_PLAYER;
   const config = readConfig();
-  return config.player?.name || null;
+  return profileSection(config)?.player || config.player?.name || null;
 }
 
 export function savePlayer(name: string): void {
   const config = readConfig();
-  config.player = { name };
+  const profile = getActiveProfile();
+  if (profile) writeProfileSection(config, profile, { player: name });
+  else config.player = { name };
   writeConfig(config);
 }
 
@@ -155,12 +243,14 @@ export function readScoringOverride(): { exact: number; goalDiff: number; tenden
 export function hasCredentials(): boolean {
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
   const config = readConfig();
+  const profile = profileSection(config);
+  if (profile?.email && profile?.password) return true;
   return !!(config.auth?.email && config.auth?.password);
 }
 
 export function logout(): void {
   const removed: string[] = [];
-  for (const p of [CONFIG_FILE, SESSION_FILE]) {
+  for (const p of [CONFIG_FILE, sessionFile()]) {
     if (fs.existsSync(p)) {
       fs.unlinkSync(p);
       removed.push(path.basename(p));
