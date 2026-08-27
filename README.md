@@ -1,14 +1,14 @@
 # kicktipp-agent
 
-A CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — the German football prediction game. View leaderboards, schedules, league tables, and place bets from the terminal or let an AI agent do it for you.
+A CLI and MCP server for [kicktipp.de](https://www.kicktipp.de) — the German football prediction game. View leaderboards, schedules, league tables, tip submission status, and place bets from the terminal or let an AI agent do it for you.
 
 ## Why?
 
 Kicktipp has no public API. Everything goes through the website. This project gives you two ways to skip the browser:
 
-- **CLI** — Check scores, standings, and place bets in seconds from the terminal. No clicking through pages, no waiting for ads to load. Useful for quick lookups during matchday or scripting your predictions.
+- **CLI** — Check scores, standings, tip status, and place bets in seconds from the terminal. No clicking through pages, no waiting for ads to load. Useful for quick lookups during matchday or scripting your predictions.
 
-- **MCP Server** — Connect an AI assistant (Claude Desktop, Claude Code, or any MCP client) to your kicktipp account. Ask it to show today's matches, check who's leading your league, or place bets for you — all through natural conversation. The assistant sees your community's data but never your password.
+- **MCP Server** — Connect an AI assistant (Claude Desktop, Claude Code, or any MCP client) to your Kicktipp account. Ask it to show today's matches, check who's leading your league, see who still needs to tip, or place bets for you — all through natural conversation. The assistant sees your community's data but never your password.
 
 Headless Chromium with session caching keeps things fast. After the first login, subsequent commands reuse the saved session and skip the login flow entirely.
 
@@ -30,7 +30,7 @@ This gives you two commands:
 
 ### First-time setup
 
-On first run, the CLI prompts for your kicktipp.com email and password. Credentials are stored locally in `~/.config/kicktipp-agent/config.ini` (chmod 600).
+On first run, the CLI prompts for your Kicktipp email and password. Credentials are stored locally in `~/.config/kicktipp-agent/config.ini` (chmod 600).
 
 ```console
 $ kicktipp set-community
@@ -61,6 +61,7 @@ $ kicktipp set-player
 | `players` | List players in the saved community |
 | `set-player` | Select which player you are |
 | `leaderboard` | Show the matchday leaderboard |
+| `tip-status` | Show who has fully, partially, or not yet tipped |
 | `overview` | Show the season overview |
 | `schedule` | Show the match schedule |
 | `table` | Show the league table |
@@ -70,6 +71,18 @@ $ kicktipp set-player
 | `rules` | Show the game rules |
 | `guide` | Print a detailed usage guide (useful for LLM agents) |
 | `logout` | Remove stored credentials and session |
+
+### Checking tip status
+
+```bash
+# Current matchday
+kicktipp tip-status
+
+# Specific matchday
+kicktipp tip-status --matchday 5
+```
+
+The command is read-only and works for normal community members. It reports whether each player has submitted all, some, or none of the matchday tips. Before the deadline it only uses Kicktipp's submission markers; it does not reveal hidden score predictions.
 
 ### Placing bets
 
@@ -97,7 +110,7 @@ kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 
 ## MCP Server
 
-The MCP server exposes the same functionality as the CLI through the [Model Context Protocol](https://modelcontextprotocol.io), allowing AI assistants like Claude to interact with kicktipp.com on your behalf.
+The MCP server exposes the same functionality as the CLI through the [Model Context Protocol](https://modelcontextprotocol.io), allowing AI assistants like Claude to interact with Kicktipp on your behalf.
 
 ### Available tools
 
@@ -108,6 +121,7 @@ The MCP server exposes the same functionality as the CLI through the [Model Cont
 | `get_bets` | Matches and current bets for a matchday |
 | `get_schedule` | Match schedule with results |
 | `get_leaderboard` | Player rankings for a matchday |
+| `get_tip_status` | Full, partial, or missing tip submissions by player |
 | `get_overview` | Season overview across all matchdays |
 | `get_table` | League table (actual football standings) |
 | `get_rules` | Game rules and scoring system |
@@ -139,7 +153,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 The `env` block passes credentials directly to the server process — Claude never sees them. If you prefer, you can omit `env` and set credentials via the CLI instead (`kicktipp set-community`).
 
-After restarting Claude Desktop, the agent will have access to all kicktipp tools. It will call `get_status` first to check configuration, then prompt you to set a community if needed.
+After restarting Claude Desktop, the agent will have access to all Kicktipp tools. It will call `get_status` first to check configuration, then prompt you to set a community if needed.
 
 ### Setup with Claude Code
 
@@ -168,12 +182,24 @@ The MCP server accepts credentials in two ways (checked in this order):
 
 If neither is found, the server returns an error guiding the agent to inform you.
 
+### Choosing the Kicktipp host
+
+The default is `https://www.kicktipp.de` with German page routes. To prefer the English host and routes instead, set:
+
+```bash
+KICKTIPP_BASE_URL=https://www.kicktipp.com
+```
+
+Existing direct route calls are normalized to the selected host, so all CLI and MCP commands use the same setting.
+
 ## Development
 
 ```bash
 npm test          # run tests
 npm run build     # compile TypeScript
 ```
+
+See [CHANGELOG.md](CHANGELOG.md) for released changes.
 
 ## Credits
 

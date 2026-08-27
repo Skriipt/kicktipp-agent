@@ -62,7 +62,7 @@ async function getPage(): Promise<Page> {
 // ── MCP Server ─────────────────────────────────────────────────────
 
 const server = new McpServer(
-  { name: 'kicktipp', version: '1.0.0' },
+  { name: 'kicktipp', version: '1.1.0' },
   {
     instructions:
       'Kicktipp football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.',
