@@ -13,36 +13,56 @@ import { registerRulesCommand } from './commands/rules.js';
 import { registerBetCommand } from './commands/bet.js';
 import { registerTodayCommand } from './commands/today.js';
 import { registerGuideCommand } from './commands/guide.js';
+import { registerTipStatusCommand } from './commands/tip-status.js';
 
 const program = new Command();
 
 async function setCommunityInteractive(page: any): Promise<void> {
   const all = await getCommunities(page);
-  if (!all.length) { console.error('No communities found.'); process.exit(1); }
+  if (!all.length) {
+    console.error('No communities found.');
+    process.exit(1);
+  }
   console.log('Available communities:');
-  all.forEach((c, i) => console.log(`  [${i + 1}] ${c}`));
+  all.forEach((community, index) =>
+    console.log(`  [${index + 1}] ${community}`),
+  );
   const choice = await ask(`Select community (1-${all.length}): `);
-  const idx = parseInt(choice) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= all.length) { console.error('Invalid selection.'); process.exit(1); }
-  saveCommunity(all[idx]);
-  console.log(`Saved '${all[idx]}' as default community.`);
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= all.length) {
+    console.error('Invalid selection.');
+    process.exit(1);
+  }
+  saveCommunity(all[index]);
+  console.log(`Saved '${all[index]}' as default community.`);
 }
 
-async function setPlayerInteractive(page: any, community: string): Promise<void> {
+async function setPlayerInteractive(
+  page: any,
+  community: string,
+): Promise<void> {
   const players = await getPlayers(page, community);
-  if (!players.length) { console.error('No players found.'); process.exit(1); }
+  if (!players.length) {
+    console.error('No players found.');
+    process.exit(1);
+  }
   console.log('Players:');
-  players.forEach((p, i) => console.log(`  [${i + 1}] ${p}`));
+  players.forEach((player, index) =>
+    console.log(`  [${index + 1}] ${player}`),
+  );
   const choice = await ask(`Which one are you? (1-${players.length}): `);
-  const idx = parseInt(choice) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= players.length) { console.error('Invalid selection.'); process.exit(1); }
-  savePlayer(players[idx]);
-  console.log(`Saved '${players[idx]}' as your player.`);
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= players.length) {
+    console.error('Invalid selection.');
+    process.exit(1);
+  }
+  savePlayer(players[index]);
+  console.log(`Saved '${players[index]}' as your player.`);
 }
 
 program
   .name('kicktipp')
-  .description('CLI tool for kicktipp.com')
+  .description('CLI tool for Kicktipp')
   .version('1.0.0');
 
 program
@@ -56,7 +76,7 @@ program
   .action(async () => {
     const { browser, page } = await launchBrowser();
     const communities = await getCommunities(page);
-    communities.forEach((c) => console.log(c));
+    communities.forEach((community) => console.log(community));
     await browser.close();
   });
 
@@ -76,7 +96,7 @@ program
     const { browser, page } = await launchBrowser();
     const community = await ensureCommunity(page);
     const players = await getPlayers(page, community);
-    players.forEach((p) => console.log(p));
+    players.forEach((player) => console.log(player));
     await browser.close();
   });
 
@@ -98,6 +118,7 @@ registerBetsCommand(program);
 registerRulesCommand(program);
 registerBetCommand(program);
 registerTodayCommand(program);
+registerTipStatusCommand(program);
 registerGuideCommand(program);
 
 export { program, ensureCommunity, ask };
