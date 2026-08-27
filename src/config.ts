@@ -76,7 +76,7 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
   const ask = (q: string): Promise<string> =>
     new Promise((resolve) => rl.question(q, resolve));
 
-  console.log('No credentials found. Please enter your kicktipp.com login:');
+  console.log('No credentials found. Please enter your Kicktipp login:');
   const email = await ask('Email: ');
   const password = await new Promise<string>((resolve) => {
     process.stdout.write('Password: ');

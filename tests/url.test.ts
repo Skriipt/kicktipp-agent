@@ -93,8 +93,49 @@ describe('Kicktipp URL builders', () => {
     );
   });
 
+  it('normalizes older direct routes to the selected host language', async () => {
+    const { normalizeKicktippUrl } = await loadUrls();
+
+    expect(
+      normalizeKicktippUrl(
+        'https://www.kicktipp.de/mycomm/schedule?spieltagIndex=5',
+      ),
+    ).toBe(
+      'https://www.kicktipp.de/mycomm/tippspielplan?spieltagIndex=5',
+    );
+    expect(
+      normalizeKicktippUrl(
+        'https://www.kicktipp.de/mycomm/predict?bonus=true',
+      ),
+    ).toBe(
+      'https://www.kicktipp.de/mycomm/tippabgabe?bonus=true',
+    );
+  });
+
+  it('normalizes German routes back to English on kicktipp.com', async () => {
+    const { normalizeKicktippUrl } = await loadUrls(
+      'https://www.kicktipp.com',
+    );
+
+    expect(
+      normalizeKicktippUrl(
+        'https://www.kicktipp.com/mycomm/tippuebersicht?spieltagIndex=2',
+      ),
+    ).toBe(
+      'https://www.kicktipp.com/mycomm/leaderboard?spieltagIndex=2',
+    );
+  });
+
+  it('leaves non-Kicktipp URLs unchanged', async () => {
+    const { normalizeKicktippUrl } = await loadUrls();
+    expect(normalizeKicktippUrl('https://example.com/schedule')).toBe(
+      'https://example.com/schedule',
+    );
+  });
+
   it('rejects invalid matchdays for every matchday URL', async () => {
-    const { getPredictUrl, getLeaderboardUrl, getScheduleUrl } = await loadUrls();
+    const { getPredictUrl, getLeaderboardUrl, getScheduleUrl } =
+      await loadUrls();
 
     expect(() => getPredictUrl('mycomm', 0)).toThrow();
     expect(() => getLeaderboardUrl('mycomm', 35)).toThrow();

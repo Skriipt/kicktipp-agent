@@ -34,7 +34,7 @@ On first run, the CLI prompts for your Kicktipp email and password. Credentials 
 
 ```console
 $ kicktipp set-community
-No credentials found. Please enter your kicktipp.com login:
+No credentials found. Please enter your Kicktipp login:
 Email: you@example.com
 Password: ********
 Credentials saved to ~/.config/kicktipp-agent/config.ini

@@ -26,7 +26,9 @@ function configurePage(page: Page): Page {
 function getCommunitySlug(href: string): string {
   try {
     const url = new URL(href, URL_BASE);
-    return url.pathname.split('/').filter(Boolean)[0] || '';
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    const parts = url.pathname.split('/').filter(Boolean);
+    return parts.length === 1 ? parts[0] : '';
   } catch {
     return '';
   }
@@ -116,17 +118,11 @@ async function login(
   statusClear();
 }
 
-export async function getCommunities(page: Page): Promise<string[]> {
-  status('Fetching communities...');
-  await page.goto(getCommunitiesUrl());
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
-
-  const $ = cheerio.load(await page.content());
-  const links = $('#kicktipp-content a');
+export function parseCommunitiesHtml(html: string): string[] {
+  const $ = cheerio.load(html);
   const communities = new Set<string>();
 
-  links.each((_, el) => {
+  $('#kicktipp-content a').each((_, el) => {
     const href = getCommunitySlug($(el).attr('href') || '');
     if (!href) return;
 
@@ -145,8 +141,17 @@ export async function getCommunities(page: Page): Promise<string[]> {
     }
   });
 
-  statusClear();
   return [...communities];
+}
+
+export async function getCommunities(page: Page): Promise<string[]> {
+  status('Fetching communities...');
+  await page.goto(getCommunitiesUrl());
+  await page.waitForLoadState('domcontentloaded');
+  await dismissConsent(page);
+  const communities = parseCommunitiesHtml(await page.content());
+  statusClear();
+  return communities;
 }
 
 export function parseOdds(
