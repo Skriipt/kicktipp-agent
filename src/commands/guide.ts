@@ -3,7 +3,7 @@ import { Command } from 'commander';
 function getGuideText(): string {
   return `# kicktipp CLI — Agent Guide
 
-kicktipp is a CLI for kicktipp.com, a football prediction game.
+kicktipp is a CLI for Kicktipp, a football prediction game.
 Players bet on match scores each matchday (1-34 per season). Points are
 awarded based on accuracy. Bonus questions (e.g. "Who will win the league?")
 are answered once before the season starts.
@@ -11,7 +11,7 @@ are answered once before the season starts.
 ## Prerequisites
 
 A community must be set before most commands work. On first run the CLI
-prompts for kicktipp.com credentials (stored in ~/.config/kicktipp-agent/).
+prompts for Kicktipp credentials (stored in ~/.config/kicktipp-agent/).
 
   kicktipp set-community          # interactive picker (prompts for number)
   kicktipp set-player             # interactive — identifies you in leaderboards
@@ -30,6 +30,8 @@ These are interactive commands that require stdin. Run them once during setup.
   kicktipp leaderboard            # player rankings for current matchday
   kicktipp leaderboard --matchday 5
   kicktipp leaderboard --bonus    # bonus question rankings
+  kicktipp tip-status             # full/partial/missing tips by player
+  kicktipp tip-status --matchday 5
   kicktipp overview               # season overview (matchday points)
   kicktipp overview --view standings
   kicktipp overview --view standings-diff
@@ -81,6 +83,9 @@ These are interactive commands that require stdin. Run them once during setup.
   kicktipp leaderboard            # current matchday rankings
   kicktipp overview               # full season at a glance
 
+### "Check who still needs to tip"
+  kicktipp tip-status             # read-only; no admin rights required
+
 ### "See what bets I've placed"
   kicktipp bets                   # shows all matches with your bets and odds
 
@@ -95,6 +100,8 @@ Exit code 0 on success, 1 on error.
 
 ## Notes
 
+- kicktipp.de and German page routes are used by default.
+- Set KICKTIPP_BASE_URL=https://www.kicktipp.com to prefer the English host.
 - Each command launches a headless browser, so expect ~2-5 seconds startup.
 - Session cookies are cached; re-login happens automatically if expired.
 - The --matchday option accepts 1-34 (one Bundesliga season).

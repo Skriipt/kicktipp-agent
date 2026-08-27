@@ -1,7 +1,7 @@
 {
   "name": "kicktipp-agent",
-  "version": "1.0.0",
-  "description": "CLI and MCP server for kicktipp.com",
+  "version": "1.1.0",
+  "description": "CLI and MCP server for Kicktipp",
   "type": "module",
   "bin": {
     "kicktipp": "./dist/index.js",
