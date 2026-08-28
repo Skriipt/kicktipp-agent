@@ -26,10 +26,25 @@ src/
     sync.ts                   # Season backfill, shared by CLI and MCP
   rules/
     scoring.ts                # ScoringRules, scoreBet, hit classification
-    parse-rules.ts            # Reads point values off the rules page
+    parse-rules.ts            # Reads point values and multipliers off the page
     resolve.ts                # config override -> parsed -> defaults
+    verify.ts                 # Recompute a matchday to prove the values
+  read-only.ts                # KICKTIPP_READ_ONLY enforcement
+  audit/
+    log.ts                    # Append-only record of every submission
+  notify/
+    backends.ts               # desktop / webhook / command notifiers
+    schedule-artifacts.ts     # cron line, systemd units, ICS calendar
+  tui/
+    state.ts                  # Betting screen as a pure state machine
+    render.ts                 # Screen lines (pure)
+    screen.ts                 # Raw-mode terminal I/O
+    run.ts                    # Loads a matchday, runs the screen, submits
   analytics/
     season.ts                 # Assembles a season from the cache
+    deadline.ts               # Kickoff countdowns and urgency
+    scenarios.ts              # Standings projection and target search
+    replay.ts                 # Season replay under an alternative strategy
     season-stats.ts           # Form, breakdown, bet profile, consistency
     rivals.ts                 # Points swing and overtake scenarios
     gap.ts                    # Points gap before a matchday
@@ -54,6 +69,12 @@ src/
     stats.ts                  # stats command (season analytics)
     rival.ts                  # rival command (overtake scenarios)
     suggest.ts                # suggest command (odds-based bet slips)
+    deadline.ts               # deadline command (--check exits 2)
+    remind.ts                 # remind + notify commands
+    log.ts                    # bet log and --undo
+    scenario.ts               # standings projection
+    whatif.ts                 # season replay
+    admin.ts                  # Spielleiter subcommands
 tests/
   parse-bet-arg.test.ts       # parseBetArg + matchFixture tests
   url.test.ts                 # Route table + URL builder tests
@@ -233,3 +254,32 @@ Everything below the HTTP layer is pure and testable without a network.
 `get_stats`, `sync_history`, `get_rival_analysis`, `suggest_bets`.
 `suggest_bets` is strictly read-only: it returns a slip plus an instruction to
 confirm with the user, and has no code path into `placeBets`.
+
+## Safety Rails
+
+Three of these are load-bearing and worth knowing before changing anything
+nearby.
+
+- **Read-only mode** (`src/read-only.ts`). `KICKTIPP_READ_ONLY=1` blocks every
+  write. Mutating MCP tools are never registered, so they do not appear in
+  `tools/list`; the CLI refuses up front; and `placeBets`/`placeBonusBets`
+  check again themselves. The third check is the point: a future wiring
+  mistake still cannot submit.
+- **The audit log** (`src/audit/log.ts`). Records are written *inside* the
+  submitting functions, not by their callers, so every entry point is covered
+  by construction — the caller only passes a source label. Anything that adds
+  a new way to bet must go through those functions or it will be invisible.
+- **Acting for another member** (`placeBetsForMember`). Refuses to submit
+  unless the member's `tipperId` will travel with the form, because a form
+  action that lost it would apply the bets to the admin's own entry. The MCP
+  tool additionally requires `confirm_member` to match the resolved member.
+
+## Output Conventions
+
+- Every read command takes `--json` and emits exactly what the matching
+  `core.ts` fetcher returns; errors in that mode are `{"error": ...}` on
+  stdout with exit code 1. Spinners go to stderr, so stdout stays pipeable.
+- MCP tools answer twice: text as before, plus `structuredContent` wrapped as
+  `{ data: ... }` under one shared output schema.
+- Anything derived from parsed scoring rules reports `rules.source` and
+  `rules.confidence`, so output can be honest about assumed values.

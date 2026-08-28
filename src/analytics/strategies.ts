@@ -1,14 +1,23 @@
-import { classify, type ScoringRules, type Score, pointsFor } from '../rules/scoring.js';
+import { classify, parseScore, type ScoringRules, type Score, pointsFor } from '../rules/scoring.js';
 import { mostLikely, type OddsMatch, type Probabilities } from './odds.js';
 import { formatScore, scorelineDistribution, typicalScore } from './score-map.js';
 
-export type StrategyName = 'safe' | 'ev' | 'contrarian';
-export const STRATEGIES: StrategyName[] = ['safe', 'ev', 'contrarian'];
+export type StrategyName = 'safe' | 'ev' | 'contrarian' | 'auto';
+export const STRATEGIES: StrategyName[] = ['safe', 'ev', 'contrarian', 'auto'];
+
+/**
+ * How much better an EV pick has to be before `auto` prefers it over the
+ * safer choice. Below this the two are effectively tied, and the lower
+ * variance option wins.
+ */
+export const AUTO_EV_MARGIN = 0.15;
 
 export interface SuggestedBet {
   home: string;
   away: string;
   bet: string;
+  /** True when the user fixed this pick and no strategy was applied. */
+  pinned?: boolean;
   probabilities: Probabilities;
   odds: { home: number; draw: number; away: number } | null;
   /** Expected points under the community's rules, for comparison. */
@@ -114,18 +123,62 @@ function contrarian(match: OddsMatch, rules: ScoringRules): SuggestedBet {
   );
 }
 
+/**
+ * Take the EV pick only when it is meaningfully better than the safe one;
+ * otherwise prefer the lower-variance choice. Deterministic, and the
+ * threshold is a named constant so the behaviour is inspectable.
+ */
+function auto(match: OddsMatch, rules: ScoringRules): SuggestedBet {
+  const safePick = safe(match, rules);
+  const evPick = ev(match, rules);
+  if (evPick.expectedPoints - safePick.expectedPoints > AUTO_EV_MARGIN) {
+    return { ...evPick, reasoning: `${evPick.reasoning} — clear enough to prefer over the safe pick` };
+  }
+  return {
+    ...safePick,
+    reasoning: `${safePick.reasoning} — expected points too close to call, taking the safer pick`,
+  };
+}
+
 const IMPLEMENTATIONS: Record<StrategyName, (m: OddsMatch, r: ScoringRules) => SuggestedBet> = {
   safe,
   ev,
   contrarian,
+  auto,
 };
+
+/** A pick the user fixed themselves, which no strategy may override. */
+export interface PinnedBet {
+  home: string;
+  away: string;
+  bet: string;
+}
+
+function pinnedFor(match: OddsMatch, pins: PinnedBet[]): PinnedBet | undefined {
+  return pins.find(
+    (p) =>
+      p.home.toLowerCase() === match.home.toLowerCase() &&
+      p.away.toLowerCase() === match.away.toLowerCase(),
+  );
+}
 
 export function suggestBets(
   matches: OddsMatch[],
   rules: ScoringRules,
   strategy: StrategyName = 'safe',
+  pins: PinnedBet[] = [],
 ): SuggestedBet[] {
   const pick = IMPLEMENTATIONS[strategy];
   if (!pick) throw new Error(`Unknown strategy '${strategy}'. Options: ${STRATEGIES.join(', ')}`);
-  return matches.map((match) => pick(match, rules));
+
+  return matches.map((match) => {
+    const pin = pinnedFor(match, pins);
+    if (!pin) return pick(match, rules);
+    const parsed = parseScore(pin.bet);
+    if (!parsed) throw new Error(`Invalid pinned bet '${pin.bet}' for ${pin.home} vs ${pin.away}.`);
+    return {
+      ...build(match, parsed, rules, 'pinned by you'),
+      pinned: true,
+    };
+  });
 }

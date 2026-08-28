@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
 import { URL_LOGIN, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
-import { SESSION_FILE, loadCredentials } from './config.js';
+import { sessionFile, loadCredentials } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
 import { normalizeSlug } from './helpers/normalize-slug.js';
 import { CookieJar } from './http/cookie-jar.js';
@@ -24,12 +24,12 @@ export interface LaunchOptions {
  * they still work, otherwise log in and save fresh ones.
  */
 export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: Page }> {
-  const sessionFile = opts.sessionFile === undefined ? SESSION_FILE : opts.sessionFile;
+  const file = opts.sessionFile === undefined ? sessionFile() : opts.sessionFile;
 
-  if (sessionFile && fs.existsSync(sessionFile)) {
+  if (file && fs.existsSync(file)) {
     status('Restoring session...');
     try {
-      const stored = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+      const stored = JSON.parse(fs.readFileSync(file, 'utf-8'));
       const page = new Page(CookieJar.fromJSON(stored), opts.fetchImpl);
       await page.goto(getCommunitiesUrl());
       if (!page.isAuthRedirect() && !page.isNotFound()) {
@@ -43,10 +43,11 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
     status('Session expired, logging in again...');
   }
 
+  statusClear();
   const { email, password } = await loadCredentials();
   const page = new Page(new CookieJar(), opts.fetchImpl);
   await login(page, email, password);
-  if (sessionFile) page.saveSession(sessionFile);
+  if (file) page.saveSession(file);
   return { page };
 }
 

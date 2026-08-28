@@ -12,19 +12,39 @@ export interface ScoringRules {
   goalDiff: number;
   /** Right winner (or a draw predicted and drawn), nothing more. */
   tendency: number;
+  /**
+   * Per-matchday point multipliers, for communities that double the final
+   * matchday and the like. Applied when a matchday total is aggregated, not
+   * per bet, so scoreBet stays a pure per-match function.
+   */
+  multipliers?: Record<number, number>;
 }
 
 export type RulesSource = 'parsed' | 'config' | 'default';
 
+/**
+ * How much the point values can be trusted. `verified` is only ever set by
+ * a check that recomputed a finished matchday and matched Kicktipp's own
+ * numbers for every player.
+ */
+export type RulesConfidence = 'verified' | 'parsed' | 'assumed';
+
 export interface ResolvedRules {
   values: ScoringRules;
   source: RulesSource;
+  confidence: RulesConfidence;
   /** Present when the rules page held something this model cannot express. */
   warning?: string;
 }
 
 /** Kicktipp's out-of-the-box scheme, used when nothing better is known. */
 export const DEFAULT_RULES: ScoringRules = { exact: 4, goalDiff: 3, tendency: 2 };
+
+/** The multiplier a matchday's points are scaled by, default 1. */
+export function multiplierFor(matchday: number | null | undefined, rules: ScoringRules): number {
+  if (matchday == null) return 1;
+  return rules.multipliers?.[matchday] ?? 1;
+}
 
 export interface Score {
   home: number;

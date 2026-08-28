@@ -92,7 +92,17 @@ export function registerRivalCommand(program: Command): void {
           gapBeforeMatchday(leaderboard, player, name),
         );
         if (opts.json) console.log(JSON.stringify({ rules, analysis }, null, 2));
-        else console.log(render(analysis, rules.warning));
+        else {
+          const note = [
+            rules.warning,
+            rules.confidence === 'assumed'
+              ? 'Scoring values are assumed; run `kicktipp rules --verify` to check them.'
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' ');
+          console.log(render(analysis, note || undefined));
+        }
         return;
       }
 

@@ -231,3 +231,44 @@ describe('getCommunities', () => {
     await expect(getCommunities(loggedOut)).rejects.toThrow(/not authenticated/i);
   });
 });
+
+describe('expired session with no stored password', () => {
+  let home: string;
+  let stdinTty: boolean | undefined;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-nologin-'));
+    stdinTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
+    vi.unstubAllEnvs();
+    delete process.env.KICKTIPP_EMAIL;
+    delete process.env.KICKTIPP_PASSWORD;
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    vi.spyOn(os, 'homedir').mockReturnValue(home);
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: stdinTty });
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.resetModules();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('errors instead of waiting for a hidden login prompt', async () => {
+    const session = path.join(home, '.config', 'kicktipp-agent', 'session.json');
+    fs.mkdirSync(path.dirname(session), { recursive: true });
+    fs.writeFileSync(
+      session,
+      JSON.stringify({ cookies: [{ name: 'sid', value: 'expired', domain: 'www.kicktipp.com' }] }),
+    );
+
+    const { launchBrowser: launch } = await import('../src/browser.js');
+    const { mockFetch: mf } = await import('./helpers/mock-fetch.js');
+    const { fetchImpl } = mf(kicktipp());
+
+    await expect(launch({ fetchImpl })).rejects.toThrow(/No credentials found/i);
+  });
+});

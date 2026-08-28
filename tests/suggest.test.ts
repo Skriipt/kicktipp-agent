@@ -166,3 +166,74 @@ describe('strategies', () => {
     expect(() => suggestBets(heavyFavourite, RULES, 'lucky' as never)).toThrow(/Unknown strategy/);
   });
 });
+
+describe('pinning', () => {
+  const matches = toOddsMatches([betMatch(), betMatch({ home: 'Freiburg', away: 'VfB' })]);
+
+  it('keeps a pinned pick verbatim and marks it', () => {
+    const picks = suggestBets(matches, RULES, 'safe', [
+      { home: 'Bayern', away: 'BVB', bet: '0:3' },
+    ]);
+    expect(picks[0]).toMatchObject({ bet: '0:3', pinned: true });
+    expect(picks[0].reasoning).toMatch(/pinned by you/);
+  });
+
+  it('still applies the strategy to everything else', () => {
+    const picks = suggestBets(matches, RULES, 'safe', [
+      { home: 'Bayern', away: 'BVB', bet: '0:3' },
+    ]);
+    expect(picks[1].pinned).toBeUndefined();
+    expect(picks[1].bet).toBe('2:1');
+  });
+
+  it('matches fixtures case-insensitively', () => {
+    const picks = suggestBets(matches, RULES, 'safe', [
+      { home: 'bayern', away: 'bvb', bet: '1:1' },
+    ]);
+    expect(picks[0].bet).toBe('1:1');
+  });
+
+  it('still scores a pinned pick, so the slip total stays meaningful', () => {
+    const [pick] = suggestBets(matches, RULES, 'safe', [
+      { home: 'Bayern', away: 'BVB', bet: '2:1' },
+    ]);
+    expect(pick.expectedPoints).toBeGreaterThan(0);
+  });
+
+  it('rejects a malformed pinned scoreline', () => {
+    expect(() =>
+      suggestBets(matches, RULES, 'safe', [{ home: 'Bayern', away: 'BVB', bet: 'nope' }]),
+    ).toThrow(/Invalid pinned bet/);
+  });
+
+  it('ignores a pin for a fixture that is not on the slip', () => {
+    const picks = suggestBets(matches, RULES, 'safe', [
+      { home: 'Nobody', away: 'Nowhere', bet: '1:0' },
+    ]);
+    expect(picks.every((p) => !p.pinned)).toBe(true);
+  });
+});
+
+describe('auto strategy', () => {
+  it('takes the EV pick when it is clearly better', () => {
+    // Exact results paying 50 make the EV choice unambiguous.
+    const [pick] = suggestBets(toOddsMatches([betMatch()]), { exact: 50, goalDiff: 1, tendency: 1 }, 'auto');
+    expect(pick.reasoning).toMatch(/clear enough to prefer/);
+  });
+
+  it('falls back to the safer pick when the two are close', () => {
+    const [pick] = suggestBets(
+      toOddsMatches([betMatch({ odds: { home: '2.60', draw: '3.30', away: '2.70' } })]),
+      { exact: 4, goalDiff: 3, tendency: 3 },
+      'auto',
+    );
+    expect(pick.reasoning).toMatch(/too close to call/);
+  });
+
+  it('never scores worse than the safe pick by more than the margin', () => {
+    const matches = toOddsMatches([betMatch()]);
+    const autoPick = suggestBets(matches, RULES, 'auto')[0];
+    const safePick = suggestBets(matches, RULES, 'safe')[0];
+    expect(autoPick.expectedPoints).toBeGreaterThanOrEqual(safePick.expectedPoints);
+  });
+});

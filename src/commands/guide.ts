@@ -15,8 +15,14 @@ prompts for kicktipp.com credentials (stored in ~/.config/kicktipp-agent/).
 
   kicktipp set-community          # interactive picker (prompts for number)
   kicktipp set-player             # interactive — identifies you in leaderboards
+  kicktipp set-notify             # interactive — desktop, webhook, or command
 
 These are interactive commands that require stdin. Run them once during setup.
+Non-interactive forms (safe for agents):
+
+  kicktipp set-notify desktop
+  kicktipp set-notify webhook https://ntfy.sh/your-topic
+  kicktipp set-notify command /path/to/hook
 
 ## Non-interactive commands (safe for automation)
 
@@ -70,6 +76,7 @@ These are interactive commands that require stdin. Run them once during setup.
   kicktipp bet --bonus            # prompts per bonus question with numbered options
   kicktipp set-community          # pick community from numbered list
   kicktipp set-player             # pick player from numbered list
+  kicktipp set-notify             # pick a notifier backend
 
 ## Common workflows
 

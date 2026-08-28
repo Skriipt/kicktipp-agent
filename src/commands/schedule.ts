@@ -1,78 +1,43 @@
 import { Command } from 'commander';
-import * as cheerio from 'cheerio';
 import { launchBrowser } from '../browser.js';
-import { getScheduleUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
+import { emitJson, setJsonMode, widest } from '../helpers/output.js';
+import { localizeMatchDates, localizePrintedDate } from '../helpers/match-date.js';
+import { fetchSchedule, type ScheduleMatch } from '../core.js';
+
+function render(title: string, matches: ScheduleMatch[]): string {
+  const lines: string[] = [];
+  if (title) lines.push(title, '');
+  if (!matches.length) return lines.concat('No schedule found.').join('\n');
+
+  const homeWidth = widest(matches.map((m) => m.home));
+  const awayWidth = widest(matches.map((m) => m.away));
+  for (const m of matches) {
+    lines.push(
+      `  ${localizePrintedDate(m.date).padEnd(17)} ${m.home.padStart(homeWidth)} vs ${m.away.padEnd(awayWidth)}  ${m.result}`,
+    );
+  }
+  return lines.join('\n');
+}
 
 export function registerScheduleCommand(program: Command): void {
   program
     .command('schedule')
     .description('Display the match schedule')
-    .option('--matchday <n>', 'Matchday number (1-34)')
+    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
+    .option('--json', 'Output raw JSON')
     .action(async (opts) => {
+      if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-
         status('Loading schedule...');
-        let matchday: number | undefined;
-        if (opts.matchday !== undefined) {
-          matchday = parseInt(opts.matchday);
-          if (!(matchday >= 1 && matchday <= 34)) {
-            console.error(`The matchday '${opts.matchday}' is not valid, use only 1 to 34!`);
-            process.exit(1);
-          }
-        }
-        await page.goto(getScheduleUrl(community, matchday));
+        const data = await fetchSchedule(page, community, opts.matchday);
         statusClear();
 
-        const $ = cheerio.load(await page.content());
-        const content = $('#kicktipp-content');
-
-        // Print title
-        const titleDiv = content.find('div.pagetitle');
-        if (titleDiv.length) {
-          console.log(titleDiv.text().trim());
-        }
-        console.log();
-
-        const table = content.find('table#spiele');
-        if (!table.length) {
-          console.log('No schedule found.');
-          return;
-        }
-        const tbody = table.find('tbody');
-        if (!tbody.length) return;
-
-        const matches: [string, string, string, string][] = [];
-        tbody.children('tr').each((_, tr) => {
-          const cols = $(tr).children('td');
-          if (cols.length < 5) return;
-          const date = $(cols[0]).text().trim();
-          const home = $(cols[2]).text().trim();
-          const away = $(cols[3]).text().trim();
-          const resultSpan = $(cols[4]).find('span.kicktipp-ergebnis');
-          let result: string;
-          if (resultSpan.length) {
-            const h = resultSpan.find('span.kicktipp-heim').text().trim();
-            const g = resultSpan.find('span.kicktipp-gast').text().trim();
-            result = `${h}:${g}`;
-          } else {
-            result = '-:-';
-          }
-          matches.push([date, home, away, result]);
-        });
-
-        if (matches.length) {
-          const homeWidth = Math.max(...matches.map((m) => m[1].length));
-          const awayWidth = Math.max(...matches.map((m) => m[2].length));
-          for (const [date, home, away, result] of matches) {
-            console.log(
-              `  ${date.padEnd(17)} ${home.padStart(homeWidth)} vs ${away.padEnd(awayWidth)}  ${result}`,
-            );
-          }
-        }
+        if (opts.json) emitJson({ community, matchday: opts.matchday ?? null, data: { ...data, matches: localizeMatchDates(data.matches) } });
+        else console.log(render(data.title, data.matches));
       } finally {
         await page.close();
       }

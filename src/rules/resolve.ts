@@ -18,7 +18,7 @@ export async function resolveRules(
   cache: CacheOptions = {},
 ): Promise<ResolvedRules> {
   const override = readScoringOverride();
-  if (override) return { values: override, source: 'config' };
+  if (override) return { values: override, source: 'config', confidence: 'parsed' };
 
   try {
     const sections = await fetchRules(page, community, cache);
@@ -31,6 +31,7 @@ export async function resolveRules(
   return {
     values: DEFAULT_RULES,
     source: 'default',
+    confidence: 'assumed',
     warning: "Could not read this community's scoring table; assuming Kicktipp's defaults (4/3/2).",
   };
 }
@@ -42,7 +43,7 @@ export async function resolveRules(
  */
 export function resolveRulesFromCache(store: CacheStore | null): ResolvedRules {
   const override = readScoringOverride();
-  if (override) return { values: override, source: 'config' };
+  if (override) return { values: override, source: 'config', confidence: 'parsed' };
 
   const cached = store?.read('rules');
   if (cached) {
@@ -53,6 +54,7 @@ export function resolveRulesFromCache(store: CacheStore | null): ResolvedRules {
   return {
     values: DEFAULT_RULES,
     source: 'default',
+    confidence: 'assumed',
     warning: store?.read('rules')
       ? "Could not read this community's scoring table; assuming Kicktipp's defaults (4/3/2)."
       : "No cached rules page; assuming Kicktipp's default scoring (4/3/2). Run `kicktipp sync` to read the real rules.",
