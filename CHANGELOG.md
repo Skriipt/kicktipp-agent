@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2] - 2026-08-28
+
+### Fixed
+
+- Bonus bets: `place_bonus_bets` matched questions by answer text, so mixed slips (champion + relegation) failed and ranking questions only filled the first dropdown.
+- MCP dry runs for `place_bets`, `place_bonus_bets`, and `place_bets_for_member` now return `success: true` when validation succeeds; use `dry_run: true` to see that nothing was submitted.
+
 ## [1.1.1] - 2026-08-28
 
 ### Changed
