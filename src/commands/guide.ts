@@ -66,7 +66,8 @@ Non-interactive forms (safe for agents):
   kicktipp bet --bonus "Question text=Answer"
 
   Question and answer must match exactly (case-insensitive) as shown on the
-  bonus page. Multiple answers for the same question (multi-select):
+  bonus page. Multiple answers for the same question (ranking / relegation):
+  repeat the question once per dropdown in a single command, in slot order.
 
   kicktipp bet --bonus "Who will be champion?=FC Bayern München" "Who will be champion?=Borussia Dortmund"
 

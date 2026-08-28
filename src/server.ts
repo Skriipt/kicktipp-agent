@@ -753,7 +753,7 @@ if (!readOnly) {
         !dry_run,
         'mcp:place_bets_for_member',
       );
-      return jsonResult({ success: !dry_run, dry_run: !!dry_run, member: resolved, placed });
+      return jsonResult({ success: true, dry_run: !!dry_run, member: resolved, placed });
     },
   );
 }
@@ -774,7 +774,7 @@ if (!readOnly) {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const placed = await placeBets(page, community, bets, matchday, !dry_run, 'mcp:place_bets');
-      return jsonResult({ success: !dry_run, dry_run: !!dry_run, placed });
+      return jsonResult({ success: true, dry_run: !!dry_run, placed });
     },
 );
 }
@@ -783,9 +783,9 @@ if (!readOnly) {
   server.registerTool(
   'place_bonus_bets',
   {
-    description: 'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
+    description: 'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer". Ranking questions have several dropdowns (selects.length > 1): pass one array entry per slot in the SAME call, in order, repeating the question text. Example: ["Who will be relegated?=FC St. Pauli", "Who will be relegated?=1. FC Heidenheim", "Who will be relegated?=Holstein Kiel"]. A shorter list fills remaining empty slots instead of overwriting the first dropdown. A successful dry run still returns success=true with dry_run=true; nothing is submitted.',
     inputSchema: {
-      bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer", e.g. ["Who will be champion?=FC Bayern München"]'),
+      bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer". Repeat the question once per ranking dropdown in a single call.'),
       dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
     },
     outputSchema: OUTPUT_SCHEMA,
@@ -794,7 +794,7 @@ if (!readOnly) {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const placed = await placeBonusBets(page, community, bets, !dry_run, 'mcp:place_bonus_bets');
-      return jsonResult({ success: !dry_run, dry_run: !!dry_run, placed });
+      return jsonResult({ success: true, dry_run: !!dry_run, placed });
     },
 );
 }

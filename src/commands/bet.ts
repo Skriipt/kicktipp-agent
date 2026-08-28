@@ -1,122 +1,19 @@
 import { Command } from 'commander';
-import * as cheerio from 'cheerio';
 import { launchBrowser } from '../browser.js';
-import { getBonusPredictUrl } from '../url.js';
 import { ensureCommunity, ask } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
-import {
-  parseBetArg,
-  matchFixture,
-  EditableMatch,
-} from '../helpers/parse-bet-arg.js';
 import { escapeCssValue } from '../helpers/escape-css-value.js';
 import { assertWritable } from '../read-only.js';
-import { loadMatchPredictPage, placeBets } from '../core.js';
+import {
+  fetchBonusQuestions,
+  loadMatchPredictPage,
+  placeBets,
+  placeBonusBets,
+  type BonusQuestion,
+} from '../core.js';
 import { appendAudit } from '../audit/log.js';
 import { inheritPrintedDate, localizePrintedDate } from '../helpers/match-date.js';
 import { runBettingTui } from '../tui/run.js';
-
-// ── Bonus question types and helpers ───────────────────────────────
-
-interface BonusSelect {
-  name: string;
-  options: { value: string; text: string }[];
-  selected: string;
-}
-
-interface BonusQuestion {
-  question: string;
-  selects: BonusSelect[];
-}
-
-function parseBonusQuestions(
-  $: cheerio.CheerioAPI,
-  content: cheerio.Cheerio<any>,
-): BonusQuestion[] {
-  const table = content.find('table#tippabgabeFragen');
-  if (!table.length) return [];
-  const tbody = table.find('tbody');
-  if (!tbody.length) return [];
-
-  const questions: BonusQuestion[] = [];
-  tbody.children('tr').each((_, tr) => {
-    const cols = $(tr).children('td');
-    if (cols.length < 3) return;
-    const question = $(cols[1]).text().trim();
-    const selectEls = $(cols[2]).find('select');
-    if (!selectEls.length) return;
-
-    const selects: BonusSelect[] = [];
-    selectEls.each((_, sel) => {
-      const name = $(sel).attr('name')!;
-      const options: { value: string; text: string }[] = [];
-      let selected = '-1';
-      $(sel).find('option').each((_, opt) => {
-        const value = $(opt).attr('value') || '';
-        const text = $(opt).text().trim();
-        if (value !== '-1') options.push({ value, text });
-        if ($(opt).attr('selected') !== undefined) selected = value;
-      });
-      selects.push({ name, options, selected });
-    });
-
-    questions.push({ question, selects });
-  });
-
-  return questions;
-}
-
-function parseBonusBetArg(arg: string): { question: string; answer: string } {
-  if (!arg.includes('=')) {
-    throw new Error(
-      `Invalid bonus bet '${arg}'. Use format: "Question text=Answer"`,
-    );
-  }
-  const eqIdx = arg.lastIndexOf('=');
-  const question = arg.slice(0, eqIdx).trim();
-  const answer = arg.slice(eqIdx + 1).trim();
-  if (!question || !answer) {
-    throw new Error(
-      `Invalid bonus bet '${arg}'. Both question and answer required.`,
-    );
-  }
-  return { question, answer };
-}
-
-function findQuestion(
-  questionText: string,
-  questions: BonusQuestion[],
-): BonusQuestion {
-  const match = questions.find(
-    (q) => q.question.toLowerCase() === questionText.toLowerCase(),
-  );
-  if (!match) {
-    console.error(`No bonus question found matching: "${questionText}"`);
-    console.error('Available questions:');
-    questions.forEach((q) => console.error(`  - ${q.question}`));
-    process.exit(1);
-  }
-  return match;
-}
-
-function findOption(
-  answerText: string,
-  select: BonusSelect,
-  questionText: string,
-): { value: string; text: string } {
-  const match = select.options.find(
-    (o) => o.text.toLowerCase() === answerText.toLowerCase(),
-  );
-  if (!match) {
-    console.error(
-      `No option "${answerText}" found for question "${questionText}"`,
-    );
-    console.error('Available options:');
-    select.options.forEach((o) => console.error(`  - ${o.text}`));
-    process.exit(1);
-  }
-  return match;
-}
 
 // ── Match betting helpers ──────────────────────────────────────────
 
@@ -223,82 +120,11 @@ async function fixtureBets(page: any, community: string, bets: string[], matchda
 
 // ── Bonus betting helpers ──────────────────────────────────────────
 
-export interface AppliedBonusBet {
-  question: string;
-  answer: string;
-}
-
-async function bonusBetsNonInteractive(
-  page: any,
-  questions: BonusQuestion[],
-  bets: string[],
-): Promise<AppliedBonusBet[]> {
-  interface ParsedBet {
-    selectName: string;
-    value: string;
-    questionText: string;
-    answerText: string;
-  }
-  const parsed: ParsedBet[] = [];
-
-  const argsByQuestion = new Map<string, string[]>();
-  for (const arg of bets) {
-    const { question, answer } = parseBonusBetArg(arg);
-    const key = question.toLowerCase();
-    if (!argsByQuestion.has(key)) {
-      argsByQuestion.set(key, []);
-    }
-    argsByQuestion.get(key)!.push(answer);
-  }
-
-  for (const [, answers] of argsByQuestion) {
-    const q = findQuestion(answers[0], questions);
-    const firstArg = bets.find((b) => {
-      const { question } = parseBonusBetArg(b);
-      return question.toLowerCase() === q.question.toLowerCase();
-    })!;
-    const { question: qText } = parseBonusBetArg(firstArg);
-
-    if (answers.length > q.selects.length) {
-      console.error(
-        `Too many answers for "${q.question}": got ${answers.length}, max ${q.selects.length}`,
-      );
-      process.exit(1);
-    }
-
-    const usedValues = new Set<string>();
-    for (let i = 0; i < answers.length; i++) {
-      const option = findOption(answers[i], q.selects[i], q.question);
-      if (usedValues.has(option.value)) {
-        console.error(
-          `Duplicate answer "${answers[i]}" for "${q.question}"`,
-        );
-        process.exit(1);
-      }
-      usedValues.add(option.value);
-      parsed.push({
-        selectName: q.selects[i].name,
-        value: option.value,
-        questionText: q.question,
-        answerText: option.text,
-      });
-    }
-  }
-
-  const applied: AppliedBonusBet[] = [];
-  for (const { selectName, value, questionText, answerText } of parsed) {
-    console.log(`  ${questionText} → ${answerText}`);
-    applied.push({ question: questionText, answer: answerText });
-    await page.selectOption(`select[name="${escapeCssValue(selectName)}"]`, value);
-  }
-  return applied;
-}
-
 async function bonusBetsInteractive(
   page: any,
   questions: BonusQuestion[],
-): Promise<AppliedBonusBet[]> {
-  const applied: AppliedBonusBet[] = [];
+): Promise<{ question: string; answer: string }[]> {
+  const applied: { question: string; answer: string }[] = [];
   for (const q of questions) {
     console.log(`\n  ${q.question}`);
 
@@ -340,31 +166,30 @@ async function bonusBetsInteractive(
 }
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
-  status('Loading bonus questions...');
-  await page.goto(getBonusPredictUrl(community));
-  statusClear();
+  if (bets && bets.length > 0) {
+    status('Loading bonus questions...');
+    const applied = await placeBonusBets(page, community, bets, true, 'cli:bet');
+    statusClear();
+    for (const a of applied) console.log(`  ${a.question} → ${a.answer}`);
+    console.log('\nBonus bets saved.');
+    return;
+  }
 
-  const $ = cheerio.load(await page.content());
-  const content = $('#kicktipp-content');
-  const questions = parseBonusQuestions($, content);
+  status('Loading bonus questions...');
+  const questions = await fetchBonusQuestions(page, community);
+  statusClear();
 
   if (!questions.length) {
     console.log('No editable bonus questions found.');
     return;
   }
 
-  const applied =
-    bets && bets.length > 0
-      ? await bonusBetsNonInteractive(page, questions, bets)
-      : await bonusBetsInteractive(page, questions);
-
+  const applied = await bonusBetsInteractive(page, questions);
   if (!applied.length) {
     console.log('\nNo changes made.');
     return;
   }
 
-  // The bonus flow drives the form directly rather than going through
-  // core.placeBonusBets, so it writes its own audit record.
   const record = {
     at: new Date().toISOString(),
     source: 'cli:bet' as const,

@@ -712,6 +712,37 @@ export async function fetchBonusQuestions(page: Page, community: string): Promis
   return questions;
 }
 
+function parseBonusBetArg(arg: string): { question: string; answer: string } {
+  const eqIdx = arg.lastIndexOf('=');
+  if (eqIdx === -1) throw new Error(`Invalid bonus bet '${arg}'. Use format: "Question text=Answer"`);
+  const question = arg.slice(0, eqIdx).trim();
+  const answer = arg.slice(eqIdx + 1).trim();
+  if (!question || !answer) {
+    throw new Error(`Invalid bonus bet '${arg}'. Both question and answer required.`);
+  }
+  return { question, answer };
+}
+
+function isEmptyBonusSlot(selected: string): boolean {
+  return selected === '-1' || selected === '';
+}
+
+/**
+ * Ranking questions (relegation, top-N) have several dropdowns. A full set
+ * of answers replaces every slot in order. A shorter list fills empty slots
+ * so a later call can add the second and third team instead of overwriting
+ * the first dropdown again.
+ */
+function bonusAnswerSlots(
+  selects: BonusQuestion['selects'],
+  answerCount: number,
+): number[] {
+  if (answerCount === selects.length) return selects.map((_, i) => i);
+  const empty = selects.flatMap((s, i) => (isEmptyBonusSlot(s.selected) ? [i] : []));
+  if (empty.length >= answerCount) return empty.slice(0, answerCount);
+  return selects.map((_, i) => i).slice(0, answerCount);
+}
+
 export async function placeBonusBets(
   page: Page,
   community: string,
@@ -723,14 +754,9 @@ export async function placeBonusBets(
   const questions = await fetchBonusQuestions(page, community);
   if (!questions.length) throw new Error('No editable bonus questions found.');
 
-  // Group by question
   const argsByQuestion = new Map<string, string[]>();
   for (const arg of bets) {
-    const eqIdx = arg.lastIndexOf('=');
-    if (eqIdx === -1) throw new Error(`Invalid bonus bet '${arg}'. Use format: "Question text=Answer"`);
-    const question = arg.slice(0, eqIdx).trim();
-    const answer = arg.slice(eqIdx + 1).trim();
-    if (!question || !answer) throw new Error(`Invalid bonus bet '${arg}'. Both question and answer required.`);
+    const { question, answer } = parseBonusBetArg(arg);
     const key = question.toLowerCase();
     if (!argsByQuestion.has(key)) argsByQuestion.set(key, []);
     argsByQuestion.get(key)!.push(answer);
@@ -738,34 +764,37 @@ export async function placeBonusBets(
 
   const placed: PlacedBonusBet[] = [];
 
-  for (const [, answers] of argsByQuestion) {
-    const q = questions.find((qq) => qq.question.toLowerCase() === answers[0].toLowerCase()) ??
-      questions.find((qq) => {
-        // Find by the original question text from args
-        for (const arg of bets) {
-          const eqIdx = arg.lastIndexOf('=');
-          const qText = arg.slice(0, eqIdx).trim();
-          if (qq.question.toLowerCase() === qText.toLowerCase()) return true;
-        }
-        return false;
-      });
-
+  for (const [key, answers] of argsByQuestion) {
+    const q = questions.find((qq) => qq.question.toLowerCase() === key);
     if (!q) {
+      const requested = bets.find((arg) => parseBonusBetArg(arg).question.toLowerCase() === key);
+      const label = requested ? parseBonusBetArg(requested).question : key;
       const available = questions.map((qq) => qq.question).join(', ');
-      throw new Error(`No bonus question found matching: "${answers[0]}". Available: ${available}`);
+      throw new Error(`No bonus question found matching: "${label}". Available: ${available}`);
     }
 
     if (answers.length > q.selects.length) {
       throw new Error(`Too many answers for "${q.question}": got ${answers.length}, max ${q.selects.length}`);
     }
 
-    for (let i = 0; i < answers.length; i++) {
-      const option = q.selects[i].options.find((o) => o.text.toLowerCase() === answers[i].toLowerCase());
+    const slots = bonusAnswerSlots(q.selects, answers.length);
+    const overwritten = new Set(slots);
+    const usedValues = new Set(
+      q.selects.filter((_, i) => !overwritten.has(i) && !isEmptyBonusSlot(q.selects[i].selected)).map((s) => s.selected),
+    );
+
+    for (let a = 0; a < answers.length; a++) {
+      const select = q.selects[slots[a]];
+      const option = select.options.find((o) => o.text.toLowerCase() === answers[a].toLowerCase());
       if (!option) {
-        const available = q.selects[i].options.map((o) => o.text).join(', ');
-        throw new Error(`No option "${answers[i]}" for question "${q.question}". Available: ${available}`);
+        const available = select.options.map((o) => o.text).join(', ');
+        throw new Error(`No option "${answers[a]}" for question "${q.question}". Available: ${available}`);
       }
-      await page.selectOption(`select[name="${escapeCssValue(q.selects[i].name)}"]`, option.value);
+      if (usedValues.has(option.value)) {
+        throw new Error(`Duplicate answer "${answers[a]}" for "${q.question}"`);
+      }
+      usedValues.add(option.value);
+      await page.selectOption(`select[name="${escapeCssValue(select.name)}"]`, option.value);
       placed.push({ question: q.question, answer: option.text });
     }
   }
