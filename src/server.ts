@@ -7,6 +7,7 @@ import { localizeMatchDates } from './helpers/match-date.js';
 import { applyNotifierSettings, notifierSnapshot } from './notify/backends.js';
 import { Page, launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, readDefaultStrategy } from './config.js';
+import { VERSION } from './version.js';
 import { ensureSetupListener } from './setup/listener.js';
 import { CacheStore } from './cache/store.js';
 import { loadSeason } from './analytics/season.js';
@@ -125,8 +126,8 @@ const OUTPUT_SCHEMA = { data: z.unknown() };
 const readOnly = isReadOnly();
 
 const server = new McpServer(
-  { name: 'kicktipp', version: '1.0.0' },
-  { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on kicktipp.com. Do not offer to place bets. ' : '') + 'kicktipp.com football prediction game. If the user asks to set up, connect, or log in to Kicktipp, call connect_account and ask them to open the setup_url in their browser. Do not ask for a password in chat. Otherwise call get_status first. If only the community is missing, call get_communities then set_community.' },
+  { name: 'kicktipp', version: VERSION },
+  { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on Kicktipp. Do not offer to place bets. ' : '') + 'Kicktipp football prediction game (kicktipp.com and kicktipp.de). If the user asks to set up, connect, or log in to Kicktipp, call connect_account and ask them to open the setup_url in their browser. Do not ask for a password in chat. Otherwise call get_status first. If only the community is missing, call get_communities then set_community.' },
 );
 
 server.registerTool(

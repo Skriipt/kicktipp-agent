@@ -1,44 +1,78 @@
 # kicktipp-agent
 
-A CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — the German football prediction game. View leaderboards, schedules, league tables, and place bets from the terminal or let an AI agent do it for you.
+A helper for [Kicktipp](https://www.kicktipp.com) on both **kicktipp.com** and **kicktipp.de**. Check the table, fill the terminal tip sheet, or let Claude do it in a chat. Your password stays on your computer.
 
-## Why?
+Kicktipp has no public API. This talks to the website from your machine. You do not need to know how that works.
 
-Kicktipp has no public API. Everything goes through the website. This project gives you two ways to skip the browser:
+## Start here
 
-- **CLI** — Check scores, standings, and place bets in seconds from the terminal. No clicking through pages, no waiting for ads to load. Useful for quick lookups during matchday or scripting your predictions.
+Pick one path. Skip the rest.
 
-- **MCP Server** — Connect an AI assistant (Claude Desktop, Claude Code, or any MCP client) to your kicktipp account. Ask it to show today's matches, check who's leading your league, or place bets for you — all through natural conversation. The assistant sees your community's data but never your password.
+You need [Node.js 20](https://nodejs.org/) or newer on every path. On the site, press the LTS button, run the installer, leave the defaults, finish. Then open Terminal (or Command Prompt on Windows) and type `node -v`. You want a number like `v20` or `v22`, not an error.
 
-No browser required. Kicktipp's pages are server-rendered, so this talks to
-them over plain HTTP — nothing to download, nothing to keep running. Session
-caching keeps it fast: after the first login, subsequent commands reuse the
-saved session and skip the login flow entirely.
+Do not type your Kicktipp password into a chat. It stays on your computer.
 
-## Installation
+### I use Claude Desktop
 
-Requires Node.js 20 or newer.
+You do not need to live in a terminal after Node is installed.
 
-Once the package is on npm:
+1. Download **[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest GitHub release. Same version number as the release.
+2. Double-click the file. Claude Desktop should offer to install it. If nothing happens, open Claude Desktop and install the file from there.
+3. In the extension settings, enter the email and password you use on kicktipp.com or kicktipp.de. Community can wait. Tick read-only if you only want Claude to look, not tip.
+4. Fully quit Claude Desktop (not just the window) and open it again.
+5. Start a **new** chat. Ask "What's my Kicktipp status?"
+
+If the chat says it cannot find `node`, Node is not installed or not on your PATH. Install LTS, restart Desktop, try again.
+
+### I use Claude Code, or another assistant that talks MCP
+
+1. From a copy of this project:
+
+   ```bash
+   npm install
+   npm run build
+   claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
+   ```
+
+   Replace the path with the real folder on your machine. When this package is on npm, you can skip the copy and run:
+
+   ```bash
+   claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
+   ```
+
+2. Open a new chat. Say **"Set up my Kicktipp account."** Open the `http://127.0.0.1:…` link in your normal browser, sign in, pick your pool.
+
+Hand-editing Claude Desktop's JSON is a third option. Same program. See [Connecting Claude](#connecting-claude).
+
+### I want `kicktipp` in the terminal
+
+After Node is installed:
 
 ```bash
 npm install -g kicktipp-agent
-# or, without a global install:
-npx -y -p kicktipp-agent kicktipp
+kicktipp login --web
 ```
 
-From a checkout:
+On a Mac or Linux, a page should open by itself. On Windows, copy the `http://127.0.0.1:…` line from the terminal into your browser. Sign in, pick your pool. Then `kicktipp today` lists today's matches, and `kicktipp bet` opens the full-screen tip sheet.
+
+The package is not on npm yet. From a copy of this project:
 
 ```bash
 npm install
 npm run build
 npm link
+kicktipp login --web
 ```
 
-This gives you:
+### I am changing the code
 
-- **`kicktipp`** — the CLI
-- **`kicktipp-mcp`** / **`kicktipp-agent-mcp`** — the MCP server (same binary)
+```bash
+npm install
+npm run build
+npm test
+```
+
+`npm run pack:mcpb` builds the Desktop file yourself. Download it from [releases](https://github.com/christianheidorn/kicktipp-agent/releases) if you only want to use it.
 
 ## CLI
 
@@ -48,7 +82,7 @@ This gives you:
 kicktipp login --web
 ```
 
-That prints a `http://127.0.0.1:…/setup?token=…` link (and opens it on macOS/Linux). Email and password go into that page, not into the terminal. After a successful Kicktipp login you pick a community. Credentials land in `~/.config/kicktipp-agent/config.ini` with mode 600.
+That prints a `http://127.0.0.1:…/setup?token=…` link and opens it on macOS and Linux. On Windows, paste the link into a browser. Email and password go into that page, not into the terminal. After a successful Kicktipp login you pick a community. Credentials land in `~/.config/kicktipp-agent/config.ini` with mode 600.
 
 `kicktipp login` without `--web` still prompts in the terminal, same as `set-community` on a first run.
 
@@ -74,7 +108,7 @@ $ kicktipp set-player
 | `schedule` | Show the match schedule |
 | `table` | Show the league table |
 | `bets` | Show your bets for a matchday |
-| `bet` | Place bets (interactive, by fixture, or bonus) |
+| `bet` | Place bets (full-screen tip sheet on a real terminal, or by fixture / bonus) |
 | `today` | Show today's matches and which still need bets |
 | `rules` | Show the game rules |
 | `guide` | Print a detailed usage guide (useful for LLM agents) |
@@ -91,20 +125,27 @@ $ kicktipp set-player
 | `profiles` | List configured profiles |
 | `admin` | Spielleiter tools (members, bets for a member) |
 
-### Placing bets
+### The tip sheet (`kicktipp bet`)
+
+On a real terminal, `kicktipp bet` with no arguments opens a full-screen list of the matchday. Type scores in place, take the odds-based suggestion, submit with `w`.
+
+![Kicktipp tip sheet in the terminal: fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
+
+Keys:
+
+- arrows move
+- digits type a score
+- `s` take the suggestion on the current row
+- `a` fill every empty row from suggestions
+- `u` clear the current row
+- `w` submit
+- `q` quit without submitting
+
+`kicktipp bet --no-tui` is the old one-match-at-a-time prompts. Bonus questions still use that path (`kicktipp bet --bonus`). You can also pass fixtures on the command line:
 
 ```bash
-# Interactive — prompts for each match
-kicktipp bet
-
-# By fixture name (get exact names from `kicktipp bets`)
 kicktipp bet "FC Bayern München vs Borussia Dortmund=2:1"
 kicktipp bet "RB Leipzig vs Bayer 04 Leverkusen=0:0" --matchday 5
-
-# Bonus questions — interactive
-kicktipp bet --bonus
-
-# Bonus questions — by name
 kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 ```
 
@@ -257,25 +298,27 @@ This recomputes every player's score for a finished matchday and checks it
 against the numbers Kicktipp itself reported — the only real proof the model
 matches the community. It exits 1 on a mismatch.
 
-## MCP server
+## Connecting Claude
 
-Claude (or any MCP client) does not talk to Kicktipp itself. It starts a small Node program on your computer. That program logs into kicktipp.com and exposes tools. The assistant sees pool data. It never sees your password.
+Claude does not talk to Kicktipp itself. It starts a small program on your computer. That program logs into kicktipp.com or kicktipp.de. The assistant sees pool data. It never sees your password.
 
-The `.mcpb` file you can double-click is that program, zipped, with a recipe for Claude Desktop. It is not a remote server.
+If you only wanted it working, [Start here](#start-here) is enough. The rest of this section is the detail.
+
+The `.mcpb` file is that program, zipped, with a recipe for Claude Desktop. It is not a remote server. Each GitHub release includes one, tagged with the same version as `package.json`.
 
 Pick **one** Desktop path. Running the bundle and a manual config at the same time starts two copies.
 
-### Sign in
+### After you connect the assistant
 
-Any of these writes `~/.config/kicktipp-agent/config.ini` (mode 600) and a session cookie. You only need one.
+Wiring Claude to this server is not the same as signing into Kicktipp. Unless you already ran `kicktipp login` or filled in the Desktop bundle's email and password, open a new chat and tell the assistant to set up your Kicktipp account. It should call `connect_account` and give you a `http://127.0.0.1:…/setup?token=…` link. Open that, sign in, pick a community. Do not paste the password into the chat.
+
+`get_status` returns the same link when nothing is saved yet. So does any tool that needs a login.
 
 ```bash
 kicktipp login --web
 ```
 
-Or, in a chat with the assistant already connected, ask it to set up Kicktipp. It should call `connect_account` and give you a `http://127.0.0.1:…/setup?token=…` link. Open that, sign in, pick a community. Do not paste the password into the chat.
-
-`get_status` returns the same link when nothing is saved yet. So does any tool that needs a login.
+is the CLI equivalent, if you prefer to sign in before connecting any assistant.
 
 ### Claude Desktop, by hand
 
@@ -292,19 +335,25 @@ Settings → Developer → Edit config opens `~/Library/Application Support/Clau
 
 No `env` block. The program reads `config.ini`. Build first (`npm run build`). After a `git pull` that changes the server, build again or Desktop keeps using the old `dist`.
 
-In a new chat, ask for Kicktipp status.
+In a new chat, tell the assistant to set up Kicktipp unless you already signed in. Then ask for status.
 
 ### Claude Desktop, the bundle
 
-From a checkout:
+A packed `kicktipp.mcpb` is attached to every [GitHub release](https://github.com/christianheidorn/kicktipp-agent/releases). Download it from the latest release:
+
+**[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)**
+
+Double-click that file, or install it from Claude Desktop. Desktop shows a settings form: email, password, optional community slug, read-only. The password goes in the OS keychain and is passed to the local process as env. Quit and reopen Desktop.
+
+If you already signed in another way, the manual config above is simpler than filling that form.
+
+Packing it yourself from a checkout is optional. The release asset is the one to download:
 
 ```bash
 npm run pack:mcpb
 ```
 
-That writes `kicktipp.mcpb` in the repo root. Double-click it (or install it from Desktop). Desktop shows a settings form: email, password, optional community slug, read-only. The password goes in the OS keychain and is passed to the local process as env. Quit and reopen Desktop.
-
-If you already signed in with `kicktipp login --web`, the manual config above is simpler. You can skip the form.
+That writes `kicktipp.mcpb` in the repo root, with the version from `package.json`.
 
 Turn the extension off if you also added the JSON snippet, so only one server runs.
 
@@ -322,11 +371,11 @@ When the package is on npm:
 claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
 ```
 
-Start a new chat and ask for Kicktipp status, or ask it to connect the account.
+Start a new chat. If Kicktipp is not signed in yet, tell the assistant to set up your account. Otherwise ask for Kicktipp status.
 
 ### Session-only storage
 
-The setup page has a checkbox to keep the login cookie and drop the password (`store = session` under `[auth]`). A leaked config then has no Kicktipp password, and you can revoke the cookie from kicktipp.com. When Kicktipp expires the session, this tool cannot log in again by itself. Tools return a fresh setup link instead. Opt-in, not the default.
+The setup page has a checkbox to keep the login cookie and drop the password (`store = session` under `[auth]`). A leaked config then has no Kicktipp password, and you can revoke the cookie on the Kicktipp site. When Kicktipp expires the session, this tool cannot log in again by itself. Tools return a fresh setup link instead. Opt-in, not the default.
 
 ### Environment variables
 
@@ -381,13 +430,15 @@ An `env` block in the client config still works and wins over the file. Use it o
 
 For a connection that provably cannot bet, check read-only on the setup page, set `read_only = true` under `[server]`, or set `KICKTIPP_READ_ONLY=1` in an `env` block. Betting and settings tools are then never registered, so they do not appear in the tool list at all, and the submitting functions refuse independently. This is the recommended way to try the MCP server for the first time.
 
-### Choosing the Kicktipp host
+### kicktipp.com and kicktipp.de
 
-By default everything runs against `https://www.kicktipp.com`. Set
-`KICKTIPP_BASE_URL=https://www.kicktipp.de` to use the German site and its
-German page names instead. You rarely need to: when a page is missing under
-one host or spelling, the same page is retried under the other automatically,
-so communities that only exist on one of the two still work either way.
+Both sites work. The default is `https://www.kicktipp.com`. If a page is missing there, the same page is tried on kicktipp.de (and the other way around), including German and English URL spellings. You usually do not have to pick.
+
+To start on the German site on purpose, set `KICKTIPP_BASE_URL=https://www.kicktipp.de`.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 

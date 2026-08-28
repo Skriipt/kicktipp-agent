@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { VERSION } from './version.js';
 import { spawn } from 'child_process';
 import {
   saveCommunity,
@@ -65,8 +66,8 @@ async function setPlayerInteractive(page: any, community: string): Promise<void>
 
 program
   .name('kicktipp')
-  .description('CLI tool for kicktipp.com')
-  .version('1.0.0')
+  .description('CLI tool for Kicktipp (.com and .de)')
+  .version(VERSION)
   .option('-c, --community <slug>', 'Act on this community instead of the saved default')
   .option('-p, --profile <name>', 'Use this config profile (a separate account and session)')
   .hook('preAction', (command) => {
@@ -114,8 +115,13 @@ program
     }
     const handle = await startSetupListener();
     console.log(`Open this page to connect your Kicktipp account:\n${handle.url}`);
-    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? undefined : 'xdg-open';
-    if (opener) spawn(opener, [handle.url], { detached: true, stdio: 'ignore' }).unref();
+    if (process.platform === 'darwin') {
+      spawn('open', [handle.url], { detached: true, stdio: 'ignore' }).unref();
+    } else if (process.platform === 'win32') {
+      spawn('cmd', ['/c', 'start', '', handle.url], { detached: true, stdio: 'ignore' }).unref();
+    } else {
+      spawn('xdg-open', [handle.url], { detached: true, stdio: 'ignore' }).unref();
+    }
     const outcome = await handle.finished;
     if (outcome === 'saved') {
       console.log('Connected.');

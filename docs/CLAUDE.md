@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**kicktipp-agent** is a TypeScript CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It talks to the site over plain HTTP (no browser), uses Cheerio for HTML parsing, Commander.js for CLI argument parsing, and the MCP SDK to expose tools to AI assistants. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
+**kicktipp-agent** is a TypeScript CLI and MCP server for Kicktipp ([kicktipp.com](https://www.kicktipp.com) and [kicktipp.de](https://www.kicktipp.de)). It talks to the site over plain HTTP (no browser), uses Cheerio for HTML parsing, Commander.js for CLI argument parsing, and the MCP SDK to expose tools to AI assistants. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
 
 ## File Inventory
 
@@ -220,7 +220,7 @@ Tables:       /{community}/tabellen        Rules:       /{community}/spielregeln
 
 ## Key Details
 
-- Site: `https://www.kicktipp.com` (not .de)
+- Site: `https://www.kicktipp.com` by default; kicktipp.de is tried automatically when a page is missing (and the other way around). Override with `KICKTIPP_BASE_URL`.
 - TypeScript with ES2022 target, Node16 module resolution
 - Matchday range: 1-34 (Bundesliga season)
 - Login form: `input[name="kennung"]`, `input[name="passwort"]`
