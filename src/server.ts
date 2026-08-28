@@ -6,8 +6,10 @@ import { z } from 'zod';
 import { localizeMatchDates } from './helpers/match-date.js';
 import { applyNotifierSettings, notifierSnapshot } from './notify/backends.js';
 import { Page, launchBrowser } from './browser.js';
-import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, readDefaultStrategy } from './config.js';
+import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, readDefaultStrategy, readUiLanguage, readUiSite } from './config.js';
 import { VERSION } from './version.js';
+import { resolveLanguage, setLanguage } from './i18n/index.js';
+import { resolveBaseUrl, setUrlBase } from './url.js';
 import { ensureSetupListener } from './setup/listener.js';
 import { CacheStore } from './cache/store.js';
 import { loadSeason } from './analytics/season.js';
@@ -46,6 +48,9 @@ import {
   placeBonusBets,
   OVERVIEW_VIEW_OPTIONS,
 } from './core.js';
+
+setLanguage(resolveLanguage({ configLanguage: readUiLanguage() }));
+setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 
 // ── Persistent Kicktipp session ────────────────────────────────────
 

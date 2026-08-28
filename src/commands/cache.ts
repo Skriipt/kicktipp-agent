@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { loadCommunity } from '../config.js';
 import { CacheStore } from '../cache/store.js';
+import { t } from '../i18n/index.js';
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -11,44 +12,44 @@ function humanSize(bytes: number): string {
 function requireCommunity(): string {
   const community = loadCommunity();
   if (!community) {
-    console.error('No community set. Run `kicktipp set-community` first.');
+    console.error(t('common.noCommunity'));
     process.exit(1);
   }
   return community;
 }
 
 export function registerCacheCommand(program: Command): void {
-  const cache = program.command('cache').description('Inspect or clear the local season cache');
+  const cache = program.command('cache').description(t('cmd.cache.description'));
 
   cache
     .command('status')
-    .description('Show what is cached')
+    .description(t('cmd.cache.status'))
     .action(() => {
       const store = new CacheStore(requireCommunity());
       const matchdays = store.cachedMatchdays();
       const meta = store.readMeta();
 
-      console.log(`Community:  ${store.community}`);
-      console.log(`Location:   ${store.dir}`);
-      console.log(`Size:       ${humanSize(store.sizeBytes())}`);
-      console.log(`Last sync:  ${meta?.lastSync ?? 'never'}`);
+      console.log(t('cache.community', { name: store.community }));
+      console.log(t('cache.location', { dir: store.dir }));
+      console.log(t('cache.size', { size: humanSize(store.sizeBytes()) }));
+      console.log(t('cache.lastSync', { when: meta?.lastSync ?? t('cache.never') }));
       if (!matchdays.length) {
-        console.log('\nNothing cached yet. Run `kicktipp sync`.');
+        console.log('\n' + t('cache.empty'));
         return;
       }
-      console.log(`Matchdays:  ${matchdays.length} cached (${matchdays[0]}-${matchdays[matchdays.length - 1]})`);
+      console.log(t('cache.matchdays', { n: matchdays.length, from: matchdays[0], to: matchdays[matchdays.length - 1] }));
       const missingBets = matchdays.filter((m) => !store.has('matchdayBets', m));
       if (missingBets.length) {
-        console.log(`            no per-player bets for: ${missingBets.join(', ')}`);
+        console.log(t('cache.missingBets', { days: missingBets.join(', ') }));
       }
     });
 
   cache
     .command('clear')
-    .description('Delete the cached data for the current community')
+    .description(t('cmd.cache.clear'))
     .action(() => {
       const store = new CacheStore(requireCommunity());
       store.clear();
-      console.log(`Cleared cache for '${store.community}'.`);
+      console.log(t('cache.cleared', { name: store.community }));
     });
 }

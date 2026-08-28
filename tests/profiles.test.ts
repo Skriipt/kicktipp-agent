@@ -141,3 +141,19 @@ describe('community override', () => {
     expect(config.loadCommunity()).toBe('from-env');
   });
 });
+
+describe('[ui] language and site', () => {
+  it('are missing until saved, then persist together', async () => {
+    const config = await loadConfig(CLASSIC);
+    expect(config.readUiLanguage()).toBeNull();
+    expect(config.readUiSite()).toBeNull();
+    config.saveUiLanguage('de');
+    config.saveUiSite('de');
+    expect(config.readUiLanguage()).toBe('de');
+    expect(config.readUiSite()).toBe('de');
+    const ini = fs.readFileSync(configFile, 'utf8');
+    expect(ini).toMatch(/\[ui\]/);
+    expect(ini).toMatch(/language\s*=\s*de/);
+    expect(ini).toMatch(/site\s*=\s*de/);
+  });
+});

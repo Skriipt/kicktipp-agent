@@ -5,6 +5,7 @@ import { loadSeason } from '../analytics/season.js';
 import { replaySeason, REPLAY_STRATEGIES, type ReplayResult } from '../analytics/replay.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
 import { emitJson, setJsonMode } from '../helpers/output.js';
+import { t } from '../i18n/index.js';
 
 function render(result: ReplayResult, baseline: ReplayResult | null): string {
   const lines = [
@@ -46,25 +47,25 @@ function render(result: ReplayResult, baseline: ReplayResult | null): string {
 export function registerWhatifCommand(program: Command): void {
   program
     .command('whatif')
-    .description('Replay the cached season under a different betting strategy')
+    .description(t('cmd.whatif.description'))
     .argument(
       '<strategy>',
-      `A scoreline like 2:1, one of ${REPLAY_STRATEGIES.join(', ')}, or suggest:safe|ev|contrarian`,
+      t('cmd.whatif.argument', { strategies: REPLAY_STRATEGIES.join(', ') }),
     )
-    .option('--player <name>', 'Player to replay (default: your saved player)')
-    .option('--json', 'Output raw JSON')
+    .option('--player <name>', t('opt.playerReplay'))
+    .option('--json', t('opt.json'))
     .action((strategy: string, opts) => {
       if (opts.json) setJsonMode(true);
 
       const community = loadCommunity();
       if (!community) {
-        console.error('No community set. Run `kicktipp set-community` first.');
+        console.error(t('common.noCommunity'));
         process.exit(1);
       }
       const ownPlayer = loadPlayer();
       const player = opts.player ?? ownPlayer;
       if (!player) {
-        console.error('No player set. Run `kicktipp set-player`, or pass --player.');
+        console.error(t('common.noPlayerOrPass'));
         process.exit(1);
       }
 

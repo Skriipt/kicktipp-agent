@@ -7,9 +7,10 @@ import { fetchRules, fetchLeaderboard, fetchMatchdayBets, type RulesSection } fr
 import { CacheStore } from '../cache/store.js';
 import { resolveRules } from '../rules/resolve.js';
 import { verifyRules } from '../rules/verify.js';
+import { t } from '../i18n/index.js';
 
 function render(sections: RulesSection[]): string {
-  if (!sections.length) return 'No rules found.';
+  if (!sections.length) return t('common.noRules');
 
   const lines: string[] = [];
   for (const section of sections) {
@@ -75,9 +76,9 @@ function renderVerification(
 export function registerRulesCommand(program: Command): void {
   program
     .command('rules')
-    .description('Display the game rules')
-    .option('--verify [matchday]', 'Check the parsed point values against a finished matchday')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.rules.description'))
+    .option('--verify [matchday]', t('cmd.rules.optionVerify'))
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
@@ -87,7 +88,7 @@ export function registerRulesCommand(program: Command): void {
         if (opts.verify) {
           const cache = { store: new CacheStore(community) };
           const matchday = typeof opts.verify === 'string' ? parseInt(opts.verify, 10) : undefined;
-          status('Verifying scoring rules...');
+          status(t('status.verifyingRules'));
           const rules = await resolveRules(page, community, cache);
           const grid = await fetchMatchdayBets(page, community, matchday, cache);
           const leaderboard = await fetchLeaderboard(page, community, matchday, false, cache);
@@ -103,7 +104,7 @@ export function registerRulesCommand(program: Command): void {
           return;
         }
 
-        status('Loading rules...');
+        status(t('status.loadingRules'));
         const data = await fetchRules(page, community);
         statusClear();
 

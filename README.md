@@ -143,6 +143,15 @@ npm test
 
 ## CLI
 
+The CLI and the localhost setup page default to English, and they start on kicktipp.com. To keep German chrome and the German site:
+
+```bash
+kicktipp set-lang de
+kicktipp set-site de
+```
+
+That writes `[ui]` in `~/.config/kicktipp-agent/config.ini`. `--lang de` and `--site de` are one-shot overrides for a single run. Team names still come from whichever Kicktipp host you use.
+
 ### First-time setup
 
 ```bash
@@ -167,6 +176,8 @@ $ kicktipp set-player
 | `logout` | Remove stored credentials and session |
 | `communities` | List all communities you belong to |
 | `set-community` | Select a default community |
+| `set-lang` | Set the UI language permanently (`en` or `de`) |
+| `set-site` | Set the Kicktipp host permanently (`de` or `com`) |
 | `players` | List players in the saved community |
 | `set-player` | Select which player you are |
 | `set-notify` | Configure the `notify` backend (desktop, webhook, or command) |
@@ -501,7 +512,7 @@ For a connection that provably cannot bet, check read-only on the setup page, se
 
 Both sites work. The default is `https://www.kicktipp.com`. If a page is missing there, the same page is tried on kicktipp.de (and the other way around), including German and English URL spellings. You usually do not have to pick.
 
-To start on the German site on purpose, set `KICKTIPP_BASE_URL=https://www.kicktipp.de`.
+To start on the German site on purpose, run `kicktipp set-site de` (or pick kicktipp.de on the setup page). `KICKTIPP_SITE=de` and `KICKTIPP_BASE_URL=https://www.kicktipp.de` still override for a single process.
 
 ## Changelog
 

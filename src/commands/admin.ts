@@ -10,22 +10,23 @@ import {
   placeBetsForMember,
   resolveMember,
 } from '../core.js';
+import { t } from '../i18n/index.js';
 
 export function registerAdminCommand(program: Command): void {
   const admin = program
     .command('admin')
-    .description('Spielleiter tools: act on behalf of another member (admin rights required)');
+    .description(t('cmd.admin.description'));
 
   admin
     .command('members')
-    .description('List the community members with their tipperIds')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.admin.members'))
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Loading members...');
+        status(t('status.loadingMembers'));
         const members = await fetchMembers(page, community);
         statusClear();
 
@@ -34,14 +35,14 @@ export function registerAdminCommand(program: Command): void {
           return;
         }
         if (!members.length) {
-          console.log('No members found. Are you a Spielleiter of this community?');
+          console.log(t('admin.noMembers'));
           return;
         }
         const nameWidth = widest(members.map((m) => m.name), 4);
         for (const member of members) {
           console.log(
             `  ${member.name.padEnd(nameWidth)}  ${member.tipperId.padStart(10)}` +
-              (member.dummy ? '  (dummy)' : ''),
+              (member.dummy ? `  ${t('common.dummy')}` : ''),
           );
         }
       } finally {
@@ -51,16 +52,16 @@ export function registerAdminCommand(program: Command): void {
 
   admin
     .command('bets')
-    .description("Show another member's bets for a matchday")
-    .argument('<member>', 'Member name or tipperId')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.admin.bets'))
+    .argument('<member>', t('cmd.admin.argumentMember'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
+    .option('--json', t('opt.json'))
     .action(async (reference: string, opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Loading members...');
+        status(t('status.loadingMembers'));
         const member = resolveMember(await fetchMembers(page, community), reference);
         const data = await fetchBetsForMember(page, community, member, opts.matchday);
         statusClear();
@@ -69,7 +70,7 @@ export function registerAdminCommand(program: Command): void {
           emitJson({ community, matchday: opts.matchday ?? null, data });
           return;
         }
-        console.log(`Bets for ${member.name} (${member.tipperId})\n`);
+        console.log(`${t('admin.betsFor', { name: member.name, id: member.tipperId })}\n`);
         const width = widest(data.matches.map((m) => `${m.home} vs ${m.away}`));
         for (const match of data.matches) {
           console.log(`  ${`${match.home} vs ${match.away}`.padEnd(width)}  ${match.bet}`);
@@ -81,32 +82,31 @@ export function registerAdminCommand(program: Command): void {
 
   admin
     .command('bet')
-    .description('Place bets on behalf of another member')
-    .argument('<member>', 'Member name or tipperId')
-    .argument('<bets...>', 'Bets as "Home vs Away=H:G"')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--dry-run', 'Show what would be submitted without submitting')
-    .option('--yes', 'Skip the confirmation prompt')
+    .description(t('cmd.admin.place'))
+    .argument('<member>', t('cmd.admin.argumentMember'))
+    .argument('<bets...>', t('cmd.admin.argumentBets'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
+    .option('--dry-run', t('opt.dryRun'))
+    .option('--yes', t('opt.yes'))
     .action(async (reference: string, bets: string[], opts) => {
       if (!opts.dryRun) assertWritable('Placing bets for another member');
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Loading members...');
+        status(t('status.loadingMembers'));
         const member = resolveMember(await fetchMembers(page, community), reference);
         statusClear();
 
         console.log(
-          `About to place ${bets.length} bet(s) on behalf of ${member.name} ` +
-            `(${member.tipperId})${member.dummy ? ', a dummy member' : ''}.`,
+          `${t('admin.aboutToPlace', { name: member.name })} (${member.tipperId})`,
         );
         for (const bet of bets) console.log(`  ${bet}`);
 
         if (!opts.dryRun && !opts.yes) {
           const { ask } = await import('../shared.js');
-          const answer = (await ask(`Type the member's name to confirm: `)).trim();
+          const answer = (await ask(t('admin.confirmName'))).trim();
           if (answer.toLowerCase() !== member.name.toLowerCase()) {
-            console.log('Name did not match. Nothing submitted.');
+            console.log(t('admin.nameMismatch'));
             return;
           }
         }
@@ -122,8 +122,8 @@ export function registerAdminCommand(program: Command): void {
         );
         console.log(
           opts.dryRun
-            ? `Dry run: ${placed.length} bet(s) would be placed for ${member.name}.`
-            : `Placed ${placed.length} bet(s) for ${member.name}.`,
+            ? t('admin.wouldPlace', { n: placed.length, name: member.name })
+            : t('admin.placed', { n: placed.length, name: member.name }),
         );
       } finally {
         await page.close();

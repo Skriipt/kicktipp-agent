@@ -8,6 +8,7 @@ import { fetchLeaderboard, fetchMatchdayBets } from '../core.js';
 import { resolveRules } from '../rules/resolve.js';
 import { analyseRival, type RivalAnalysis } from '../analytics/rivals.js';
 import { gapBeforeMatchday } from '../analytics/gap.js';
+import { t } from '../i18n/index.js';
 import { offlineMatchday, requireCached } from '../cache/offline.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
 
@@ -62,21 +63,21 @@ function render(analysis: RivalAnalysis, rulesNote: string | undefined): string 
 export function registerRivalCommand(program: Command): void {
   program
     .command('rival')
-    .description('Work out what it would take to overtake another player')
-    .argument('<name>', 'Player to compare against')
-    .option('--matchday <n>', 'Matchday number (1-34). Omit for the current one.', parseInt)
-    .option('--offline', 'Use only cached data; make no requests')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.rival.description'))
+    .argument('<name>', t('cmd.rival.argument'))
+    .option('--matchday <n>', t('opt.matchdayCurrent'), parseInt)
+    .option('--offline', t('opt.offline'))
+    .option('--json', t('opt.json'))
     .action(async (name: string, opts) => {
       if (opts.offline) {
         const community = loadCommunity();
         if (!community) {
-          console.error('No community set. Run `kicktipp set-community` first.');
+          console.error(t('common.noCommunity'));
           process.exit(1);
         }
         const player = loadPlayer();
         if (!player) {
-          console.error('No player set. Run `kicktipp set-player` first.');
+          console.error(t('common.noPlayer'));
           process.exit(1);
         }
         const store = new CacheStore(community);
@@ -111,14 +112,14 @@ export function registerRivalCommand(program: Command): void {
         const community = await ensureCommunity(page);
         const player = loadPlayer();
         if (!player) {
-          console.error('No player set. Run `kicktipp set-player` first.');
+          console.error(t('common.noPlayer'));
           process.exit(1);
         }
 
         const store = new CacheStore(community);
         const cache = { store };
 
-        status('Loading matchday...');
+        status(t('status.loadingMatchday'));
         const grid = await fetchMatchdayBets(page, community, opts.matchday, cache);
         const leaderboard = await fetchLeaderboard(page, community, opts.matchday, false, cache);
         const rules = await resolveRules(page, community, cache);

@@ -5,6 +5,7 @@ import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
 import { localizeMatchDates, localizePrintedDate } from '../helpers/match-date.js';
 import { fetchLeaderboard, type LeaderboardData } from '../core.js';
+import { t } from '../i18n/index.js';
 
 function render(data: LeaderboardData, bonus: boolean): string {
   const lines: string[] = [];
@@ -28,7 +29,7 @@ function render(data: LeaderboardData, bonus: boolean): string {
   }
 
   if (!data.rankings.length) {
-    lines.push('No rankings found.');
+    lines.push(t('common.noRankings'));
     return lines.join('\n');
   }
 
@@ -50,17 +51,17 @@ function render(data: LeaderboardData, bonus: boolean): string {
 export function registerLeaderboardCommand(program: Command): void {
   program
     .command('leaderboard')
-    .description('Display the leaderboard for a matchday')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--bonus', 'Show bonus questions instead of matches')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.leaderboard.description'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
+    .option('--bonus', t('opt.bonusLeaderboard'))
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         const bonus = !!opts.bonus;
-        status('Loading leaderboard...');
+        status(t('status.loadingLeaderboard'));
         const data = await fetchLeaderboard(page, community, opts.matchday, bonus);
         statusClear();
 

@@ -6,6 +6,7 @@ import { emitJson, setJsonMode } from '../helpers/output.js';
 import { fetchBets } from '../core.js';
 import { buildDeadlineReport, type DeadlineReport } from '../analytics/deadline.js';
 import { humanDelta } from '../helpers/match-date.js';
+import { t } from '../i18n/index.js';
 
 /** `--check` exits with this when something still needs a bet, for cron. */
 export const EXIT_URGENT = 2;
@@ -16,7 +17,7 @@ function render(report: DeadlineReport): string {
   lines.push(`Deadlines for ${report.community}${md}`);
 
   if (!report.matches.length) {
-    lines.push('No matches found.');
+    lines.push(t('common.noMatches'));
     return lines.join('\n');
   }
 
@@ -55,24 +56,24 @@ function render(report: DeadlineReport): string {
 export function registerDeadlineCommand(program: Command): void {
   program
     .command('deadline')
-    .description('Show time until kickoff and which matches still need a bet')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
+    .description(t('cmd.deadline.description'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
     .option(
       '--warn-hours <n>',
-      'Hours before kickoff that an unbetted match counts as urgent (default: 6)',
+      t('opt.warnHours'),
       parseFloat,
     )
     .option(
       '--check',
-      'For cron: print nothing except a one-line warning, and exit 2 if anything is urgent (else 0)',
+      t('opt.check'),
     )
-    .option('--json', 'Output raw JSON')
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Checking deadlines...');
+        status(t('status.checkingDeadlines'));
         const { matches } = await fetchBets(page, community, opts.matchday);
         statusClear();
 
@@ -84,8 +85,11 @@ export function registerDeadlineCommand(program: Command): void {
         else if (!opts.check) console.log(render(report));
         else if (report.urgentCount) {
           console.log(
-            `${report.urgentCount} match(es) need a bet within ${report.warnHours}h ` +
-              `(next kickoff ${report.nextKickoffIn}).`,
+            t('deadline.urgent', {
+              n: report.urgentCount,
+              hours: report.warnHours,
+              when: report.nextKickoffIn ?? '',
+            }),
           );
         }
 

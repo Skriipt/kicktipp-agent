@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import type { AnyNode, Element } from 'domhandler';
 import fs from 'fs';
 import path from 'path';
-import { URL_BASE, getAlternateUrls } from '../url.js';
+import { urlBase, getAlternateUrls } from '../url.js';
 import { CookieJar } from './cookie-jar.js';
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -77,7 +77,7 @@ export class ElementHandle {
  * actually used is implemented.
  */
 export class Page {
-  private currentUrl = URL_BASE;
+  private currentUrl = urlBase();
   private html = '';
   private $dom: cheerio.CheerioAPI | null = null;
   private lastStatus = 0;
@@ -357,7 +357,7 @@ export class Page {
     return this.$dom;
   }
 
-  private absoluteUrl(url: string, base = this.currentUrl || URL_BASE): string {
+  private absoluteUrl(url: string, base = this.currentUrl || urlBase()): string {
     return new URL(url, base).toString();
   }
 

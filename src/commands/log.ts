@@ -6,11 +6,12 @@ import { emitJson, setJsonMode } from '../helpers/output.js';
 import { readAudit, lastSubmission, auditFile, type AuditRecord } from '../audit/log.js';
 import { placeBets } from '../core.js';
 import { assertWritable } from '../read-only.js';
+import { t } from '../i18n/index.js';
 
 function requireCommunity(): string {
   const community = loadCommunity();
   if (!community) {
-    console.error('No community set. Run `kicktipp set-community` first.');
+    console.error(t('common.noCommunity'));
     process.exit(1);
   }
   return community;
@@ -37,12 +38,12 @@ function render(records: AuditRecord[], community: string): string {
 export function registerLogCommand(program: Command): void {
   program
     .command('log')
-    .description('Show what this agent submitted to Kicktipp, and when')
-    .option('--matchday <n>', 'Only this matchday', parseInt)
-    .option('--all', 'Include dry runs, intents and failures')
-    .option('--undo', 'Restore the bets replaced by the most recent submission')
-    .option('--yes', 'Skip the confirmation prompt when undoing')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.log.description'))
+    .option('--matchday <n>', t('opt.matchdayOnly'), parseInt)
+    .option('--all', t('cmd.log.optionAll'))
+    .option('--undo', t('cmd.log.optionUndo'))
+    .option('--yes', t('opt.yes'))
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const community = requireCommunity();
@@ -51,7 +52,7 @@ export function registerLogCommand(program: Command): void {
         assertWritable('Undoing bets');
         const last = lastSubmission(community, opts.matchday);
         if (!last) {
-          console.error('Nothing to undo: no submission recorded yet.');
+          console.error(t('log.nothingUndo'));
           process.exit(1);
         }
         const restorable = last.bets.filter((b) => b.previous);
@@ -62,15 +63,15 @@ export function registerLogCommand(program: Command): void {
           process.exit(1);
         }
 
-        console.log(`Undoing the submission from ${new Date(last.at).toLocaleString()}:`);
+        console.log(t('log.undoing', { when: new Date(last.at).toLocaleString() }));
         for (const bet of restorable) {
           console.log(`  ${bet.fixture}: ${bet.bet} -> ${bet.previous}`);
         }
 
         if (!opts.yes) {
-          const answer = (await ask('Restore these bets? [y/N]: ')).trim().toLowerCase();
-          if (answer !== 'y' && answer !== 'yes') {
-            console.log('Nothing submitted.');
+          const answer = (await ask(t('log.confirm'))).trim().toLowerCase();
+          if (answer !== 'y' && answer !== 'yes' && answer !== 'j' && answer !== 'ja') {
+            console.log(t('common.nothingSubmitted'));
             return;
           }
         }
@@ -79,7 +80,7 @@ export function registerLogCommand(program: Command): void {
         try {
           const args = restorable.map((b) => `${b.fixture}=${b.previous}`);
           const placed = await placeBets(page, community, args, last.matchday ?? undefined, true, 'cli:bet');
-          console.log(`Restored ${placed.length} bet(s).`);
+          console.log(t('log.restored', { n: placed.length }));
         } finally {
           await page.close();
         }

@@ -1,9 +1,10 @@
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
-import { URL_LOGIN, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
+import { urlLogin, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
 import { sessionFile, loadCredentials, isSessionOnly, SessionOnlyExpiredError } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
+import { t } from './i18n/index.js';
 import { normalizeSlug } from './helpers/normalize-slug.js';
 import { CookieJar } from './http/cookie-jar.js';
 import { Page } from './http/page.js';
@@ -27,7 +28,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
   const file = opts.sessionFile === undefined ? sessionFile() : opts.sessionFile;
 
   if (file && fs.existsSync(file)) {
-    status('Restoring session...');
+    status(t('status.restoringSession'));
     try {
       const stored = JSON.parse(fs.readFileSync(file, 'utf-8'));
       const page = new Page(CookieJar.fromJSON(stored), opts.fetchImpl);
@@ -40,7 +41,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
       // An unreadable or outdated session file is not worth reporting —
       // logging in again produces a good one.
     }
-    status('Session expired, logging in again...');
+    status(t('status.sessionExpired'));
   }
 
   if (isSessionOnly()) {
@@ -57,12 +58,12 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
 }
 
 export async function login(page: Page, username: string, password: string): Promise<void> {
-  status('Logging in...');
-  await page.goto(URL_LOGIN);
+  status(t('status.loggingIn'));
+  await page.goto(urlLogin());
 
   if (!page.has('input[name="kennung"]')) {
     statusClear();
-    throw new Error(`Kicktipp login form not found at ${page.url()}.`);
+    throw new Error(t('login.formMissing', { url: page.url() }));
   }
 
   page.setInputValue('input[name="kennung"]', username);
@@ -72,18 +73,18 @@ export async function login(page: Page, username: string, password: string): Pro
   // A failed login lands back on the login page.
   if (page.isAuthRedirect()) {
     statusClear();
-    throw new Error('Login failed. Check your credentials (use --logout to re-enter).');
+    throw new Error(t('login.failed'));
   }
   statusClear();
 }
 
 export async function getCommunities(page: Page): Promise<string[]> {
-  status('Fetching communities...');
+  status(t('status.fetchingCommunities'));
   await page.goto(getCommunitiesUrl());
   if (page.isAuthRedirect()) {
     statusClear();
     throw new Error(
-      `Kicktipp session is not authenticated (redirected to ${page.url()}). Verify credentials.`,
+      t('login.notAuthenticated', { url: page.url() }),
     );
   }
 
@@ -121,7 +122,7 @@ export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, 
 }
 
 export async function getPlayers(page: Page, community: string): Promise<string[]> {
-  status('Fetching players...');
+  status(t('status.fetchingPlayers'));
   await page.goto(getLeaderboardUrl(community));
   statusClear();
 

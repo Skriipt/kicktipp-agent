@@ -11,6 +11,10 @@ import {
   setActiveProfile,
   setCommunityOverride,
   getActiveProfile,
+  readUiLanguage,
+  readUiSite,
+  saveUiLanguage,
+  saveUiSite,
 } from './config.js';
 import { startSetupListener } from './setup/listener.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
@@ -37,39 +41,46 @@ import { registerLogCommand } from './commands/log.js';
 import { registerScenarioCommand } from './commands/scenario.js';
 import { registerWhatifCommand } from './commands/whatif.js';
 import { registerAdminCommand } from './commands/admin.js';
+import { currentLanguage, parseLanguage, resolveLanguage, setLanguage, t } from './i18n/index.js';
+import { parseSite, resolveBaseUrl, setUrlBase, siteLabel, urlBase } from './url.js';
+
+setLanguage(resolveLanguage({ configLanguage: readUiLanguage() }));
+setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 
 const program = new Command();
 
 async function setCommunityInteractive(page: any): Promise<void> {
   const all = await getCommunities(page);
-  if (!all.length) { console.error('No communities found.'); process.exit(1); }
-  console.log('Available communities:');
+  if (!all.length) { console.error(t('common.noCommunities')); process.exit(1); }
+  console.log(t('common.availableCommunities'));
   all.forEach((c, i) => console.log(`  [${i + 1}] ${c}`));
-  const choice = await ask(`Select community (1-${all.length}): `);
+  const choice = await ask(t('common.selectCommunity', { n: all.length }));
   const idx = parseInt(choice) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= all.length) { console.error('Invalid selection.'); process.exit(1); }
+  if (isNaN(idx) || idx < 0 || idx >= all.length) { console.error(t('common.invalidSelection')); process.exit(1); }
   saveCommunity(all[idx]);
-  console.log(`Saved '${all[idx]}' as default community.`);
+  console.log(t('common.savedCommunity', { name: all[idx] }));
 }
 
 async function setPlayerInteractive(page: any, community: string): Promise<void> {
   const players = await getPlayers(page, community);
-  if (!players.length) { console.error('No players found.'); process.exit(1); }
-  console.log('Players:');
+  if (!players.length) { console.error(t('common.noPlayers')); process.exit(1); }
+  console.log(t('common.players'));
   players.forEach((p, i) => console.log(`  [${i + 1}] ${p}`));
-  const choice = await ask(`Which one are you? (1-${players.length}): `);
+  const choice = await ask(t('common.selectPlayer', { n: players.length }));
   const idx = parseInt(choice) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= players.length) { console.error('Invalid selection.'); process.exit(1); }
+  if (isNaN(idx) || idx < 0 || idx >= players.length) { console.error(t('common.invalidSelection')); process.exit(1); }
   savePlayer(players[idx]);
-  console.log(`Saved '${players[idx]}' as your player.`);
+  console.log(t('common.savedPlayer', { name: players[idx] }));
 }
 
 program
   .name('kicktipp')
-  .description('CLI tool for Kicktipp (.com and .de)')
+  .description(t('program.description'))
   .version(VERSION)
-  .option('-c, --community <slug>', 'Act on this community instead of the saved default')
-  .option('-p, --profile <name>', 'Use this config profile (a separate account and session)')
+  .option('-c, --community <slug>', t('program.optionCommunity'))
+  .option('-p, --profile <name>', t('program.optionProfile'))
+  .option('--lang <code>', t('program.optionLang'))
+  .option('--site <host>', t('program.optionSite'))
   .hook('preAction', (command) => {
     // Applied before every subcommand so the flags work everywhere without
     // each command having to know about them.
@@ -80,8 +91,8 @@ program
 
 program
   .command('profiles')
-  .description('List the configured profiles')
-  .option('--json', 'Output raw JSON')
+  .description(t('cmd.profiles.description'))
+  .option('--json', t('opt.json'))
   .action((opts) => {
     const profiles = listProfiles();
     const active = getActiveProfile();
@@ -90,8 +101,8 @@ program
       return;
     }
     if (!profiles.length) {
-      console.log('No profiles configured. The default [auth]/[community]/[player] sections are in use.');
-      console.log('Add one as a [profile.<name>] section in ~/.config/kicktipp-agent/config.ini.');
+      console.log(t('profiles.none'));
+      console.log(t('profiles.addOne'));
       return;
     }
     for (const name of profiles) {
@@ -101,8 +112,8 @@ program
 
 program
   .command('login')
-  .description('Connect a Kicktipp account')
-  .option('--web', 'Enter credentials in the browser instead of the terminal')
+  .description(t('cmd.login.description'))
+  .option('--web', t('cmd.login.optionWeb'))
   .action(async (opts) => {
     if (!opts.web) {
       const { page } = await launchBrowser();
@@ -114,7 +125,7 @@ program
       return;
     }
     const handle = await startSetupListener();
-    console.log(`Open this page to connect your Kicktipp account:\n${handle.url}`);
+    console.log(t('login.openPage', { url: handle.url }));
     if (process.platform === 'darwin') {
       spawn('open', [handle.url], { detached: true, stdio: 'ignore' }).unref();
     } else if (process.platform === 'win32') {
@@ -124,26 +135,26 @@ program
     }
     const outcome = await handle.finished;
     if (outcome === 'saved') {
-      console.log('Connected.');
+      console.log(t('login.connected'));
       return;
     }
     if (outcome === 'timeout') {
-      console.error('Setup timed out. Run `kicktipp login --web` again.');
+      console.error(t('login.timeout'));
       process.exit(1);
     }
-    console.error('Setup did not finish. Open the page again with `kicktipp login --web`.');
+    console.error(t('login.unfinished'));
     process.exit(1);
   });
 
 program
   .command('logout')
-  .description('Remove stored credentials and session')
+  .description(t('cmd.logout.description'))
   .action(() => logout());
 
 program
   .command('communities')
-  .description('List all communities you belong to')
-  .option('--json', 'Output raw JSON')
+  .description(t('cmd.communities.description'))
+  .option('--json', t('opt.json'))
   .action(async (opts) => {
     if (opts.json) setJsonMode(true);
     const { page } = await launchBrowser();
@@ -158,7 +169,7 @@ program
 
 program
   .command('set-community')
-  .description('Select a default community')
+  .description(t('cmd.setCommunity.description'))
   .action(async () => {
     const { page } = await launchBrowser();
     await setCommunityInteractive(page);
@@ -166,9 +177,39 @@ program
   });
 
 program
+  .command('set-lang')
+  .description(t('cmd.setLang.description'))
+  .argument('[code]', t('cmd.setLang.argument'))
+  .action((code?: string) => {
+    const language = parseLanguage(code);
+    if (!language) {
+      console.log(t('ui.currentLanguage', { code: currentLanguage() }));
+      return;
+    }
+    saveUiLanguage(language);
+    setLanguage(language);
+    console.log(t('ui.savedLanguage', { code: language }));
+  });
+
+program
+  .command('set-site')
+  .description(t('cmd.setSite.description'))
+  .argument('[site]', t('cmd.setSite.argument'))
+  .action((site?: string) => {
+    const base = parseSite(site);
+    if (!base) {
+      console.log(t('ui.currentSite', { site: siteLabel(urlBase()), url: urlBase() }));
+      return;
+    }
+    saveUiSite(siteLabel(base));
+    setUrlBase(base);
+    console.log(t('ui.savedSite', { site: siteLabel(base), url: base }));
+  });
+
+program
   .command('players')
-  .description('List players in the saved community')
-  .option('--json', 'Output raw JSON')
+  .description(t('cmd.players.description'))
+  .option('--json', t('opt.json'))
   .action(async (opts) => {
     if (opts.json) setJsonMode(true);
     const { page } = await launchBrowser();
@@ -184,7 +225,7 @@ program
 
 program
   .command('set-player')
-  .description('Select which player you are')
+  .description(t('cmd.setPlayer.description'))
   .action(async () => {
     const { page } = await launchBrowser();
     const community = await ensureCommunity(page);

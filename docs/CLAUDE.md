@@ -188,15 +188,16 @@ All page parsing follows: `page.goto(url)` → `cheerio.load(await page.content(
 ### URL Structure: `src/url.ts`
 
 A route table holds the German and English spelling of every page.
-`URL_BASE` defaults to `https://www.kicktipp.com` (English spellings) and can
+`urlBase()` defaults to `https://www.kicktipp.com` (English spellings) and can
 be pointed at `https://www.kicktipp.de` (German spellings) with
+`kicktipp set-site de`, `[ui] site=de`, `KICKTIPP_SITE=de`, or
 `KICKTIPP_BASE_URL`. `getAlternateUrls()` lists the same page on the other
 host and in the other language; `Page.goto()` walks those candidates when a
 request comes back "not found", so a community that exists on only one host
 still resolves.
 
 ```
-Base:         https://www.kicktipp.com (override: KICKTIPP_BASE_URL)
+Base:         https://www.kicktipp.com (override: set-site / KICKTIPP_SITE / KICKTIPP_BASE_URL)
 Login:        /info/profil/login
 Communities:  /info/profil/meinetipprunden
 Predict:      /{community}/predict[?spieltagIndex=N]

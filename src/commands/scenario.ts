@@ -7,6 +7,7 @@ import { emitJson, setJsonMode, widest } from '../helpers/output.js';
 import { fetchLeaderboard, fetchMatchdayBets } from '../core.js';
 import { CacheStore } from '../cache/store.js';
 import { resolveRules } from '../rules/resolve.js';
+import { t } from '../i18n/index.js';
 import {
   findTargetCombinations,
   projectStandings,
@@ -68,12 +69,12 @@ function render(projection: ScenarioProjection): string {
 export function registerScenarioCommand(program: Command): void {
   program
     .command('scenario')
-    .description('Project the leaderboard under hypothetical results')
-    .argument('[results...]', 'Results as "Home vs Away=H:G"')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--target <rank>', 'Search for combinations that reach this rank', parseInt)
-    .option('--player <name>', 'Player for --target (default: your saved player)')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.scenario.description'))
+    .argument('[results...]', t('cmd.scenario.argument'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
+    .option('--target <rank>', t('cmd.scenario.optionTarget'), parseInt)
+    .option('--player <name>', t('opt.playerTarget'))
+    .option('--json', t('opt.json'))
     .action(async (results: string[], opts) => {
       if (opts.json) setJsonMode(true);
       const supplied = (results ?? []).map(parseScenarioArg);
@@ -83,7 +84,7 @@ export function registerScenarioCommand(program: Command): void {
         const community = await ensureCommunity(page);
         const cache = { store: new CacheStore(community) };
 
-        status('Loading matchday...');
+        status(t('status.loadingMatchday'));
         const grid = await fetchMatchdayBets(page, community, opts.matchday, cache);
         const leaderboard = await fetchLeaderboard(page, community, opts.matchday, false, cache);
         const rules = await resolveRules(page, community, cache);
@@ -92,7 +93,7 @@ export function registerScenarioCommand(program: Command): void {
         if (opts.target !== undefined) {
           const player = opts.player ?? loadPlayer();
           if (!player) {
-            console.error('No player set. Run `kicktipp set-player`, or pass --player.');
+            console.error(t('common.noPlayerOrPass'));
             process.exit(1);
           }
           const search = findTargetCombinations(

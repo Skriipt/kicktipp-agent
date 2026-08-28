@@ -1,3 +1,6 @@
+import { currentLanguage, t } from '../i18n/index.js';
+import { siteLabel, urlBase } from '../url.js';
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -9,7 +12,7 @@ function escapeHtml(value: string): string {
 
 function page(title: string, body: string): string {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${currentLanguage()}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -38,20 +41,30 @@ ${body}
 export function loginPage(token: string, error?: string): string {
   const err = error ? `<p class="error">${escapeHtml(error)}</p>` : '';
   return page(
-    'Connect Kicktipp',
-    `<h1>Connect Kicktipp</h1>
-<p>Email and password stay on this machine. They are not sent to the assistant.</p>
+    t('setup.loginTitle'),
+    `<h1>${escapeHtml(t('setup.loginTitle'))}</h1>
+<p>${escapeHtml(t('setup.loginLead'))}</p>
 ${err}
 <form method="post" action="/setup?token=${escapeHtml(token)}">
   <input type="hidden" name="token" value="${escapeHtml(token)}">
   <input type="hidden" name="step" value="login">
-  <label for="email">Email</label>
+  <label for="email">${escapeHtml(t('setup.email'))}</label>
   <input id="email" name="email" type="email" autocomplete="username" required>
-  <label for="password">Password</label>
+  <label for="password">${escapeHtml(t('setup.password'))}</label>
   <input id="password" name="password" type="password" autocomplete="current-password" required>
-  <label class="check"><input type="checkbox" name="store" value="session"> Keep the login cookie, not the password. You will have to reconnect when Kicktipp expires the session.</label>
-  <label class="check"><input type="checkbox" name="read_only" value="1"> Read-only: the assistant can look, but it cannot bet or change settings.</label>
-  <button type="submit">Sign in</button>
+  <fieldset>
+    <legend>${escapeHtml(t('setup.siteLegend'))}</legend>
+    <label class="check"><input type="radio" name="site" value="com"${siteLabel(urlBase()) === 'de' ? '' : ' checked'}> ${escapeHtml(t('setup.siteCom'))}</label>
+    <label class="check"><input type="radio" name="site" value="de"${siteLabel(urlBase()) === 'de' ? ' checked' : ''}> ${escapeHtml(t('setup.siteDe'))}</label>
+  </fieldset>
+  <fieldset>
+    <legend>${escapeHtml(t('setup.langLegend'))}</legend>
+    <label class="check"><input type="radio" name="language" value="en"${currentLanguage() === 'de' ? '' : ' checked'}> ${escapeHtml(t('setup.langEn'))}</label>
+    <label class="check"><input type="radio" name="language" value="de"${currentLanguage() === 'de' ? ' checked' : ''}> ${escapeHtml(t('setup.langDe'))}</label>
+  </fieldset>
+  <label class="check"><input type="checkbox" name="store" value="session"> ${escapeHtml(t('setup.storeSession'))}</label>
+  <label class="check"><input type="checkbox" name="read_only" value="1"> ${escapeHtml(t('setup.readOnly'))}</label>
+  <button type="submit">${escapeHtml(t('setup.signIn'))}</button>
 </form>`,
   );
 }
@@ -65,30 +78,33 @@ export function communityPage(token: string, communities: string[], error?: stri
     )
     .join('\n');
   return page(
-    'Choose a community',
-    `<h1>Choose a community</h1>
-<p>Signed in. Pick the pool this assistant should use.</p>
+    t('setup.communityTitle'),
+    `<h1>${escapeHtml(t('setup.communityTitle'))}</h1>
+<p>${escapeHtml(t('setup.communityLead'))}</p>
 ${err}
 <form method="post" action="/setup?token=${escapeHtml(token)}">
   <input type="hidden" name="token" value="${escapeHtml(token)}">
   <input type="hidden" name="step" value="community">
   <fieldset>
-    <legend>Community</legend>
+    <legend>${escapeHtml(t('setup.communityLegend'))}</legend>
     ${options}
   </fieldset>
-  <button type="submit">Save</button>
+  <button type="submit">${escapeHtml(t('setup.save'))}</button>
 </form>`,
   );
 }
 
 export function donePage(): string {
   return page(
-    'Connected',
-    `<h1>Connected</h1>
-<p>You can close this tab. The next Kicktipp tool call will use this account.</p>`,
+    t('setup.doneTitle'),
+    `<h1>${escapeHtml(t('setup.doneTitle'))}</h1>
+<p>${escapeHtml(t('setup.doneLead'))}</p>`,
   );
 }
 
 export function forbiddenPage(): string {
-  return page('Setup closed', `<h1>Setup closed</h1><p>This link is no longer valid.</p>`);
+  return page(
+    t('setup.closedTitle'),
+    `<h1>${escapeHtml(t('setup.closedTitle'))}</h1><p>${escapeHtml(t('setup.closedLead'))}</p>`,
+  );
 }

@@ -24,7 +24,9 @@
         "KICKTIPP_EMAIL": "${user_config.email}",
         "KICKTIPP_PASSWORD": "${user_config.password}",
         "KICKTIPP_COMMUNITY": "${user_config.community}",
-        "KICKTIPP_READ_ONLY": "${user_config.read_only}"
+        "KICKTIPP_READ_ONLY": "${user_config.read_only}",
+        "KICKTIPP_LANG": "${user_config.language}",
+        "KICKTIPP_SITE": "${user_config.site}"
       }
     }
   },
@@ -53,6 +55,18 @@
       "title": "Read-only",
       "description": "Hide betting and settings tools. The assistant can look, not submit.",
       "default": false,
+      "required": false
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "UI language for the setup page and CLI chrome. en (default) or de.",
+      "required": false
+    },
+    "site": {
+      "type": "string",
+      "title": "Site",
+      "description": "Kicktipp host: de for kicktipp.de, or com (default) for kicktipp.com.",
       "required": false
     }
   },

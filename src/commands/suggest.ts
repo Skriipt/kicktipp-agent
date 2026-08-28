@@ -10,6 +10,7 @@ import { STRATEGIES, suggestBets, type PinnedBet, type StrategyName, type Sugges
 import { offlineMatchday, requireCached } from '../cache/offline.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
 import { loadCommunity, readDefaultStrategy } from '../config.js';
+import { t } from '../i18n/index.js';
 import { assertWritable } from '../read-only.js';
 
 /** "Bayern vs BVB=2:1" — same shape the bet command accepts. */
@@ -59,36 +60,36 @@ function render(
 export function registerSuggestCommand(program: Command): void {
   program
     .command('suggest')
-    .description('Suggest a bet slip from the published odds (prints only unless --place)')
-    .option('--strategy <name>', `One of: ${STRATEGIES.join(', ')}`)
+    .description(t('cmd.suggest.description'))
+    .option('--strategy <name>', t('cmd.suggest.optionStrategy', { strategies: STRATEGIES.join(', ') }))
     .option(
       '--pin <bet...>',
-      'Fix a pick the strategy must not touch, as "Home vs Away=H:G"',
+      t('cmd.suggest.optionPin'),
     )
-    .option('--matchday <n>', 'Matchday number (1-34). Omit for the current one.', parseInt)
-    .option('--place', 'Submit the slip after confirmation')
-    .option('--replace', 'Also overwrite matches that already have a bet')
-    .option('--yes', 'Skip the confirmation prompt (for scripts)')
-    .option('--offline', 'Use only cached data; make no requests (implies no --place)')
-    .option('--json', 'Output raw JSON')
+    .option('--matchday <n>', t('opt.matchdayCurrent'), parseInt)
+    .option('--place', t('cmd.suggest.optionPlace'))
+    .option('--replace', t('cmd.suggest.optionReplace'))
+    .option('--yes', t('opt.yesScripts'))
+    .option('--offline', t('opt.offlineSuggest'))
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.place) assertWritable('Placing bets');
       // Explicit flag wins, then the configured default, then safe.
       const strategy = (opts.strategy ?? readDefaultStrategy() ?? 'safe') as StrategyName;
       const pins = parsePins(opts.pin ?? []);
       if (!STRATEGIES.includes(strategy)) {
-        console.error(`Unknown strategy '${strategy}'. Options: ${STRATEGIES.join(', ')}`);
+        console.error(t('suggest.unknownStrategy', { name: strategy, options: STRATEGIES.join(', ') }));
         process.exit(1);
       }
 
       if (opts.offline) {
         if (opts.place) {
-          console.error('--offline cannot be combined with --place.');
+          console.error(t('suggest.offlinePlace'));
           process.exit(1);
         }
         const community = loadCommunity();
         if (!community) {
-          console.error('No community set. Run `kicktipp set-community` first.');
+          console.error(t('common.noCommunity'));
           process.exit(1);
         }
         const store = new CacheStore(community);
@@ -107,13 +108,13 @@ export function registerSuggestCommand(program: Command): void {
         const store = new CacheStore(community);
         const cache = { store };
 
-        status('Loading odds...');
+        status(t('status.loadingMatchday'));
         const { matches } = await fetchBets(page, community, opts.matchday, cache);
         const rules = await resolveRules(page, community, cache);
         statusClear();
 
         if (!matches.length) {
-          console.log('No matches found for this matchday.');
+          console.log(t('common.noMatchesMatchday'));
           return;
         }
 
@@ -140,27 +141,23 @@ export function registerSuggestCommand(program: Command): void {
         const skipped = suggestions.length - toPlace.length;
 
         if (!toPlace.length) {
-          console.log('\nEvery match already has a bet. Use --replace to overwrite them.');
+          console.log('\n' + t('suggest.alreadyBet'));
           return;
         }
 
-        console.log(
-          `\nAbout to submit ${toPlace.length} bet(s)` +
-            (skipped ? `, leaving ${skipped} existing bet(s) untouched` : '') +
-            '.',
-        );
+        console.log('\n' + t('suggest.willPlace', { n: toPlace.length }));
 
         if (!opts.yes) {
-          const answer = (await ask('Submit these bets? [y/N]: ')).trim().toLowerCase();
-          if (answer !== 'y' && answer !== 'yes') {
-            console.log('Nothing submitted.');
+          const answer = (await ask(t('suggest.confirm'))).trim().toLowerCase();
+          if (answer !== 'y' && answer !== 'yes' && answer !== 'j' && answer !== 'ja') {
+            console.log(t('common.nothingSubmitted'));
             return;
           }
         }
 
         const args = toPlace.map((s) => `${s.home} vs ${s.away}=${s.bet}`);
         const placed = await placeBets(page, community, args, opts.matchday, true, 'cli:suggest');
-        console.log(`Submitted ${placed.length} bet(s).`);
+        console.log(t('common.submittedCount', { n: placed.length }));
       } finally {
         await page.close();
       }

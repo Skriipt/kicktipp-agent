@@ -4,6 +4,7 @@ import { CacheStore } from '../cache/store.js';
 import { loadSeason } from '../analytics/season.js';
 import { computeSeasonStats, type SeasonStats } from '../analytics/season-stats.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
+import { t } from '../i18n/index.js';
 
 const BAR = '█';
 
@@ -120,21 +121,21 @@ function render(stats: SeasonStats, rulesNote: string | undefined): string {
 export function registerStatsCommand(program: Command): void {
   program
     .command('stats')
-    .description('Season analytics for you or another player, computed from the local cache')
-    .option('--player <name>', 'Player to analyse (default: your saved player)')
-    .option('--compare <name>', 'Show a second player side by side')
-    .option('--offline', 'Accepted for symmetry; stats always reads the cache only')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.stats.description'))
+    .option('--player <name>', t('opt.player'))
+    .option('--compare <name>', t('cmd.stats.optionCompare'))
+    .option('--offline', t('opt.offlineStats'))
+    .option('--json', t('opt.json'))
     .action((opts) => {
       const community = loadCommunity();
       if (!community) {
-        console.error('No community set. Run `kicktipp set-community` first.');
+        console.error(t('common.noCommunity'));
         process.exit(1);
       }
 
       const player = opts.player ?? loadPlayer();
       if (!player) {
-        console.error('No player set. Run `kicktipp set-player`, or pass --player.');
+        console.error(t('common.noPlayerOrPass'));
         process.exit(1);
       }
 

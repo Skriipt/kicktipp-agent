@@ -6,6 +6,7 @@ import { emitJson, setJsonMode, widest } from '../helpers/output.js';
 import { localizeMatchDates, localizePrintedDate } from '../helpers/match-date.js';
 import { fetchBets, type BetMatch } from '../core.js';
 import { buildDeadlineReport, urgencyWarning } from '../analytics/deadline.js';
+import { t } from '../i18n/index.js';
 
 function odds(match: BetMatch): string {
   const { home, draw, away } = match.odds;
@@ -16,7 +17,7 @@ function odds(match: BetMatch): string {
 function render(title: string, matches: BetMatch[]): string {
   const lines: string[] = [];
   if (title) lines.push(title, '');
-  if (!matches.length) return lines.concat('No matches found.').join('\n');
+  if (!matches.length) return lines.concat(t('common.noMatches')).join('\n');
 
   const homeWidth = widest(matches.map((m) => m.home));
   const awayWidth = widest(matches.map((m) => m.away));
@@ -32,15 +33,15 @@ function render(title: string, matches: BetMatch[]): string {
 export function registerBetsCommand(program: Command): void {
   program
     .command('bets')
-    .description('Show bets/predictions for a matchday')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.bets.description'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Loading bets...');
+        status(t('status.loadingBets'));
         const data = await fetchBets(page, community, opts.matchday);
         statusClear();
 

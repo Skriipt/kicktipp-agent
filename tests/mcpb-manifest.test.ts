@@ -23,9 +23,13 @@ describe('the MCPB manifest', () => {
     expect(manifest.server.mcp_config.command).toBe('node');
     expect(manifest.server.mcp_config.args[0]).toContain('${__dirname}');
     expect(manifest.server.mcp_config.env.KICKTIPP_PASSWORD).toBe('${user_config.password}');
+    expect(manifest.server.mcp_config.env.KICKTIPP_LANG).toBe('${user_config.language}');
+    expect(manifest.server.mcp_config.env.KICKTIPP_SITE).toBe('${user_config.site}');
     expect(manifest.user_config.password.sensitive).toBe(true);
     expect(manifest.user_config.password.required).toBe(true);
     expect(manifest.user_config.email.required).toBe(true);
     expect(manifest.user_config.read_only.type).toBe('boolean');
+    expect(manifest.user_config.language.type).toBe('string');
+    expect(manifest.user_config.site.type).toBe('string');
   });
 });

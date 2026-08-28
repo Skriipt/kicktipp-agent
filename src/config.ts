@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'crypto';
 import * as ini from 'ini';
 import readline from 'readline';
+import { t } from './i18n/index.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
@@ -221,19 +222,17 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
   if (isSessionOnly()) throw new SessionOnlyExpiredError();
 
   if (!process.stdin.isTTY) {
-    throw new Error(
-      'No credentials found. Run `kicktipp login --web`, or set KICKTIPP_EMAIL and KICKTIPP_PASSWORD.',
-    );
+    throw new Error(t('config.noCredentialsHint'));
   }
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string): Promise<string> =>
     new Promise((resolve) => rl.question(q, resolve));
 
-  console.log('No credentials found. Please enter your Kicktipp login:');
-  const email = await ask('Email: ');
+  console.log(t('config.noCredentials'));
+  const email = await ask(t('config.emailPrompt'));
   const password = await new Promise<string>((resolve) => {
-    process.stdout.write('Password: ');
+    process.stdout.write(t('config.passwordPrompt'));
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
     if (stdin.isTTY) stdin.setRawMode(true);
@@ -261,7 +260,7 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
   const config2 = readConfig();
   config2.auth = { email, password: encrypt(password) };
   writeConfig(config2);
-  console.log('Credentials saved to config.');
+  console.log(t('config.credentialsSaved'));
   return { email, password };
 }
 
@@ -327,6 +326,32 @@ export function readDefaultStrategy(): string | null {
   return process.env.KICKTIPP_SUGGEST_STRATEGY || readConfig().suggest?.strategy || null;
 }
 
+function patchUi(patch: Record<string, string>): void {
+  const config = readConfig();
+  config.ui = { ...(config.ui ?? {}), ...patch };
+  writeConfig(config);
+}
+
+/** Optional UI language from `[ui] language` in config.ini. */
+export function readUiLanguage(): string | null {
+  const raw = readConfig().ui?.language;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+}
+
+/** Optional Kicktipp host from `[ui] site` (`de`, `com`, or a URL). */
+export function readUiSite(): string | null {
+  const raw = readConfig().ui?.site;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+}
+
+export function saveUiLanguage(language: string): void {
+  patchUi({ language });
+}
+
+export function saveUiSite(site: string): void {
+  patchUi({ site });
+}
+
 export function hasCredentials(): boolean {
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
   const config = readConfig();
@@ -343,5 +368,5 @@ export function logout(): void {
       removed.push(path.basename(p));
     }
   }
-  console.log(removed.length ? `Removed: ${removed.join(', ')}` : 'Nothing to remove.');
+  console.log(removed.length ? t('logout.removed', { names: removed.join(', ') }) : t('logout.nothing'));
 }

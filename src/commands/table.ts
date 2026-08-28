@@ -4,10 +4,11 @@ import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
 import { fetchTable, type TableTeam } from '../core.js';
+import { t } from '../i18n/index.js';
 
 function render(label: string, teams: TableTeam[]): string {
   const lines: string[] = [label, ''];
-  if (!teams.length) return lines.concat('No table found.').join('\n');
+  if (!teams.length) return lines.concat(t('common.noTable')).join('\n');
 
   const teamWidth = widest(teams.map((t) => t.team), 4);
   lines.push(
@@ -28,17 +29,17 @@ function render(label: string, teams: TableTeam[]): string {
 export function registerTableCommand(program: Command): void {
   program
     .command('table')
-    .description('Display the league table')
-    .option('--home', 'Show home table only')
-    .option('--away', 'Show away table only')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.table.description'))
+    .option('--home', t('opt.home'))
+    .option('--away', t('opt.away'))
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const option: 'home' | 'away' | undefined = opts.home ? 'home' : opts.away ? 'away' : undefined;
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Loading table...');
+        status(t('status.loadingTable'));
         const data = await fetchTable(page, community, option);
         statusClear();
 

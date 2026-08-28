@@ -9,11 +9,13 @@ import {
   getRulesUrl,
   getCommunitiesUrl,
   getAlternateUrls,
-  URL_BASE,
-  URL_LOGIN,
+  parseSite,
+  resolveBaseUrl,
+  urlBase,
+  urlLogin,
 } from '../src/url.js';
 
-// URL_BASE is resolved from the environment at import time, so exercising a
+// The host is resolved from the environment at import time, so exercising a
 // different host means re-importing the module with the env var stubbed.
 async function withBase(base: string) {
   vi.resetModules();
@@ -28,8 +30,8 @@ afterEach(() => {
 
 describe('default host', () => {
   it('stays on kicktipp.com with English paths', () => {
-    expect(URL_BASE).toBe('https://www.kicktipp.com');
-    expect(URL_LOGIN).toBe('https://www.kicktipp.com/info/profil/login');
+    expect(urlBase()).toBe('https://www.kicktipp.com');
+    expect(urlLogin()).toBe('https://www.kicktipp.com/info/profil/login');
     expect(getCommunitiesUrl()).toBe(
       'https://www.kicktipp.com/info/profil/meinetipprunden',
     );
@@ -89,7 +91,7 @@ describe('other page URLs', () => {
 describe('KICKTIPP_BASE_URL override', () => {
   it('switches kicktipp.de to German paths', async () => {
     const url = await withBase('https://www.kicktipp.de');
-    expect(url.URL_BASE).toBe('https://www.kicktipp.de');
+    expect(url.urlBase()).toBe('https://www.kicktipp.de');
     expect(url.getPredictUrl('c', 4)).toBe(
       'https://www.kicktipp.de/c/tippabgabe?spieltagIndex=4',
     );
@@ -101,7 +103,52 @@ describe('KICKTIPP_BASE_URL override', () => {
 
   it('normalizes a base with a path or trailing slash', async () => {
     const url = await withBase('https://www.kicktipp.de/some/path/');
-    expect(url.URL_BASE).toBe('https://www.kicktipp.de');
+    expect(url.urlBase()).toBe('https://www.kicktipp.de');
+  });
+});
+
+describe('parseSite', () => {
+  it('accepts de, com, and full URLs', () => {
+    expect(parseSite('de')).toBe('https://www.kicktipp.de');
+    expect(parseSite('COM')).toBe('https://www.kicktipp.com');
+    expect(parseSite('https://www.kicktipp.de/foo')).toBe('https://www.kicktipp.de');
+    expect(parseSite('')).toBeUndefined();
+  });
+
+  it('rejects unknown values', () => {
+    expect(() => parseSite('fr')).toThrow(/Unknown site 'fr'/);
+  });
+});
+
+describe('resolveBaseUrl', () => {
+  it('prefers the flag, then the full URL env, then KICKTIPP_SITE, then config', () => {
+    expect(
+      resolveBaseUrl({
+        argv: ['kicktipp', '--site', 'de'],
+        env: { KICKTIPP_BASE_URL: 'https://www.kicktipp.com', KICKTIPP_SITE: 'com' },
+        configSite: 'com',
+      }),
+    ).toBe('https://www.kicktipp.de');
+    expect(
+      resolveBaseUrl({
+        argv: ['kicktipp'],
+        env: { KICKTIPP_BASE_URL: 'https://www.kicktipp.de' },
+        configSite: 'com',
+      }),
+    ).toBe('https://www.kicktipp.de');
+    expect(
+      resolveBaseUrl({
+        argv: ['kicktipp'],
+        env: { KICKTIPP_SITE: 'de' },
+        configSite: 'com',
+      }),
+    ).toBe('https://www.kicktipp.de');
+    expect(resolveBaseUrl({ argv: ['kicktipp'], env: {}, configSite: 'de' })).toBe(
+      'https://www.kicktipp.de',
+    );
+    expect(resolveBaseUrl({ argv: ['kicktipp'], env: {}, configSite: null })).toBe(
+      'https://www.kicktipp.com',
+    );
   });
 });
 

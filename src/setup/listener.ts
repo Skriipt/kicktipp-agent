@@ -4,8 +4,10 @@ import crypto from 'crypto';
 import { CookieJar } from '../http/cookie-jar.js';
 import { Page, type FetchLike } from '../http/page.js';
 import { getCommunities, login } from '../browser.js';
-import { saveAuth, saveCommunity, saveReadOnly, sessionFile, type AuthStore } from '../config.js';
+import { saveAuth, saveCommunity, saveReadOnly, saveUiLanguage, saveUiSite, sessionFile, type AuthStore } from '../config.js';
 import { communityPage, donePage, forbiddenPage, loginPage } from './html.js';
+import { parseLanguage, setLanguage, t } from '../i18n/index.js';
+import { parseSite, setUrlBase, siteLabel } from '../url.js';
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -188,27 +190,37 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
       }
 
       if (step !== 'login' || phase.kind !== 'login') {
-        await send(res, 200, loginPage(token, 'Start again from the sign-in form.'));
+        await send(res, 200, loginPage(token, t('setup.startAgain')));
         return;
       }
 
       const email = (body.get('email') ?? '').trim();
       const password = body.get('password') ?? '';
       if (!email || !password) {
-        await send(res, 200, loginPage(token, 'Email and password are required.'));
+        await send(res, 200, loginPage(token, t('setup.emailPasswordRequired')));
         return;
       }
 
       const store: AuthStore = body.get('store') === 'session' ? 'session' : 'password';
       const readOnly = body.get('read_only') === '1';
+      const language = parseLanguage(body.get('language'));
+      if (language) {
+        saveUiLanguage(language);
+        setLanguage(language);
+      }
+      const site = parseSite(body.get('site'));
+      if (site) {
+        saveUiSite(siteLabel(site));
+        setUrlBase(site);
+      }
       const page = new Page(new CookieJar(), opts.fetchImpl);
       try {
         await login(page, email, password);
       } catch (err) {
         const raw = err instanceof Error ? err.message : '';
         const message = /login failed/i.test(raw)
-          ? 'Sign-in failed. Check the email and password.'
-          : raw || 'Sign-in failed. Check the email and password.';
+          ? t('setup.signInFailed')
+          : raw || t('setup.signInFailed');
         await send(res, 200, loginPage(token, message));
         return;
       }
@@ -235,7 +247,7 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
       phase = { kind: 'community', communities };
       await send(res, 200, communityPage(token, communities));
     } catch {
-      await send(res, 500, loginPage(token, 'Something went wrong. Try again.'));
+      await send(res, 500, loginPage(token, t('setup.somethingWrong')));
     }
   }
 

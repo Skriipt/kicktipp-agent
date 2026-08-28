@@ -16,6 +16,7 @@ import {
   readNotifierConfig,
 } from '../notify/backends.js';
 import { ask } from '../shared.js';
+import { t } from '../i18n/index.js';
 
 const SYSTEMD_DIR = path.join(os.homedir(), '.config', 'systemd', 'user');
 
@@ -26,9 +27,9 @@ function installSystemd(everyMinutes: number, warnHours?: number): void {
   const timer = path.join(SYSTEMD_DIR, 'kicktipp-deadline.timer');
   fs.writeFileSync(service, units.service);
   fs.writeFileSync(timer, units.timer);
-  console.log(`Wrote ${service}`);
-  console.log(`Wrote ${timer}`);
-  console.log('\nEnable it with:');
+  console.log(t('notify.wroteFile', { path: service }));
+  console.log(t('notify.wroteFile', { path: timer }));
+  console.log('\n' + t('notify.enableWith'));
   console.log('  systemctl --user daemon-reload');
   console.log('  systemctl --user enable --now kicktipp-deadline.timer');
 }
@@ -39,32 +40,32 @@ function uninstallSystemd(): void {
     const file = path.join(SYSTEMD_DIR, name);
     if (fs.existsSync(file)) {
       fs.unlinkSync(file);
-      console.log(`Removed ${file}`);
+      console.log(t('notify.removedFile', { path: file }));
       removed++;
     }
   }
   console.log(
     removed
-      ? '\nDisable it with:\n  systemctl --user disable --now kicktipp-deadline.timer'
-      : 'Nothing to remove.',
+      ? '\n' + t('notify.disableWith')
+      : t('notify.nothingToRemove'),
   );
 }
 
 export function registerRemindCommand(program: Command): void {
   program
     .command('remind')
-    .description('Generate a schedule or calendar file that reminds you before kickoff')
-    .option('--print <kind>', 'Print a cron line or systemd units: cron | systemd')
-    .option('--install', 'Write the systemd user units (does not enable them)')
-    .option('--uninstall', 'Remove the systemd user units')
-    .option('--ics [file]', 'Write a calendar file with an alarm per kickoff')
-    .option('--every <minutes>', 'How often to check', parseInt)
+    .description(t('cmd.remind.description'))
+    .option('--print <kind>', t('cmd.remind.optionPrint'))
+    .option('--install', t('cmd.remind.optionInstall'))
+    .option('--uninstall', t('cmd.remind.optionUninstall'))
+    .option('--ics [file]', t('cmd.remind.optionIcs'))
+    .option('--every <minutes>', t('cmd.remind.optionEvery'), parseInt)
     .option(
       '--warn-hours <n>',
-      'Hours before kickoff that an unbetted match counts as urgent (default: 6)',
+      t('opt.warnHours'),
       parseFloat,
     )
-    .option('--matchday <n>', 'Matchday for --ics', parseInt)
+    .option('--matchday <n>', t('opt.matchdayIcs'), parseInt)
     .action(async (opts) => {
       const everyMinutes = opts.every ?? 60;
 
@@ -81,7 +82,7 @@ export function registerRemindCommand(program: Command): void {
         return;
       }
       if (opts.print) {
-        console.error(`Unknown --print kind '${opts.print}'. Use cron or systemd.`);
+        console.error(t('notify.unknownPrint', { kind: opts.print }));
         process.exit(1);
       }
       if (opts.uninstall) return uninstallSystemd();
@@ -91,7 +92,7 @@ export function registerRemindCommand(program: Command): void {
         const { page } = await launchBrowser();
         try {
           const community = await ensureCommunity(page);
-          status('Loading kickoffs...');
+          status(t('status.loadingKickoffs'));
           const { matches } = await fetchBets(page, community, opts.matchday);
           statusClear();
           const report = buildDeadlineReport(community, opts.matchday ?? null, matches, {
@@ -100,14 +101,14 @@ export function registerRemindCommand(program: Command): void {
           const calendar = icsCalendar(report);
           const file = typeof opts.ics === 'string' ? opts.ics : 'kicktipp-deadlines.ics';
           fs.writeFileSync(file, calendar);
-          console.log(`Wrote ${file} (${report.matches.filter((m) => !m.closed).length} event(s)).`);
+          console.log(t('notify.wroteIcs', { file, n: report.matches.filter((m) => !m.closed).length }));
         } finally {
           await page.close();
         }
         return;
       }
 
-      console.error('Nothing to do. Use --print cron|systemd, --install, --uninstall or --ics.');
+      console.error(t('notify.nothingToDo'));
       process.exit(1);
     });
 }
@@ -115,21 +116,21 @@ export function registerRemindCommand(program: Command): void {
 export function registerNotifyCommand(program: Command): void {
   program
     .command('notify')
-    .description('Send a reminder through the configured notifier, if anything needs a bet')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
+    .description(t('cmd.notify.description'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
     .option(
       '--warn-hours <n>',
-      'Hours before kickoff that an unbetted match counts as urgent (default: 6)',
+      t('opt.warnHours'),
       parseFloat,
     )
-    .option('--force', 'Notify even when nothing is urgent')
-    .option('--json', 'Output raw JSON instead of notifying')
+    .option('--force', t('cmd.notify.optionForce'))
+    .option('--json', t('cmd.notify.optionJson'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Checking deadlines...');
+        status(t('status.checkingDeadlines'));
         const { matches } = await fetchBets(page, community, opts.matchday);
         statusClear();
 
@@ -145,23 +146,25 @@ export function registerNotifyCommand(program: Command): void {
           return;
         }
         if (!report.urgentCount && !opts.force) {
-          console.log('Nothing urgent; no notification sent.');
+          console.log(t('notify.nothingUrgent'));
           return;
         }
 
         await notify(readNotifierConfig(), summary, report);
-        console.log('Notification sent.');
+        console.log(t('notify.sent'));
       } finally {
         await page.close();
       }
     });
 }
 
-const KIND_HELP = [
-  { kind: 'desktop' as const, label: 'macOS Notification Center / notify-send' },
-  { kind: 'webhook' as const, label: 'POST JSON to a URL (ntfy, Slack, Home Assistant)' },
-  { kind: 'command' as const, label: 'Run a local program' },
-];
+function kindHelp(): { kind: 'desktop' | 'webhook' | 'command'; label: string }[] {
+  return [
+    { kind: 'desktop', label: t('notify.labelDesktop') },
+    { kind: 'webhook', label: t('notify.labelWebhook') },
+    { kind: 'command', label: t('notify.labelCommand') },
+  ];
+}
 
 async function resolveNotifierArgs(kindArg?: string, targetArg?: string): Promise<{ kind: string; target?: string }> {
   let kind = kindArg?.trim().toLowerCase();
@@ -169,23 +172,24 @@ async function resolveNotifierArgs(kindArg?: string, targetArg?: string): Promis
 
   if (!kind) {
     if (!process.stdin.isTTY) {
-      throw new Error('Pass a kind: kicktipp set-notify desktop|webhook|command [target]');
+      throw new Error(t('notify.passKind'));
     }
-    console.log('Notifier backends:');
-    KIND_HELP.forEach((entry, i) => console.log(`  [${i + 1}] ${entry.kind.padEnd(8)}  ${entry.label}`));
-    const choice = await ask(`Select backend (1-${KIND_HELP.length}): `);
+    const backends = kindHelp();
+    console.log(t('notify.backends'));
+    backends.forEach((entry, i) => console.log(`  [${i + 1}] ${entry.kind.padEnd(8)}  ${entry.label}`));
+    const choice = await ask(t('notify.selectBackend', { n: backends.length }));
     const idx = parseInt(choice, 10) - 1;
-    if (!Number.isInteger(idx) || idx < 0 || idx >= KIND_HELP.length) {
-      throw new Error('Invalid selection.');
+    if (!Number.isInteger(idx) || idx < 0 || idx >= backends.length) {
+      throw new Error(t('common.invalidSelection'));
     }
-    kind = KIND_HELP[idx].kind;
+    kind = backends[idx].kind;
   }
 
   if ((kind === 'webhook' || kind === 'command') && !target) {
     if (!process.stdin.isTTY) {
       parseNotifierSettings(kind, target);
     }
-    target = (await ask(kind === 'webhook' ? 'Webhook URL: ' : 'Command path: ')).trim();
+    target = (await ask(kind === 'webhook' ? t('notify.webhookUrl') : t('notify.commandPath'))).trim();
   }
 
   return { kind, target };
@@ -194,13 +198,13 @@ async function resolveNotifierArgs(kindArg?: string, targetArg?: string): Promis
 export function registerSetNotifyCommand(program: Command): void {
   program
     .command('set-notify')
-    .description('Configure how `notify` delivers reminders (desktop, webhook, or command)')
-    .argument('[kind]', 'desktop | webhook | command')
-    .argument('[target]', 'Webhook URL or executable path')
+    .description(t('cmd.setNotify.description'))
+    .argument('[kind]', t('cmd.setNotify.argumentKind'))
+    .argument('[target]', t('cmd.setNotify.argumentTarget'))
     .action(async (kindArg: string | undefined, targetArg: string | undefined) => {
       const { kind, target } = await resolveNotifierArgs(kindArg, targetArg);
       const saved = applyNotifierSettings(kind, target);
-      if (saved.kind === 'desktop') console.log('Saved desktop notifier.');
-      else console.log(`Saved ${saved.kind} notifier → ${saved.target}`);
+      if (saved.kind === 'desktop') console.log(t('notify.savedDesktop'));
+      else console.log(t('notify.savedOther', { kind: saved.kind, target: saved.target ?? '' }));
     });
 }

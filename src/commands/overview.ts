@@ -4,10 +4,11 @@ import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
 import { fetchOverview, OVERVIEW_VIEW_OPTIONS, type OverviewData } from '../core.js';
+import { t } from '../i18n/index.js';
 
 function render(data: OverviewData): string {
   const lines = [`Overview: ${data.label}`, ''];
-  if (!data.players.length) return lines.concat('No data found.').join('\n');
+  if (!data.players.length) return lines.concat(t('common.noData')).join('\n');
 
   const nameWidth = widest(data.players.map((p) => p.name), 4);
   const matchdays = Array.from({ length: data.maxMatchday }, (_, i) => i + 1);
@@ -30,15 +31,15 @@ function render(data: OverviewData): string {
 export function registerOverviewCommand(program: Command): void {
   program
     .command('overview')
-    .description('Display the season overview')
-    .option('--view <value>', `View type: ${OVERVIEW_VIEW_OPTIONS.join(', ')}`, 'matchday-points')
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.overview.description'))
+    .option('--view <value>', t('cmd.overview.optionView', { views: OVERVIEW_VIEW_OPTIONS.join(', ') }), 'matchday-points')
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status('Loading overview...');
+        status(t('status.loadingOverview'));
         const data = await fetchOverview(page, community, opts.view);
         statusClear();
 

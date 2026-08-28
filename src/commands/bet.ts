@@ -14,11 +14,12 @@ import {
 import { appendAudit } from '../audit/log.js';
 import { inheritPrintedDate, localizePrintedDate } from '../helpers/match-date.js';
 import { runBettingTui } from '../tui/run.js';
+import { t } from '../i18n/index.js';
 
 // ── Match betting helpers ──────────────────────────────────────────
 
 async function interactiveMatchBets(page: any, community: string, matchday?: number): Promise<void> {
-  status('Loading bets...');
+  status(t('status.loadingBets'));
   const $ = await loadMatchPredictPage(page, community, matchday);
   statusClear();
   const content = $('#kicktipp-content');
@@ -29,7 +30,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
 
   const tbody = content.find('tbody');
   if (!tbody.length) {
-    console.log('No matches found.');
+    console.log(t('common.noMatches'));
     return;
   }
 
@@ -71,7 +72,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
   });
 
   if (!editable.length) {
-    console.log('No editable matches found.');
+    console.log(t('bet.noEditable'));
     return;
   }
 
@@ -79,43 +80,43 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
   for (const row of editable) {
     let prompt = `  ${localizePrintedDate(row.date)} ${row.home} vs ${row.away} `;
     if (row.current) prompt += `[${row.current}] `;
-    prompt += '(e.g. 2:1, Enter to skip): ';
+    prompt += t('bet.promptSkip');
     const answer = (await ask(prompt)).trim();
     if (!answer) continue;
     const parts = answer.replace('-', ':').split(':');
     if (parts.length !== 2) {
-      console.log('    Invalid format, skipping.');
+      console.log(t('bet.invalidFormat'));
       continue;
     }
     const h = parseInt(parts[0]);
     const g = parseInt(parts[1]);
     if (isNaN(h) || isNaN(g)) {
-      console.log('    Invalid format, skipping.');
+      console.log(t('bet.invalidFormat'));
       continue;
     }
     chosen.push(`${row.home} vs ${row.away}=${h}:${g}`);
   }
 
   if (!chosen.length) {
-    console.log('\nNo changes made.');
+    console.log('\n' + t('common.noChanges'));
     return;
   }
 
   // Same submission path as the non-interactive form, so the log records it.
   await placeBets(page, community, chosen, matchday, true, 'cli:bet');
-  console.log('\nBets saved.');
+  console.log('\n' + t('common.betsSaved'));
 }
 
 async function fixtureBets(page: any, community: string, bets: string[], matchday?: number): Promise<void> {
   // Delegates to core.placeBets rather than repeating its fixture matching
   // and form filling, so this path is validated and audited like every other.
-  status('Loading bets...');
+  status(t('status.loadingBets'));
   const placed = await placeBets(page, community, bets, matchday, true, 'cli:bet');
   statusClear();
   for (const bet of placed) {
     console.log(`  ${bet.home} vs ${bet.away} - ${bet.homeGoals}:${bet.awayGoals}`);
   }
-  console.log('\nBets saved.');
+  console.log('\n' + t('common.betsSaved'));
 }
 
 // ── Bonus betting helpers ──────────────────────────────────────────
@@ -136,21 +137,21 @@ async function bonusBetsInteractive(
       const currentText = currentOption ? currentOption.text : '---';
 
       if (q.selects.length > 1) {
-        console.log(`    Slot ${si + 1}/${q.selects.length}:`);
+        console.log(t('bet.slot', { n: si + 1, total: q.selects.length }));
       }
       sel.options.forEach((o, i) =>
         console.log(`    [${i + 1}] ${o.text}`),
       );
 
-      let prompt = `    Select`;
+      let prompt = t('bet.select');
       if (currentText !== '---') prompt += ` [${currentText}]`;
-      prompt += ' (Enter to skip): ';
+      prompt += t('bet.selectSkip');
       const answer = (await ask(prompt)).trim();
 
       if (!answer) continue;
       const idx = parseInt(answer) - 1;
       if (isNaN(idx) || idx < 0 || idx >= sel.options.length) {
-        console.log('    Invalid selection, skipping.');
+        console.log(t('bet.invalidSkip'));
         continue;
       }
 
@@ -167,26 +168,26 @@ async function bonusBetsInteractive(
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
   if (bets && bets.length > 0) {
-    status('Loading bonus questions...');
+    status(t('status.loadingBonus'));
     const applied = await placeBonusBets(page, community, bets, true, 'cli:bet');
     statusClear();
     for (const a of applied) console.log(`  ${a.question} → ${a.answer}`);
-    console.log('\nBonus bets saved.');
+    console.log('\n' + t('common.bonusSaved'));
     return;
   }
 
-  status('Loading bonus questions...');
+  status(t('status.loadingBonus'));
   const questions = await fetchBonusQuestions(page, community);
   statusClear();
 
   if (!questions.length) {
-    console.log('No editable bonus questions found.');
+    console.log(t('bet.noBonus'));
     return;
   }
 
   const applied = await bonusBetsInteractive(page, questions);
   if (!applied.length) {
-    console.log('\nNo changes made.');
+    console.log('\n' + t('common.noChanges'));
     return;
   }
 
@@ -211,7 +212,7 @@ async function bonusBets(page: any, community: string, bets: string[]): Promise<
     throw err;
   }
   appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
-  console.log('\nBonus bets saved.');
+  console.log('\n' + t('common.bonusSaved'));
 }
 
 // ── Command registration ───────────────────────────────────────────
@@ -219,14 +220,12 @@ async function bonusBets(page: any, community: string, bets: string[]): Promise<
 export function registerBetCommand(program: Command): void {
   program
     .command('bet')
-    .description(
-      'Place bets. Interactive if no args, or pass "Home vs Away=H:G" args. Use --bonus for bonus questions.',
-    )
-    .argument('[bets...]', 'Bets: "Home vs Away=H:G" or with --bonus "Question=Answer"')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--bonus', 'Place bonus question bets')
-    .option('--tui', 'Full-screen matchday view (default on an interactive terminal)')
-    .option('--no-tui', 'Force the line-by-line prompts instead')
+    .description(t('cmd.bet.description'))
+    .argument('[bets...]', t('cmd.bet.argument'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
+    .option('--bonus', t('opt.bonusBet'))
+    .option('--tui', t('opt.tui'))
+    .option('--no-tui', t('opt.noTui'))
     .action(async (bets: string[], opts) => {
       assertWritable('Placing bets');
 

@@ -5,11 +5,12 @@ import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
 import { fetchTodayMatches, fetchBets, type TodayMatch } from '../core.js';
 import { buildDeadlineReport, urgencyWarning } from '../analytics/deadline.js';
+import { t } from '../i18n/index.js';
 
 function render(matches: TodayMatch[]): string {
-  if (!matches.length) return 'No matches today.';
+  if (!matches.length) return t('common.noMatchesToday');
 
-  const lines: string[] = ["Today's matches", ''];
+  const lines: string[] = [t('common.todaysMatches'), ''];
   const homeWidth = widest(matches.map((m) => m.home));
   const awayWidth = widest(matches.map((m) => m.away));
 
@@ -31,14 +32,14 @@ function render(matches: TodayMatch[]): string {
 export function registerTodayCommand(program: Command): void {
   program
     .command('today')
-    .description("Show today's matches and which still need bets")
-    .option('--json', 'Output raw JSON')
+    .description(t('cmd.today.description'))
+    .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
-        status("Loading today's matches...");
+        status(t('status.loadingToday'));
         const data = await fetchTodayMatches(page, community);
         statusClear();
 

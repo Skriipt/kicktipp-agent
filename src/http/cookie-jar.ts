@@ -1,4 +1,4 @@
-import { URL_BASE } from '../url.js';
+import { urlBase } from '../url.js';
 
 export interface StoredCookie {
   name: string;
@@ -11,7 +11,6 @@ export interface StoredSession {
 }
 
 const KICKTIPP_HOST = /(^|\.)kicktipp\.(de|com)$/i;
-const BASE_HOST = new URL(URL_BASE).hostname.toLowerCase();
 
 /**
  * Session cookies are only ever stored for, and sent to, Kicktipp's own
@@ -20,7 +19,8 @@ const BASE_HOST = new URL(URL_BASE).hostname.toLowerCase();
  */
 export function isAllowedHost(host: string): boolean {
   const h = host.toLowerCase();
-  return KICKTIPP_HOST.test(h) || h === BASE_HOST;
+  const baseHost = new URL(urlBase()).hostname.toLowerCase();
+  return KICKTIPP_HOST.test(h) || h === baseHost;
 }
 
 type HeaderBag = Headers & { getSetCookie?: () => string[] };

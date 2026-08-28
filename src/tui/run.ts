@@ -10,6 +10,7 @@ import { buildDeadlineReport } from '../analytics/deadline.js';
 import { readDefaultStrategy } from '../config.js';
 import { changedRows, initialState, normalizeDraft, type TuiRow } from './state.js';
 import { runScreen } from './screen.js';
+import { t } from '../i18n/index.js';
 
 export interface TuiOptions {
   matchday?: number;
@@ -23,13 +24,13 @@ export async function runBettingTui(opts: TuiOptions = {}): Promise<void> {
     const community = await ensureCommunity(page);
     const cache = { store: new CacheStore(community) };
 
-    status('Loading matchday...');
+    status(t('status.loadingMatchday'));
     const { title, matches } = await fetchBets(page, community, opts.matchday);
     const rules = await resolveRules(page, community, cache);
     statusClear();
 
     if (!matches.length) {
-      console.log('No matches found for this matchday.');
+      console.log(t('common.noMatchesMatchday'));
       return;
     }
 
@@ -55,24 +56,24 @@ export async function runBettingTui(opts: TuiOptions = {}): Promise<void> {
     });
 
     const finalState = await runScreen(initialState(rows), {
-      title: `${title || 'Matchday'} — ${community}`,
+      title: `${title || t('tui.matchday')} — ${community}`,
       deadline: deadline.nextKickoffIn,
     });
 
     if (finalState.outcome !== 'submit') {
-      console.log('Nothing submitted.');
+      console.log(t('common.nothingSubmitted'));
       return;
     }
 
     const changed = changedRows(finalState);
     if (!changed.length) {
-      console.log('Nothing to submit.');
+      console.log(t('common.nothingToSubmit'));
       return;
     }
 
     const args = changed.map((row) => `${row.home} vs ${row.away}=${normalizeDraft(row.draft)}`);
     const placed = await placeBets(page, community, args, opts.matchday, true, 'cli:tui');
-    console.log(`Submitted ${placed.length} bet(s):`);
+    console.log(t('common.submittedCountColon', { n: placed.length }));
     for (const bet of placed) {
       console.log(`  ${bet.home} vs ${bet.away} - ${bet.homeGoals}:${bet.awayGoals}`);
     }

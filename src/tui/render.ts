@@ -1,4 +1,5 @@
 import { widest } from '../helpers/output.js';
+import { t } from '../i18n/index.js';
 import { changedRows, isCompleteDraft, normalizeDraft, type TuiState } from './state.js';
 
 const RESET = '\x1b[0m';
@@ -22,7 +23,7 @@ export function renderScreen(state: TuiState, options: RenderOptions): string[] 
   const lines: string[] = [];
   lines.push(style(BOLD, options.title));
   lines.push(
-    options.deadline ? `Next kickoff ${options.deadline}` : 'No upcoming kickoff in this matchday.',
+    options.deadline ? t('tui.nextKickoff', { deadline: options.deadline }) : t('tui.noKickoff'),
   );
   lines.push('');
 
@@ -36,19 +37,19 @@ export function renderScreen(state: TuiState, options: RenderOptions): string[] 
     const fixture = `${row.home} vs ${row.away}`.padEnd(fixtureWidth);
 
     let field: string;
-    if (!row.editable) field = ' closed ';
+    if (!row.editable) field = t('tui.closed');
     else if (row.draft) field = ` ${normalizeDraft(row.draft).padEnd(5)} `;
     else field = '  _:_   ';
 
     const changed =
       row.editable && isCompleteDraft(row.draft) && normalizeDraft(row.draft) !== row.saved;
     const marker = changed ? '*' : ' ';
-    const saved = row.saved ? `was ${row.saved}` : row.editable ? 'no bet yet' : '';
-    const hint = row.suggestion && !row.draft ? `suggests ${row.suggestion}` : '';
+    const saved = row.saved ? t('tui.was', { bet: row.saved }) : row.editable ? t('tui.noBetYet') : '';
+    const hint = row.suggestion && !row.draft ? t('tui.suggests', { bet: row.suggestion }) : '';
 
     const body =
       `${marker} ${fixture}  ${selected ? style(INVERT, field) : field}  ` +
-      style(DIM, `${saved.padEnd(12)} ${hint}`);
+      style(DIM, `${saved.padEnd(Math.max(12, t('tui.noBetYet').length))} ${hint}`);
     lines.push(selected ? `> ${body}` : `  ${body}`);
   });
 
@@ -56,15 +57,10 @@ export function renderScreen(state: TuiState, options: RenderOptions): string[] 
   const pending = changedRows(state).length;
   lines.push(
     pending
-      ? style(BOLD, `${pending} bet(s) ready to submit (marked *)`)
-      : style(DIM, 'No changes yet.'),
+      ? style(BOLD, t('tui.ready', { n: pending }))
+      : style(DIM, t('tui.noChanges')),
   );
-  lines.push(
-    style(
-      DIM,
-      'up/down move   digits type a score   s take suggestion   a fill all   u clear   w submit   q quit',
-    ),
-  );
+  lines.push(style(DIM, t('tui.keys')));
   if (state.message) lines.push(state.message);
   return lines;
 }

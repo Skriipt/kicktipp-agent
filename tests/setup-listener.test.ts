@@ -26,8 +26,9 @@ function communityList(slugs: string[]): string {
 
 function kicktipp(slugs: string[]): Handler {
   return (req: RecordedRequest) => {
+    const url = req.url.replace('https://www.kicktipp.de', BASE);
     const authenticated = (req.headers.get('cookie') || '').includes('sid=valid');
-    if (req.url === LOGIN) {
+    if (url === LOGIN) {
       if (req.method === 'GET') return LOGIN_FORM;
       const body = new URLSearchParams(req.body || '');
       if (body.get('kennung') === EMAIL && body.get('passwort') === PASSWORD) {
@@ -36,8 +37,8 @@ function kicktipp(slugs: string[]): Handler {
       return LOGIN_FORM;
     }
     if (!authenticated) return { status: 302, location: '/info/profil/login' };
-    if (req.url === COMMUNITIES) return communityList(slugs);
-    if (req.url === `${BASE}/`) return htmlPage('home');
+    if (url === COMMUNITIES) return communityList(slugs);
+    if (url === `${BASE}/`) return htmlPage('home');
     return undefined;
   };
 }
@@ -156,6 +157,21 @@ describe('the localhost setup listener', () => {
     const ini = fs.readFileSync(path.join(home, '.config', 'kicktipp-agent', 'config.ini'), 'utf8');
     expect(ini).toMatch(/beta/);
     expect(ini).not.toMatch(/community.*alpha/);
+  });
+
+  it('persists the chosen site and language', async () => {
+    const handle = await startListener(['mycomm']);
+    await post(handle.url, {
+      step: 'login',
+      email: EMAIL,
+      password: PASSWORD,
+      site: 'de',
+      language: 'de',
+    });
+    expect(await handle.finished).toBe('saved');
+    const ini = fs.readFileSync(path.join(home, '.config', 'kicktipp-agent', 'config.ini'), 'utf8');
+    expect(ini).toMatch(/language\s*=\s*de/);
+    expect(ini).toMatch(/site\s*=\s*de/);
   });
 
   it('stores a session without a password when asked', async () => {

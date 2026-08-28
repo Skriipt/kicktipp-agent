@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { t } from '../i18n/index.js';
 
 function getGuideText(): string {
   return `# kicktipp CLI — Agent Guide
@@ -16,6 +17,8 @@ prompts for kicktipp.com credentials (stored in ~/.config/kicktipp-agent/).
   kicktipp set-community          # interactive picker (prompts for number)
   kicktipp set-player             # interactive — identifies you in leaderboards
   kicktipp set-notify             # interactive — desktop, webhook, or command
+  kicktipp set-lang de            # keep German UI chrome (or en)
+  kicktipp set-site de            # start on kicktipp.de (or com)
 
 These are interactive commands that require stdin. Run them once during setup.
 Non-interactive forms (safe for agents):
@@ -115,7 +118,7 @@ Exit code 0 on success, 1 on error.
 export function registerGuideCommand(program: Command): void {
   program
     .command('guide')
-    .description('Print a detailed usage guide (useful for LLM agents)')
+    .description(t('cmd.guide.description'))
     .action(() => {
       console.log(getGuideText());
     });

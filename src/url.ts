@@ -1,9 +1,13 @@
+import { en } from './i18n/en.js';
+
 // Kicktipp serves the same pages under a German and an English host, with
 // different path spellings per language. We build URLs for the configured
 // host, and — because some communities only exist under one of them — can
 // enumerate the equivalent URLs on the other host/language as fallbacks.
 
 const DEFAULT_BASE_URL = 'https://www.kicktipp.com';
+const SITE_DE = 'https://www.kicktipp.de';
+const SITE_COM = 'https://www.kicktipp.com';
 
 type RouteKey =
   | 'login'
@@ -80,9 +84,74 @@ function oppositeBase(base: string): string {
   return normalizeBaseUrl(url.toString());
 }
 
-export const URL_BASE = normalizeBaseUrl(process.env.KICKTIPP_BASE_URL || DEFAULT_BASE_URL);
+export function siteFromArgv(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--site') return argv[i + 1];
+    if (arg.startsWith('--site=')) return arg.slice('--site='.length);
+  }
+  return undefined;
+}
 
-function routePath(route: RouteKey, community?: string, base = URL_BASE): string {
+/** Map `de` / `com` / a URL to a normalized origin. Empty is not an error. */
+export function parseSite(raw: string | undefined | null): string | undefined {
+  if (raw == null) return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+  const key = value.toLowerCase();
+  if (key === 'de' || key === '.de' || key === 'kicktipp.de' || key === 'www.kicktipp.de') {
+    return SITE_DE;
+  }
+  if (
+    key === 'com' ||
+    key === '.com' ||
+    key === 'en' ||
+    key === 'kicktipp.com' ||
+    key === 'www.kicktipp.com'
+  ) {
+    return SITE_COM;
+  }
+  if (key.startsWith('http://') || key.startsWith('https://')) return normalizeBaseUrl(value);
+  throw new Error(en.i18n.unknownSite.replace('{value}', value));
+}
+
+export function resolveBaseUrl(opts?: {
+  argv?: string[];
+  env?: NodeJS.ProcessEnv;
+  configSite?: string | null;
+}): string {
+  const argv = opts?.argv ?? process.argv;
+  const env = opts?.env ?? process.env;
+  const fromFlag = parseSite(siteFromArgv(argv));
+  if (fromFlag) return fromFlag;
+  const fromBaseEnv = env.KICKTIPP_BASE_URL?.trim();
+  if (fromBaseEnv) return normalizeBaseUrl(fromBaseEnv);
+  const fromSiteEnv = parseSite(env.KICKTIPP_SITE);
+  if (fromSiteEnv) return fromSiteEnv;
+  const fromConfig = parseSite(opts?.configSite);
+  if (fromConfig) return fromConfig;
+  return DEFAULT_BASE_URL;
+}
+
+/** Short label for config.ini and status lines: `de`, `com`, or the origin. */
+export function siteLabel(base: string): string {
+  const host = new URL(base).hostname.toLowerCase();
+  if (host.endsWith('kicktipp.de')) return 'de';
+  if (host.endsWith('kicktipp.com')) return 'com';
+  return normalizeBaseUrl(base);
+}
+
+let currentBase = resolveBaseUrl();
+
+export function setUrlBase(base: string): void {
+  currentBase = normalizeBaseUrl(base);
+}
+
+export function urlBase(): string {
+  return currentBase;
+}
+
+function routePath(route: RouteKey, community?: string, base = urlBase()): string {
   const template = ROUTES[route][languageForBase(base)];
   if (!template.includes(':community')) return template;
   if (!community) throw new Error(`Community is required for route '${route}'.`);
@@ -93,7 +162,7 @@ function buildUrl(
   route: RouteKey,
   community?: string,
   params?: URLSearchParams,
-  base = URL_BASE,
+  base = urlBase(),
 ): string {
   const url = new URL(routePath(route, community, base), base);
   if (params) {
@@ -117,7 +186,9 @@ function matchdayParams(matchday?: number, extra?: Record<string, string>): URLS
   return params;
 }
 
-export const URL_LOGIN = buildUrl('login');
+export function urlLogin(): string {
+  return buildUrl('login');
+}
 
 export function getCommunitiesUrl(): string {
   return buildUrl('communities');
@@ -215,8 +286,8 @@ export function getAlternateUrls(rawUrl: string): string[] {
   const bases = [
     normalizeBaseUrl(current.origin),
     oppositeBase(current.origin),
-    URL_BASE,
-    oppositeBase(URL_BASE),
+    urlBase(),
+    oppositeBase(urlBase()),
   ];
   const paths = pathVariants(current.pathname);
 

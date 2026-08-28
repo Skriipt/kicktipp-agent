@@ -1,3 +1,5 @@
+import { t } from '../i18n/index.js';
+
 /**
  * The betting screen as a pure state machine.
  *
@@ -144,13 +146,13 @@ export function handleKey(state: TuiState, key: Key): TuiState {
       const rows = state.rows.map((r) =>
         r.editable && r.suggestion && !isCompleteDraft(r.draft) ? { ...r, draft: r.suggestion } : r,
       );
-      return { ...state, rows, message: 'Filled every empty match from the suggestions.', confirmingQuit: false };
+      return { ...state, rows, message: t('tui.filledAll'), confirmingQuit: false };
     }
 
     case 'submit': {
       const changed = changedRows(state);
       if (!changed.length) {
-        return { ...state, message: 'Nothing to submit — no bets have changed.', confirmingQuit: false };
+        return { ...state, message: t('tui.nothingChanged'), confirmingQuit: false };
       }
       return { ...state, outcome: 'submit', message: null, confirmingQuit: false };
     }
@@ -160,7 +162,7 @@ export function handleKey(state: TuiState, key: Key): TuiState {
         return {
           ...state,
           confirmingQuit: true,
-          message: 'You have unsaved bets. Press q again to discard them, or w to submit.',
+          message: t('tui.unsaved'),
         };
       }
       return { ...state, outcome: 'quit', message: null };
