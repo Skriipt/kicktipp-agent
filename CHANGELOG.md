@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.1] - 2026-08-28
+
+### Changed
+
+- npm `homepage` is https://kicktipp-agent.com, matching the GitHub repo website.
+
 ## [1.1.0] - 2026-08-28
 
 ### Changed

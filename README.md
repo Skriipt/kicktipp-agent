@@ -36,7 +36,7 @@ This is the least terminal-heavy path. After Node is installed, you can stay in 
 
 This is a zip Claude Desktop knows how to install. It is the same Node program, with a settings form.
 
-1. Download **[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest [GitHub release](https://github.com/christianheidorn/kicktipp-agent/releases). The file version should match the release tag, for example both `1.1.0`.
+1. Download **[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest [GitHub release](https://github.com/christianheidorn/kicktipp-agent/releases). The file version should match the release tag, for example both `1.1.1`.
 2. Double-click the file. Claude Desktop should offer to install it. If nothing happens, open Claude Desktop and install the file from there.
 3. Fill in the email and password you use on kicktipp.com or kicktipp.de. You can leave community blank and pick the pool later. Tick read-only if you only want Claude to look, not submit tips.
 4. Fully quit Claude Desktop. Closing the window is not enough on a Mac. Use Claude → Quit, then open it again.

@@ -1,6 +1,6 @@
 {
   "name": "kicktipp-agent",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "CLI and MCP server for kicktipp.com and kicktipp.de",
   "type": "module",
   "license": "MIT",
@@ -8,7 +8,7 @@
     "type": "git",
     "url": "git+https://github.com/christianheidorn/kicktipp-agent.git"
   },
-  "homepage": "https://github.com/christianheidorn/kicktipp-agent",
+  "homepage": "https://kicktipp-agent.com",
   "keywords": [
     "kicktipp",
     "mcp",
