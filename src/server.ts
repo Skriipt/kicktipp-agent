@@ -3,6 +3,8 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { localizeMatchDates } from './helpers/match-date.js';
+import { applyNotifierSettings, notifierSnapshot } from './notify/backends.js';
 import { Page, launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials, getActiveProfile, readDefaultStrategy } from './config.js';
 import { CacheStore } from './cache/store.js';
@@ -106,7 +108,7 @@ const server = new McpServer(
 server.registerTool(
   'get_status',
   {
-    description: 'Check current configuration. Call this first to see if a community and player are set. Most tools require a community. Use set_community and set_player if not configured.',
+    description: 'Check current configuration. Call this first to see if a community, player and notifier are set. Most tools require a community. Use set_community, set_player and set_notify if not configured.',
     inputSchema: {},
     outputSchema: OUTPUT_SCHEMA,
   },
@@ -120,6 +122,7 @@ server.registerTool(
           credentials_saved: credentials,
           community: community || null,
           player: player || null,
+          notify: notifierSnapshot(),
           setup_needed: !credentials || !community,
           setup_instructions: !credentials
             ? 'No credentials found. Set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal.'
@@ -156,7 +159,7 @@ server.registerTool(
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchBets(page, community, matchday);
-    return jsonResult(data);
+    return jsonResult({ ...data, matches: localizeMatchDates(data.matches) });
   }),
 );
 
@@ -171,7 +174,7 @@ server.registerTool(
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchSchedule(page, community, matchday);
-    return jsonResult(data);
+    return jsonResult({ ...data, matches: localizeMatchDates(data.matches) });
   }),
 );
 
@@ -189,7 +192,9 @@ server.registerTool(
     const page = await getPage();
     const community = await resolveCommunity(page);
     const data = await fetchLeaderboard(page, community, matchday, bonus);
-    return jsonResult(data);
+    return jsonResult(
+      data.matches ? { ...data, matches: localizeMatchDates(data.matches) } : data,
+    );
   }),
 );
 
@@ -308,6 +313,45 @@ if (!readOnly) {
 );
 }
 
+if (!readOnly) {
+  server.registerTool(
+    'set_notify',
+    {
+      description:
+        'Configure the local notifier used by reminders (kicktipp notify). Does not contact Kicktipp. kind is desktop (macOS/Linux notification), webhook (POST JSON to target URL), or command (run target). webhook and command require target. Environment variables KICKTIPP_NOTIFY_KIND / KICKTIPP_NOTIFY_TARGET override the saved file if set.',
+      inputSchema: {
+        kind: z.enum(['desktop', 'webhook', 'command']).describe('desktop, webhook, or command.'),
+        target: z
+          .string()
+          .optional()
+          .describe('Required for webhook (http(s) URL) and command (executable path). Omit for desktop.'),
+      },
+      outputSchema: OUTPUT_SCHEMA,
+    },
+    async ({ kind, target }) => {
+      try {
+        const saved = applyNotifierSettings(kind, target);
+        const snap = notifierSnapshot();
+        return jsonResult({
+          success: true,
+          kind: saved.kind,
+          target: saved.target ?? null,
+          from_env: snap.from_env,
+          note: snap.from_env
+            ? 'Saved to config.ini, but KICKTIPP_NOTIFY_KIND or KICKTIPP_NOTIFY_TARGET is set and will win at runtime.'
+            : null,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: message }, null, 2) }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
 server.registerTool(
   'get_bonus_questions',
   {
@@ -419,7 +463,7 @@ server.registerTool(
 server.registerTool(
   'get_deadline',
   {
-    description: "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Times are interpreted in the time_zone field's zone, which is assumed rather than reported by Kicktipp — mention it if a countdown looks surprising.",
+    description: "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Kickoff instants are parsed from Kicktipp's HTML (Central Time on .com, Berlin on .de) and shown in the time_zone field, which is this machine unless KICKTIPP_TZ is set.",
     inputSchema: {
     matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
     warn_hours: z.number().positive().optional().describe('Urgency window in hours (default 6).'),

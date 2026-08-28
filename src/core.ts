@@ -20,7 +20,13 @@ import {
 import { escapeCssValue } from './helpers/escape-css-value.js';
 import { throughCache, type CacheOptions } from './cache/cached-fetch.js';
 import { assertWritable } from './read-only.js';
-import { parseMatchDate } from './helpers/match-date.js';
+import {
+  displayTimeZone,
+  formatKickoffTime,
+  inheritPrintedDate,
+  isSameCalendarDay,
+  parseMatchDate,
+} from './helpers/match-date.js';
 import { appendAudit, type AuditBet, type BetSource } from './audit/log.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
@@ -57,6 +63,32 @@ async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   }
 
   return cheerio.load(await page.content());
+}
+
+function spieltagIndexFromPage($: cheerio.CheerioAPI): number | undefined {
+  const raw = $('input[name="spieltagIndex"]').attr('value');
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 34) return undefined;
+  return n;
+}
+
+/**
+ * Bare `/predict` is not always the match list. Kicktipp remembers the last
+ * tab; after bonus questions (or some submitted match bets) it serves
+ * `#tippabgabeFragen` with hidden `bonus=true` and no `#tippabgabeSpiele`.
+ * Reload the same spieltag without the bonus flag so callers see matches.
+ */
+export async function loadMatchPredictPage(
+  page: Page,
+  community: string,
+  matchday?: number,
+): Promise<cheerio.CheerioAPI> {
+  let $ = await loadPage(page, getPredictUrl(community, matchday));
+  if (matchday !== undefined) return $;
+  if ($('#kicktipp-content table#tippabgabeSpiele tbody').length) return $;
+  const index = spieltagIndexFromPage($);
+  if (index === undefined) return $;
+  return loadPage(page, getPredictUrl(community, index));
 }
 
 
@@ -200,22 +232,24 @@ export interface PlacedBonusBet {
 // ── Data functions ─────────────────────────────────────────────────
 
 export async function fetchTodayMatches(page: Page, community: string): Promise<{ title: string; matches: TodayMatch[] }> {
-  const $ = await loadPage(page, getPredictUrl(community));
+  const $ = await loadMatchPredictPage(page, community);
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
   const tbody = content.find('table#tippabgabeSpiele tbody');
   if (!tbody.length) return { title, matches: [] };
 
   const now = new Date();
+  const zone = displayTimeZone();
   const matches: TodayMatch[] = [];
+  let lastDate = '';
 
   tbody.children('tr').each((_, tr) => {
     const cols = $(tr).children('td');
     if (cols.length < 4) return;
-    const dateText = $(cols[0]).text().trim();
+    const dateText = inheritPrintedDate($(cols[0]).text(), lastDate);
+    lastDate = dateText;
     const matchDate = parseMatchDate(dateText);
-    if (!matchDate || matchDate.getFullYear() !== now.getFullYear() ||
-        matchDate.getMonth() !== now.getMonth() || matchDate.getDate() !== now.getDate()) return;
+    if (!matchDate || !isSameCalendarDay(matchDate, now, zone)) return;
 
     const home = $(cols[1]).text().trim();
     const away = $(cols[2]).text().trim();
@@ -235,7 +269,7 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
       }
     }
 
-    const time = matchDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    const time = formatKickoffTime(matchDate, zone);
     // The odds column is only present in communities that have odds enabled
     const [rateHome, rateDraw, rateAway] = cols.length > 4 ? parseOdds($, cols[4]) : ['-', '-', '-'];
 
@@ -251,17 +285,19 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
 
 export async function fetchBets(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: BetMatch[] }> {
   return throughCache('bets', matchday, cache, async () => {
-  const $ = await loadPage(page, getPredictUrl(community, matchday));
+  const $ = await loadMatchPredictPage(page, community, matchday);
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
   const tbody = content.find('table#tippabgabeSpiele tbody');
   if (!tbody.length) return { title, matches: [] };
 
   const matches: BetMatch[] = [];
+  let lastDate = '';
   tbody.children('tr').each((_, tr) => {
     const cols = $(tr).children('td');
     if (cols.length < 4) return;
-    const date = $(cols[0]).text().trim();
+    const date = inheritPrintedDate($(cols[0]).text(), lastDate);
+    lastDate = date;
     const home = $(cols[1]).text().trim();
     const away = $(cols[2]).text().trim();
 
@@ -301,10 +337,12 @@ export async function fetchSchedule(page: Page, community: string, matchday?: nu
   if (!tbody.length) return { title, matches: [] };
 
   const matches: ScheduleMatch[] = [];
+  let lastDate = '';
   tbody.children('tr').each((_, tr) => {
     const cols = $(tr).children('td');
     if (cols.length < 5) return;
-    const date = $(cols[0]).text().trim();
+    const date = inheritPrintedDate($(cols[0]).text(), lastDate);
+    lastDate = date;
     const home = $(cols[2]).text().trim();
     const away = $(cols[3]).text().trim();
     const resultSpan = $(cols[4]).find('span.kicktipp-ergebnis');
@@ -339,10 +377,12 @@ export async function fetchLeaderboard(page: Page, community: string, matchday?:
     const matchesTable = content.find('table#spielplanSpiele');
     if (matchesTable.length) {
       matches = [];
+      let lastDate = '';
       matchesTable.find('tbody tr').each((_, tr) => {
         const cols = $(tr).children('td');
         if (cols.length < 4) return;
-        const date = $(cols[0]).text().trim();
+        const date = inheritPrintedDate($(cols[0]).text(), lastDate);
+        lastDate = date;
         const home = $(cols[1]).text().trim();
         const away = $(cols[2]).text().trim();
         const resultSpan = $(cols[3]).find('span.kicktipp-ergebnis');
@@ -554,7 +594,7 @@ export async function placeBets(
   // Checked here as well as at the entry points: this is the last line before
   // anything reaches Kicktipp.
   if (submit) assertWritable('Placing bets');
-  const $ = await loadPage(page, getPredictUrl(community, matchday));
+  const $ = await loadMatchPredictPage(page, community, matchday);
   const tbody = $('#kicktipp-content table#tippabgabeSpiele tbody');
   if (!tbody.length) throw new Error('No matches found.');
 
@@ -782,6 +822,7 @@ export async function fetchMatchdayBets(
   const content = $('#kicktipp-content');
 
   const matches: ScheduleMatch[] = [];
+  let lastDate = '';
   content.find('table#spielplanSpiele tbody tr').each((_, tr) => {
     const cols = $(tr).children('td');
     if (cols.length < 4) return;
@@ -789,8 +830,10 @@ export async function fetchMatchdayBets(
     const result = resultSpan.length
       ? `${resultSpan.find('span.kicktipp-heim').text().trim()}:${resultSpan.find('span.kicktipp-gast').text().trim()}`
       : '-:-';
+    const date = inheritPrintedDate($(cols[0]).text(), lastDate);
+    lastDate = date;
     matches.push({
-      date: $(cols[0]).text().trim(),
+      date,
       home: $(cols[1]).text().trim(),
       away: $(cols[2]).text().trim(),
       result,
@@ -930,6 +973,7 @@ function parseEditableRows(
 ): { editable: EditableMatch[]; bets: BetMatch[] } {
   const editable: EditableMatch[] = [];
   const bets: BetMatch[] = [];
+  let lastDate = '';
 
   $('#kicktipp-content tbody tr').each((_, tr) => {
     const cols = $(tr).children('td');
@@ -943,8 +987,10 @@ function parseEditableRows(
 
     const h = heimInput.attr('value') || '';
     const g = gastInput.attr('value') || '';
+    const date = inheritPrintedDate($(cols[0]).text(), lastDate);
+    lastDate = date;
     bets.push({
-      date: $(cols[0]).text().trim(),
+      date,
       home,
       away,
       bet: h && g ? `${h}:${g}` : '-',

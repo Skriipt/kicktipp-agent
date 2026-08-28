@@ -9,7 +9,13 @@ import { emitJson, setJsonMode } from '../helpers/output.js';
 import { fetchBets } from '../core.js';
 import { buildDeadlineReport, urgencyWarning } from '../analytics/deadline.js';
 import { cronLine, icsCalendar, systemdUnits } from '../notify/schedule-artifacts.js';
-import { notify, readNotifierConfig } from '../notify/backends.js';
+import {
+  applyNotifierSettings,
+  notify,
+  parseNotifierSettings,
+  readNotifierConfig,
+} from '../notify/backends.js';
+import { ask } from '../shared.js';
 
 const SYSTEMD_DIR = path.join(os.homedir(), '.config', 'systemd', 'user');
 
@@ -53,7 +59,11 @@ export function registerRemindCommand(program: Command): void {
     .option('--uninstall', 'Remove the systemd user units')
     .option('--ics [file]', 'Write a calendar file with an alarm per kickoff')
     .option('--every <minutes>', 'How often to check', parseInt)
-    .option('--warn-hours <n>', 'Urgency window passed to `deadline --check`', parseFloat)
+    .option(
+      '--warn-hours <n>',
+      'Hours before kickoff that an unbetted match counts as urgent (default: 6)',
+      parseFloat,
+    )
     .option('--matchday <n>', 'Matchday for --ics', parseInt)
     .action(async (opts) => {
       const everyMinutes = opts.every ?? 60;
@@ -107,7 +117,11 @@ export function registerNotifyCommand(program: Command): void {
     .command('notify')
     .description('Send a reminder through the configured notifier, if anything needs a bet')
     .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--warn-hours <n>', 'Urgency window in hours', parseFloat)
+    .option(
+      '--warn-hours <n>',
+      'Hours before kickoff that an unbetted match counts as urgent (default: 6)',
+      parseFloat,
+    )
     .option('--force', 'Notify even when nothing is urgent')
     .option('--json', 'Output raw JSON instead of notifying')
     .action(async (opts) => {
@@ -140,5 +154,53 @@ export function registerNotifyCommand(program: Command): void {
       } finally {
         await page.close();
       }
+    });
+}
+
+const KIND_HELP = [
+  { kind: 'desktop' as const, label: 'macOS Notification Center / notify-send' },
+  { kind: 'webhook' as const, label: 'POST JSON to a URL (ntfy, Slack, Home Assistant)' },
+  { kind: 'command' as const, label: 'Run a local program' },
+];
+
+async function resolveNotifierArgs(kindArg?: string, targetArg?: string): Promise<{ kind: string; target?: string }> {
+  let kind = kindArg?.trim().toLowerCase();
+  let target = targetArg?.trim() || undefined;
+
+  if (!kind) {
+    if (!process.stdin.isTTY) {
+      throw new Error('Pass a kind: kicktipp set-notify desktop|webhook|command [target]');
+    }
+    console.log('Notifier backends:');
+    KIND_HELP.forEach((entry, i) => console.log(`  [${i + 1}] ${entry.kind.padEnd(8)}  ${entry.label}`));
+    const choice = await ask(`Select backend (1-${KIND_HELP.length}): `);
+    const idx = parseInt(choice, 10) - 1;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= KIND_HELP.length) {
+      throw new Error('Invalid selection.');
+    }
+    kind = KIND_HELP[idx].kind;
+  }
+
+  if ((kind === 'webhook' || kind === 'command') && !target) {
+    if (!process.stdin.isTTY) {
+      parseNotifierSettings(kind, target);
+    }
+    target = (await ask(kind === 'webhook' ? 'Webhook URL: ' : 'Command path: ')).trim();
+  }
+
+  return { kind, target };
+}
+
+export function registerSetNotifyCommand(program: Command): void {
+  program
+    .command('set-notify')
+    .description('Configure how `notify` delivers reminders (desktop, webhook, or command)')
+    .argument('[kind]', 'desktop | webhook | command')
+    .argument('[target]', 'Webhook URL or executable path')
+    .action(async (kindArg: string | undefined, targetArg: string | undefined) => {
+      const { kind, target } = await resolveNotifierArgs(kindArg, targetArg);
+      const saved = applyNotifierSettings(kind, target);
+      if (saved.kind === 'desktop') console.log('Saved desktop notifier.');
+      else console.log(`Saved ${saved.kind} notifier → ${saved.target}`);
     });
 }

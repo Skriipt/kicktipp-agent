@@ -153,6 +153,12 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: config.auth.email, password };
   }
 
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      'No credentials found. Set KICKTIPP_EMAIL and KICKTIPP_PASSWORD, or run this command in a terminal to enter them.',
+    );
+  }
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string): Promise<string> =>
     new Promise((resolve) => rl.question(q, resolve));
@@ -218,6 +224,15 @@ export function savePlayer(name: string): void {
   const profile = getActiveProfile();
   if (profile) writeProfileSection(config, profile, { player: name });
   else config.player = { name };
+  writeConfig(config);
+}
+
+/** Replace the [notify] section. Passing no target clears a previous one. */
+export function saveNotifySection(notify: { kind: string; target?: string }): void {
+  const config = readConfig();
+  config.notify = notify.target
+    ? { kind: notify.kind, target: notify.target }
+    : { kind: notify.kind };
   writeConfig(config);
 }
 

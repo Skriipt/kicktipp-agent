@@ -1,12 +1,47 @@
 import { spawn } from 'child_process';
-import { readConfig } from '../config.js';
+import { readConfig, saveNotifySection } from '../config.js';
 
-export type NotifierKind = 'desktop' | 'webhook' | 'command';
+export const NOTIFIER_KINDS = ['desktop', 'webhook', 'command'] as const;
+export type NotifierKind = (typeof NOTIFIER_KINDS)[number];
 
 export interface NotifierConfig {
   kind: NotifierKind;
   /** webhook: the URL to POST to. command: the program to run. */
   target?: string;
+}
+
+function isNotifierKind(value: string): value is NotifierKind {
+  return (NOTIFIER_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Validate a kind/target pair the way the CLI and MCP both accept it.
+ * Desktop ignores a leftover target; webhook and command require one.
+ */
+export function parseNotifierSettings(kindRaw: string, targetRaw?: string): NotifierConfig {
+  const kind = kindRaw.trim().toLowerCase();
+  if (!isNotifierKind(kind)) {
+    throw new Error(`Unknown notifier '${kindRaw}'. Use desktop, webhook or command.`);
+  }
+  const target = targetRaw?.trim() || undefined;
+  if (kind === 'desktop') return { kind: 'desktop' };
+  if (!target) {
+    throw new Error(
+      kind === 'webhook'
+        ? 'The webhook notifier needs a URL (for example https://ntfy.sh/your-topic).'
+        : 'The command notifier needs an executable path.',
+    );
+  }
+  if (kind === 'webhook' && !/^https?:\/\//i.test(target)) {
+    throw new Error('Webhook target must be an http(s) URL.');
+  }
+  return { kind, target };
+}
+
+export function applyNotifierSettings(kind: string, target?: string): NotifierConfig {
+  const parsed = parseNotifierSettings(kind, target);
+  saveNotifySection(parsed);
+  return parsed;
 }
 
 /**
@@ -21,9 +56,24 @@ export interface NotifierConfig {
  */
 export function readNotifierConfig(): NotifierConfig {
   const notify = readConfig().notify ?? {};
-  const kind = (process.env.KICKTIPP_NOTIFY_KIND || notify.kind || 'desktop') as NotifierKind;
+  const kindRaw = String(process.env.KICKTIPP_NOTIFY_KIND || notify.kind || 'desktop');
+  const kind: NotifierKind = isNotifierKind(kindRaw) ? kindRaw : 'desktop';
   const target = process.env.KICKTIPP_NOTIFY_TARGET || notify.target;
   return { kind, target };
+}
+
+/** Effective notifier plus whether env vars are shadowing the ini file. */
+export function notifierSnapshot(): {
+  kind: NotifierKind;
+  target: string | null;
+  from_env: boolean;
+} {
+  const cfg = readNotifierConfig();
+  return {
+    kind: cfg.kind,
+    target: cfg.target ?? null,
+    from_env: !!(process.env.KICKTIPP_NOTIFY_KIND || process.env.KICKTIPP_NOTIFY_TARGET),
+  };
 }
 
 function run(command: string, args: string[], input?: string): Promise<void> {
@@ -49,7 +99,15 @@ function run(command: string, args: string[], input?: string): Promise<void> {
 async function desktop(title: string, body: string): Promise<void> {
   if (process.platform === 'darwin') {
     const escape = (s: string) => s.replace(/["\\]/g, '\\$&');
-    await run('osascript', ['-e', `display notification "${escape(body)}" with title "${escape(title)}"`]);
+    // A silent `display notification` is often filed only in Notification
+    // Center. A system sound makes macOS treat it as a real banner. The
+    // short delay keeps osascript alive until that banner is posted.
+    await run('osascript', [
+      '-e',
+      `display notification "${escape(body)}" with title "${escape(title)}" sound name "Glass"`,
+      '-e',
+      'delay 1',
+    ]);
     return;
   }
   if (process.platform === 'linux') {

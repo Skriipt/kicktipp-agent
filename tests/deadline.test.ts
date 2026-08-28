@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { parseMatchDate, humanDelta, assumedTimeZone } from '../src/helpers/match-date.js';
+import {
+  parseMatchDate,
+  humanDelta,
+  assumedTimeZone,
+  inheritPrintedDate,
+  localizePrintedDate,
+  formatKickoffTime,
+  isSameCalendarDay,
+} from '../src/helpers/match-date.js';
 import { buildDeadlineReport, urgencyWarning } from '../src/analytics/deadline.js';
 import type { BetMatch } from '../src/core.js';
 
@@ -33,8 +41,33 @@ describe('parseMatchDate', () => {
     expect(parseMatchDate('15.01.27 20:30', TZ)?.toISOString()).toBe('2027-01-15T19:30:00.000Z');
   });
 
-  it('honours a different zone entirely', () => {
-    expect(parseMatchDate('21.08.26 20:30', 'UTC')?.toISOString()).toBe('2026-08-21T20:30:00.000Z');
+  it('infers Europe/Berlin from a German date when no zone is given', () => {
+    expect(parseMatchDate('21.08.26 20:30')?.toISOString()).toBe('2026-08-21T18:30:00.000Z');
+  });
+
+  it('infers America/Chicago from a US date when no zone is given', () => {
+    // kicktipp.com HTML is Central Time: 1:30 PM CDT is 18:30Z, 20:30 in Berlin.
+    expect(parseMatchDate('8/21/26 1:30 PM')?.toISOString()).toBe('2026-08-21T18:30:00.000Z');
+  });
+
+  it('treats the live Bayern–Stuttgart HTML clock as 20:30 Berlin', () => {
+    expect(parseMatchDate('8/28/26 1:30 PM')?.toISOString()).toBe('2026-08-28T18:30:00.000Z');
+    expect(localizePrintedDate('8/28/26 1:30 PM', 'Europe/Berlin')).toBe('8/28/26 8:30 PM');
+    const instant = parseMatchDate('8/28/26 1:30 PM')!;
+    expect(formatKickoffTime(instant, 'Europe/Berlin')).toBe('20:30');
+  });
+
+  it('does not let KICKTIPP_TZ change how the HTML is read', () => {
+    const previous = process.env.KICKTIPP_TZ;
+    process.env.KICKTIPP_TZ = 'UTC';
+    try {
+      // 1:30 PM is still Chicago, not 13:30 UTC.
+      expect(parseMatchDate('8/28/26 1:30 PM')?.toISOString()).toBe('2026-08-28T18:30:00.000Z');
+      expect(localizePrintedDate('8/28/26 1:30 PM', 'UTC')).toBe('8/28/26 6:30 PM');
+    } finally {
+      if (previous === undefined) delete process.env.KICKTIPP_TZ;
+      else process.env.KICKTIPP_TZ = previous;
+    }
   });
 
   it('rejects anything it does not recognise', () => {
@@ -42,9 +75,23 @@ describe('parseMatchDate', () => {
     expect(parseMatchDate('', TZ)).toBeNull();
   });
 
+  it('carries a blank Kicktipp date cell forward from the row above', () => {
+    expect(inheritPrintedDate('', '8/28/26 1:30 PM')).toBe('8/28/26 1:30 PM');
+    expect(inheritPrintedDate('  ', '8/28/26 1:30 PM')).toBe('8/28/26 1:30 PM');
+    expect(inheritPrintedDate('8/29/26 8:30 AM', '8/28/26 1:30 PM')).toBe('8/29/26 8:30 AM');
+  });
+
   it('falls back to a usable zone name', () => {
     expect(typeof assumedTimeZone()).toBe('string');
     expect(assumedTimeZone().length).toBeGreaterThan(0);
+  });
+
+  it('compares calendar days in a named zone', () => {
+    const kickoff = parseMatchDate('8/28/26 1:30 PM')!;
+    const berlinAfternoon = new Date('2026-08-28T12:00:00.000Z');
+    const berlinNextDay = new Date('2026-08-28T22:30:00.000Z'); // 00:30 on the 29th in Berlin
+    expect(isSameCalendarDay(kickoff, berlinAfternoon, 'Europe/Berlin')).toBe(true);
+    expect(isSameCalendarDay(kickoff, berlinNextDay, 'Europe/Berlin')).toBe(false);
   });
 });
 
@@ -146,6 +193,7 @@ describe('urgencyWarning', () => {
     const warning = urgencyWarning(report);
     expect(warning).toMatch(/2 match\(es\) still need a bet/);
     expect(warning).toMatch(/in 2h 0m/);
+    expect(warning).toMatch(/Europe\/Berlin/);
   });
 
   it('stays quiet when nothing is urgent', () => {

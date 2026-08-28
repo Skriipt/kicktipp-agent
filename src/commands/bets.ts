@@ -3,6 +3,7 @@ import { launchBrowser } from '../browser.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
+import { localizeMatchDates, localizePrintedDate } from '../helpers/match-date.js';
 import { fetchBets, type BetMatch } from '../core.js';
 import { buildDeadlineReport, urgencyWarning } from '../analytics/deadline.js';
 
@@ -22,7 +23,7 @@ function render(title: string, matches: BetMatch[]): string {
   for (const m of matches) {
     const bet = (m.bet || '-').padStart(5);
     lines.push(
-      `  ${m.date.padEnd(17)} ${m.home.padStart(homeWidth)} vs ${m.away.padEnd(awayWidth)} ${bet}${odds(m)}`,
+      `  ${localizePrintedDate(m.date).padEnd(17)} ${m.home.padStart(homeWidth)} vs ${m.away.padEnd(awayWidth)} ${bet}${odds(m)}`,
     );
   }
   return lines.join('\n');
@@ -46,7 +47,12 @@ export function registerBetsCommand(program: Command): void {
         const report = buildDeadlineReport(community, opts.matchday ?? null, data.matches);
 
         if (opts.json) {
-          emitJson({ community, matchday: opts.matchday ?? null, data, deadline: report });
+          emitJson({
+            community,
+            matchday: opts.matchday ?? null,
+            data: { ...data, matches: localizeMatchDates(data.matches) },
+            deadline: report,
+          });
         } else {
           console.log(render(data.title, data.matches));
           const warning = urgencyWarning(report);

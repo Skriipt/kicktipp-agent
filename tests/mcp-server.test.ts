@@ -85,6 +85,7 @@ describe('the MCP server as a client sees it', () => {
     // Text stays parseable on its own for clients that ignore structure.
     expect(() => JSON.parse(result.content[0].text)).not.toThrow();
     expect(result.structuredContent.data).toMatchObject({ community: 'mycomm', player: 'Me' });
+    expect(result.structuredContent.data.notify).toMatchObject({ kind: 'desktop' });
   });
 
   it('offers the cached-data resources', async () => {
@@ -125,9 +126,37 @@ describe('the MCP server as a client sees it', () => {
     const names = (messages.find((m) => m.id === 2)?.result?.tools ?? []).map(
       (t: { name: string }) => t.name,
     );
-    for (const mutating of ['place_bets', 'place_bonus_bets', 'set_community', 'set_player']) {
+    for (const mutating of ['place_bets', 'place_bonus_bets', 'set_community', 'set_player', 'set_notify']) {
       expect(names).not.toContain(mutating);
     }
     expect(names).toContain('get_status');
+  });
+
+  it('lets set_notify write the local [notify] section', async () => {
+    const messages = await callServer(
+      [
+        INIT,
+        {
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/call',
+          params: {
+            name: 'set_notify',
+            arguments: { kind: 'webhook', target: 'https://ntfy.sh/kicktipp-tests' },
+          },
+        },
+      ],
+      { HOME: home },
+    );
+    const result = messages.find((m) => m.id === 2)?.result;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent.data).toMatchObject({
+      success: true,
+      kind: 'webhook',
+      target: 'https://ntfy.sh/kicktipp-tests',
+    });
+    const ini = fs.readFileSync(path.join(home, '.config', 'kicktipp-agent', 'config.ini'), 'utf8');
+    expect(ini).toMatch(/kind\s*=\s*webhook/);
+    expect(ini).toMatch(/kicktipp-tests/);
   });
 });

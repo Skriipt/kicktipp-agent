@@ -43,6 +43,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
     status('Session expired, logging in again...');
   }
 
+  statusClear();
   const { email, password } = await loadCredentials();
   const page = new Page(new CookieJar(), opts.fetchImpl);
   await login(page, email, password);

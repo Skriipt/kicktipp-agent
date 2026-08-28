@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { cronLine, systemdUnits, icsCalendar } from '../src/notify/schedule-artifacts.js';
-import { notify } from '../src/notify/backends.js';
+import { notify, parseNotifierSettings } from '../src/notify/backends.js';
 import { buildDeadlineReport } from '../src/analytics/deadline.js';
 import type { BetMatch } from '../src/core.js';
 
@@ -127,5 +127,33 @@ describe('notify', () => {
     await expect(
       notify({ kind: 'command', target: 'definitely-not-a-real-binary-xyz' }, 's', {}),
     ).rejects.toThrow(/Could not run/);
+  });
+});
+
+describe('parseNotifierSettings', () => {
+  it('accepts desktop without a target', () => {
+    expect(parseNotifierSettings('desktop')).toEqual({ kind: 'desktop' });
+    expect(parseNotifierSettings('DESKTOP', 'https://ignored.example')).toEqual({ kind: 'desktop' });
+  });
+
+  it('requires an http(s) URL for webhook', () => {
+    expect(parseNotifierSettings('webhook', 'https://ntfy.sh/topic')).toEqual({
+      kind: 'webhook',
+      target: 'https://ntfy.sh/topic',
+    });
+    expect(() => parseNotifierSettings('webhook')).toThrow(/needs a URL/);
+    expect(() => parseNotifierSettings('webhook', 'ntfy.sh/topic')).toThrow(/http/);
+  });
+
+  it('requires a command path', () => {
+    expect(parseNotifierSettings('command', '/bin/true')).toEqual({
+      kind: 'command',
+      target: '/bin/true',
+    });
+    expect(() => parseNotifierSettings('command', '  ')).toThrow(/executable/);
+  });
+
+  it('rejects an unknown kind', () => {
+    expect(() => parseNotifierSettings('sms')).toThrow(/Unknown notifier/);
   });
 });

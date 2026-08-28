@@ -3,6 +3,7 @@ import { launchBrowser } from '../browser.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
+import { localizeMatchDates, localizePrintedDate } from '../helpers/match-date.js';
 import { fetchLeaderboard, type LeaderboardData } from '../core.js';
 
 function render(data: LeaderboardData, bonus: boolean): string {
@@ -20,7 +21,7 @@ function render(data: LeaderboardData, bonus: boolean): string {
     const awayWidth = widest(data.matches.map((m) => m.away));
     for (const m of data.matches) {
       lines.push(
-        `  ${m.date.padEnd(17)} ${m.home.padStart(homeWidth)} vs ${m.away.padEnd(awayWidth)}  ${m.result}`,
+        `  ${localizePrintedDate(m.date).padEnd(17)} ${m.home.padStart(homeWidth)} vs ${m.away.padEnd(awayWidth)}  ${m.result}`,
       );
     }
     lines.push('');
@@ -63,7 +64,12 @@ export function registerLeaderboardCommand(program: Command): void {
         const data = await fetchLeaderboard(page, community, opts.matchday, bonus);
         statusClear();
 
-        if (opts.json) emitJson({ community, matchday: opts.matchday ?? null, bonus, data });
+        if (opts.json) {
+          const payload = data.matches
+            ? { ...data, matches: localizeMatchDates(data.matches) }
+            : data;
+          emitJson({ community, matchday: opts.matchday ?? null, bonus, data: payload });
+        }
         else console.log(render(data, bonus));
       } finally {
         await page.close();

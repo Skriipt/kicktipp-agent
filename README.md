@@ -64,6 +64,7 @@ $ kicktipp set-player
 | `set-community` | Select a default community |
 | `players` | List players in the saved community |
 | `set-player` | Select which player you are |
+| `set-notify` | Configure the `notify` backend (desktop, webhook, or command) |
 | `leaderboard` | Show the matchday leaderboard |
 | `overview` | Show the season overview |
 | `schedule` | Show the match schedule |
@@ -166,14 +167,34 @@ kicktipp remind --ics season.ics   # a calendar with an alarm per kickoff
 kicktipp notify                    # notify now, if anything is urgent
 ```
 
-Kicktipp prints kickoff times with no UTC offset, so they are read in this
-machine's timezone unless `KICKTIPP_TZ` names the site's zone. Every countdown
-says which zone it assumed.
+The predict page in a browser shows kickoff times in *your* timezone.
+Kicktipp's HTML does not: `.com` prints US Central (`8/28/26 1:30 PM`) and
+`.de` prints Berlin (`28.08.26 20:30`) — the same instant, rewritten by
+JavaScript on the page. The CLI reads the HTML, then shows the time in this
+machine's zone (or `KICKTIPP_TZ` if you set one). Later rows that share a
+kickoff have a blank date cell; that value is carried forward from the row
+above.
 
-Notifications go through one backend, configured under `[notify]`:
-`desktop` (notify-send / osascript), `webhook` (a JSON POST — ntfy, Slack,
-Home Assistant, anything), or `command`. There is no default endpoint; a
-webhook only ever goes where you point it.
+A match is urgent when it still needs a bet and kickoff is within **6 hours**
+(`--warn-hours`, or `KICKTIPP_WARN_HOURS`). Kicktipp closes betting at each
+match's own kickoff, not at a matchday-wide deadline.
+
+Notifications go through one backend, configured with `kicktipp set-notify`
+(or the MCP `set_notify` tool). That writes `[notify]` in
+`~/.config/kicktipp-agent/config.ini`:
+
+```bash
+kicktipp set-notify                  # picker
+kicktipp set-notify desktop
+kicktipp set-notify webhook https://ntfy.sh/your-topic
+kicktipp set-notify command /usr/local/bin/my-hook
+```
+
+`desktop` is macOS Notification Center (or `notify-send` on Linux). `webhook`
+POSTs JSON to the URL. `command` runs that program with the summary as an
+argument and the deadline report on stdin. `KICKTIPP_NOTIFY_KIND` and
+`KICKTIPP_NOTIFY_TARGET` override the file if set. There is no default
+webhook endpoint — a URL only ever goes where you named it.
 
 ### Scenarios, replays and the bet log
 

@@ -1,5 +1,5 @@
 import type { BetMatch } from '../core.js';
-import { assumedTimeZone, humanDelta, parseMatchDate } from '../helpers/match-date.js';
+import { displayTimeZone, humanDelta, parseMatchDate } from '../helpers/match-date.js';
 
 export interface DeadlineMatch {
   home: string;
@@ -49,11 +49,11 @@ export function buildDeadlineReport(
 ): DeadlineReport {
   const now = options.now ?? new Date();
   const warnHours = options.warnHours ?? warnHoursDefault();
-  const timeZone = options.timeZone ?? assumedTimeZone();
+  const timeZone = options.timeZone ?? displayTimeZone();
   const windowMs = warnHours * 3600_000;
 
   const rows: DeadlineMatch[] = matches.map((match) => {
-    const kickoff = parseMatchDate(match.date, timeZone);
+    const kickoff = parseMatchDate(match.date);
     const hasBet = /^\d+:\d+$/.test(match.bet);
     // Without a parseable kickoff, assume the match is still open: warning
     // about a match that has started is better than staying quiet about one
@@ -102,6 +102,7 @@ export function urgencyWarning(report: DeadlineReport): string | null {
   const when = soonest ? humanDelta(new Date(report.now), new Date(soonest.kickoff as string)) : 'soon';
   return (
     `WARNING: ${report.urgentCount} match(es) still need a bet, ` +
-    `the first kicking off ${when}.`
+    `the first kicking off ${when}. ` +
+    `Times shown in ${report.timeZone} (set KICKTIPP_TZ to override).`
   );
 }

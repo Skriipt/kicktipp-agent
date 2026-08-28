@@ -3,6 +3,7 @@ import { launchBrowser } from '../browser.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { emitJson, setJsonMode, widest } from '../helpers/output.js';
+import { localizeMatchDates, localizePrintedDate } from '../helpers/match-date.js';
 import { fetchSchedule, type ScheduleMatch } from '../core.js';
 
 function render(title: string, matches: ScheduleMatch[]): string {
@@ -14,7 +15,7 @@ function render(title: string, matches: ScheduleMatch[]): string {
   const awayWidth = widest(matches.map((m) => m.away));
   for (const m of matches) {
     lines.push(
-      `  ${m.date.padEnd(17)} ${m.home.padStart(homeWidth)} vs ${m.away.padEnd(awayWidth)}  ${m.result}`,
+      `  ${localizePrintedDate(m.date).padEnd(17)} ${m.home.padStart(homeWidth)} vs ${m.away.padEnd(awayWidth)}  ${m.result}`,
     );
   }
   return lines.join('\n');
@@ -35,7 +36,7 @@ export function registerScheduleCommand(program: Command): void {
         const data = await fetchSchedule(page, community, opts.matchday);
         statusClear();
 
-        if (opts.json) emitJson({ community, matchday: opts.matchday ?? null, data });
+        if (opts.json) emitJson({ community, matchday: opts.matchday ?? null, data: { ...data, matches: localizeMatchDates(data.matches) } });
         else console.log(render(data.title, data.matches));
       } finally {
         await page.close();

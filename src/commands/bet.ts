@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
 import { launchBrowser } from '../browser.js';
-import { getBonusPredictUrl, getPredictUrl } from '../url.js';
+import { getBonusPredictUrl } from '../url.js';
 import { ensureCommunity, ask } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import {
@@ -11,8 +11,9 @@ import {
 } from '../helpers/parse-bet-arg.js';
 import { escapeCssValue } from '../helpers/escape-css-value.js';
 import { assertWritable } from '../read-only.js';
-import { placeBets } from '../core.js';
+import { loadMatchPredictPage, placeBets } from '../core.js';
 import { appendAudit } from '../audit/log.js';
+import { inheritPrintedDate, localizePrintedDate } from '../helpers/match-date.js';
 import { runBettingTui } from '../tui/run.js';
 
 // ── Bonus question types and helpers ───────────────────────────────
@@ -121,10 +122,8 @@ function findOption(
 
 async function interactiveMatchBets(page: any, community: string, matchday?: number): Promise<void> {
   status('Loading bets...');
-  await page.goto(getPredictUrl(community, matchday));
+  const $ = await loadMatchPredictPage(page, community, matchday);
   statusClear();
-
-  const $ = cheerio.load(await page.content());
   const content = $('#kicktipp-content');
 
   const titleDiv = content.find('div.pagetitle');
@@ -146,6 +145,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
     gastName: string;
   }
   const editable: EditableRow[] = [];
+  let lastDate = '';
 
   tbody.find('tr').each((_, tr) => {
     const cols = $(tr).find('td');
@@ -155,7 +155,8 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
     const heimInput = betTd.find('input[id$="_heimTipp"]');
     const gastInput = betTd.find('input[id$="_gastTipp"]');
     if (!heimInput.length || !gastInput.length) return;
-    const date = $(cols[0]).text().trim();
+    const date = inheritPrintedDate($(cols[0]).text(), lastDate);
+    lastDate = date;
     const home = $(cols[1]).text().trim();
     const away = $(cols[2]).text().trim();
     const currentH = heimInput.attr('value') || '';
@@ -179,7 +180,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
 
   const chosen: string[] = [];
   for (const row of editable) {
-    let prompt = `  ${row.date} ${row.home} vs ${row.away} `;
+    let prompt = `  ${localizePrintedDate(row.date)} ${row.home} vs ${row.away} `;
     if (row.current) prompt += `[${row.current}] `;
     prompt += '(e.g. 2:1, Enter to skip): ';
     const answer = (await ask(prompt)).trim();

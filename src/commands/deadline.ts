@@ -22,7 +22,7 @@ function render(report: DeadlineReport): string {
 
   lines.push(
     report.nextKickoff
-      ? `Next kickoff ${report.nextKickoffIn} (${new Date(report.nextKickoff).toLocaleString()})`
+      ? `Next kickoff ${report.nextKickoffIn} (${new Date(report.nextKickoff).toLocaleString(undefined, { timeZone: report.timeZone })})`
       : 'Every match has kicked off.',
   );
   lines.push('');
@@ -48,7 +48,7 @@ function render(report: DeadlineReport): string {
           (report.urgentCount ? `, ${report.urgentCount} within ${report.warnHours}h.` : '.')
       : 'All open matches have a bet.',
   );
-  lines.push(`Times interpreted in ${report.timeZone} (set KICKTIPP_TZ to override).`);
+  lines.push(`Times shown in ${report.timeZone} (set KICKTIPP_TZ to override).`);
   return lines.join('\n');
 }
 
@@ -57,8 +57,15 @@ export function registerDeadlineCommand(program: Command): void {
     .command('deadline')
     .description('Show time until kickoff and which matches still need a bet')
     .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--warn-hours <n>', 'Urgency window in hours', parseFloat)
-    .option('--check', `Exit ${EXIT_URGENT} when matches need a bet within the window`)
+    .option(
+      '--warn-hours <n>',
+      'Hours before kickoff that an unbetted match counts as urgent (default: 6)',
+      parseFloat,
+    )
+    .option(
+      '--check',
+      'For cron: print nothing except a one-line warning, and exit 2 if anything is urgent (else 0)',
+    )
     .option('--json', 'Output raw JSON')
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
