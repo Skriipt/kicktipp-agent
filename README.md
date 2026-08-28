@@ -73,6 +73,11 @@ $ kicktipp set-player
 | `today` | Show today's matches and which still need bets |
 | `rules` | Show the game rules |
 | `guide` | Print a detailed usage guide (useful for LLM agents) |
+| `sync` | Download this season into the local cache |
+| `cache status` / `cache clear` | Inspect or delete the cache |
+| `stats` | Season analytics for you or another player |
+| `rival` | What it would take to overtake another player |
+| `suggest` | Bet slip suggested from the published odds |
 | `logout` | Remove stored credentials and session |
 
 ### Placing bets
@@ -99,6 +104,64 @@ kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 - `--view <value>` — Overview type (with `overview`)
 - `--home` / `--away` — Home/away filter (with `table`)
 
+### Analytics
+
+Once a season is cached locally, the agent can answer questions Kicktipp
+itself does not:
+
+```bash
+kicktipp sync                      # download this season into a local cache
+kicktipp stats                     # your form, hit types, biases, consistency
+kicktipp stats --player Papa       # or somebody else's
+kicktipp rival Papa                # what has to happen for you to overtake them
+kicktipp suggest --strategy ev     # a bet slip built from the published odds
+```
+
+`sync` walks the season once, pacing its requests, and skips matchdays it has
+already stored, so later runs only fetch what is new. Everything downstream of
+it reads the cache: `stats` needs no network at all, and `rival`/`suggest`
+accept `--offline` to work the same way.
+
+**stats** reports points per matchday against the league average, rank history,
+how your hits break down (exact result / goal difference / tendency / miss),
+how your predictions compare with what actually happened, and how consistent
+you are. It always states how many matchdays the numbers rest on.
+
+**rival** shows the points gap, how much each remaining match can still swing
+it, and what would have to happen for you to pass someone. Kicktipp hides other
+players' bets until the deadline passes, so before kickoff the answer is given
+as best/worst bounds and labelled as such.
+
+**suggest** converts the odds Kicktipp already prints into probabilities and
+proposes a full slip, explaining every pick. Three strategies: `safe` backs the
+likeliest outcome, `ev` maximises expected points under your community's own
+scoring rules, and `contrarian` fades the favourite in close matches (high
+variance on purpose). It prints and stops — submitting needs `--place`, which
+asks first, and matches that already have a bet are left alone unless you pass
+`--replace`.
+
+This is odds arithmetic, not prediction magic: the numbers come from the
+bookmaker's own prices, and no external data source or API key is involved.
+
+The cache lives in your platform's data directory (`~/.local/share/kicktipp-agent`
+on Linux) and can be inspected with `kicktipp cache status` or removed with
+`kicktipp cache clear`.
+
+### Scoring rules
+
+Features that count points read your community's rules page to learn what an
+exact result, a goal difference and a tendency are worth. If that page cannot be
+parsed, Kicktipp's 4/3/2 defaults are assumed and every affected output says so.
+You can also set them explicitly in `~/.config/kicktipp-agent/config.ini`:
+
+```ini
+[scoring]
+exact = 4
+diff = 3
+tendency = 2
+```
+
+
 ## MCP Server
 
 The MCP server exposes the same functionality as the CLI through the [Model Context Protocol](https://modelcontextprotocol.io), allowing AI assistants like Claude to interact with kicktipp.com on your behalf.
@@ -122,6 +185,10 @@ The MCP server exposes the same functionality as the CLI through the [Model Cont
 | `set_player` | Set which player you are |
 | `place_bets` | Place match bets by fixture name |
 | `place_bonus_bets` | Place bonus question answers |
+| `sync_history` | Fill the local cache so the analytics tools have data |
+| `get_stats` | Season analytics for a player |
+| `get_rival_analysis` | Gap, swing and overtake conditions vs. another player |
+| `suggest_bets` | Suggested bet slip from the odds (read-only, never submits) |
 
 ### Setup with Claude Desktop
 

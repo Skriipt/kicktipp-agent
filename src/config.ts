@@ -133,6 +133,25 @@ export function savePlayer(name: string): void {
   writeConfig(config);
 }
 
+/**
+ * An explicit scoring override from config.ini, for communities whose rules
+ * page cannot be parsed:
+ *
+ *   [scoring]
+ *   exact = 4
+ *   diff = 3
+ *   tendency = 2
+ */
+export function readScoringOverride(): { exact: number; goalDiff: number; tendency: number } | null {
+  const scoring = readConfig().scoring;
+  if (!scoring) return null;
+  const exact = Number(scoring.exact);
+  const goalDiff = Number(scoring.diff ?? scoring.goalDiff);
+  const tendency = Number(scoring.tendency);
+  if (![exact, goalDiff, tendency].every(Number.isFinite)) return null;
+  return { exact, goalDiff, tendency };
+}
+
 export function hasCredentials(): boolean {
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
   const config = readConfig();

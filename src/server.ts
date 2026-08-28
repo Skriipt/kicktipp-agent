@@ -5,6 +5,16 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Page, launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials } from './config.js';
+import { CacheStore } from './cache/store.js';
+import { loadSeason } from './analytics/season.js';
+import { computeSeasonStats } from './analytics/season-stats.js';
+import { resolveRulesFromCache } from './rules/resolve.js';
+import { syncSeason } from './cache/sync.js';
+import { analyseRival } from './analytics/rivals.js';
+import { gapBeforeMatchday } from './analytics/gap.js';
+import { resolveRules } from './rules/resolve.js';
+import { toOddsMatches } from './analytics/odds.js';
+import { STRATEGIES, suggestBets } from './analytics/strategies.js';
 import {
   AuthError,
   resolveCommunity,
@@ -18,6 +28,7 @@ import {
   fetchCommunities,
   fetchPlayers,
   fetchBonusQuestions,
+  fetchMatchdayBets,
   placeBets,
   placeBonusBets,
   OVERVIEW_VIEW_OPTIONS,
@@ -242,6 +253,128 @@ server.tool(
     const community = await resolveCommunity(page);
     const data = await fetchBonusQuestions(page, community);
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }),
+);
+
+server.tool(
+  'get_stats',
+  'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
+  {
+    player: z.string().optional().describe('Player name. Defaults to the configured player.'),
+    compare: z.string().optional().describe('Optional second player to compute alongside.'),
+  },
+  async ({ player, compare }) => {
+    const community = loadCommunity();
+    if (!community) throw new Error('No community set. Call get_communities then set_community.');
+    const who = player || loadPlayer();
+    if (!who) throw new Error('No player set. Call get_players then set_player, or pass a player name.');
+
+    const store = new CacheStore(community);
+    const season = loadSeason(store);
+    const rules = resolveRulesFromCache(store);
+
+    if (!season.matchdays.length) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            error: 'empty_cache',
+            message: 'No season history cached yet. Call sync_history first; it may take a minute.',
+          }, null, 2),
+        }],
+      };
+    }
+
+    const own = loadPlayer();
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          rules,
+          stats: computeSeasonStats(season, who, rules.values, own),
+          compare: compare ? computeSeasonStats(season, compare, rules.values, own) : undefined,
+        }, null, 2),
+      }],
+    };
+  },
+);
+
+server.tool(
+  'sync_history',
+  'Download this season into the local cache so get_stats has data to work with. Makes several requests per matchday and paces them politely, so the first run can take a minute. Safe to repeat: matchdays already complete are skipped.',
+  {
+    from: z.number().int().min(1).max(34).optional().describe('First matchday (default 1).'),
+    to: z.number().int().min(1).max(34).optional().describe('Last matchday (default: end of season).'),
+  },
+  async ({ from, to }) => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const result = await syncSeason(page, community, { from, to });
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  'get_rival_analysis',
+  "Compare the user with another player for one matchday: the points gap, how much each remaining match can still swing it, and what has to happen to overtake them. Check the 'mode' field before answering - 'exact' means both bet sets are known, 'bounds' means the rival's bets are still hidden and the figures are best/worst limits, not predictions. Also report rules.source, since the point values may be assumed defaults rather than this community's real ones.",
+  {
+    rival: z.string().describe('Player to compare against, as named by get_players.'),
+    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
+  },
+  async ({ rival, matchday }) => withFreshSession(async () => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const player = loadPlayer();
+    if (!player) throw new Error('No player set. Call get_players then set_player first.');
+
+    const store = new CacheStore(community);
+    const cache = { store };
+    const grid = await fetchMatchdayBets(page, community, matchday, cache);
+    const leaderboard = await fetchLeaderboard(page, community, matchday, false, cache);
+    const rules = await resolveRules(page, community, cache);
+
+    const analysis = analyseRival(
+      grid,
+      player,
+      rival,
+      rules.values,
+      gapBeforeMatchday(leaderboard, player, rival),
+    );
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ rules, analysis }, null, 2) }] };
+  }),
+);
+
+server.tool(
+  'suggest_bets',
+  "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
+  {
+    strategy: z.enum(['safe', 'ev', 'contrarian']).optional().describe('Default: safe.'),
+    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
+  },
+  async ({ strategy, matchday }) => withFreshSession(async () => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const store = new CacheStore(community);
+    const cache = { store };
+
+    const { matches } = await fetchBets(page, community, matchday, cache);
+    const rules = await resolveRules(page, community, cache);
+    const chosen = (strategy ?? 'safe') as (typeof STRATEGIES)[number];
+    const suggestions = suggestBets(toOddsMatches(matches), rules.values, chosen);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          strategy: chosen,
+          matchday: matchday ?? null,
+          rules,
+          suggestions,
+          expectedPointsTotal: suggestions.reduce((sum, s) => sum + s.expectedPoints, 0),
+          note: 'Suggestions only - nothing has been submitted. Show these to the user and call place_bets only after they confirm.',
+        }, null, 2),
+      }],
+    };
   }),
 );
 

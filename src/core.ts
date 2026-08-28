@@ -16,6 +16,7 @@ import {
   EditableMatch,
 } from './helpers/parse-bet-arg.js';
 import { escapeCssValue } from './helpers/escape-css-value.js';
+import { throughCache, type CacheOptions } from './cache/cached-fetch.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
 
@@ -186,6 +187,25 @@ export interface BonusQuestion {
   }[];
 }
 
+
+export interface PlayerBets {
+  player: string;
+  /** One entry per match, aligned with `matches`. Empty string = no bet shown. */
+  bets: string[];
+}
+
+export interface MatchdayBets {
+  matchday?: number;
+  matches: ScheduleMatch[];
+  players: PlayerBets[];
+  /**
+   * Set when per-player bets could not be read — most often because the
+   * deadline has not passed yet and Kicktipp still hides everyone else's
+   * predictions. `players` is then empty rather than wrong.
+   */
+  note?: string;
+}
+
 export interface PlacedBonusBet {
   question: string;
   answer: string;
@@ -243,7 +263,8 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
   return { title, matches };
 }
 
-export async function fetchBets(page: Page, community: string, matchday?: number): Promise<{ title: string; matches: BetMatch[] }> {
+export async function fetchBets(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: BetMatch[] }> {
+  return throughCache('bets', matchday, cache, async () => {
   const $ = await loadPage(page, getPredictUrl(community, matchday));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
@@ -280,9 +301,11 @@ export async function fetchBets(page: Page, community: string, matchday?: number
   });
 
   return { title, matches };
+  });
 }
 
-export async function fetchSchedule(page: Page, community: string, matchday?: number): Promise<{ title: string; matches: ScheduleMatch[] }> {
+export async function fetchSchedule(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: ScheduleMatch[] }> {
+  return throughCache('schedule', matchday, cache, async () => {
   const $ = await loadPage(page, getScheduleUrl(community, matchday));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
@@ -311,9 +334,14 @@ export async function fetchSchedule(page: Page, community: string, matchday?: nu
   });
 
   return { title, matches };
+  });
 }
 
-export async function fetchLeaderboard(page: Page, community: string, matchday?: number, bonus = false): Promise<LeaderboardData> {
+export async function fetchLeaderboard(page: Page, community: string, matchday?: number, bonus = false, cache: CacheOptions = {}): Promise<LeaderboardData> {
+  // The bonus view is a different payload under the same URL; it is not
+  // cached, so it can neither overwrite the regular leaderboard nor be
+  // served offline.
+  return throughCache('leaderboard', matchday, bonus ? { ...cache, store: null } : cache, async () => {
   const $ = await loadPage(page, getLeaderboardUrl(community, matchday, bonus));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
@@ -380,6 +408,7 @@ export async function fetchLeaderboard(page: Page, community: string, matchday?:
   });
 
   return { title, matches, bonusQuestions, rankings };
+  });
 }
 
 const OVERVIEW_VIEWS: Record<string, [string, string]> = {
@@ -392,7 +421,10 @@ const OVERVIEW_VIEWS: Record<string, [string, string]> = {
 
 export const OVERVIEW_VIEW_OPTIONS = Object.keys(OVERVIEW_VIEWS);
 
-export async function fetchOverview(page: Page, community: string, view = 'matchday-points'): Promise<OverviewData> {
+export async function fetchOverview(page: Page, community: string, view = 'matchday-points', cache: CacheOptions = {}): Promise<OverviewData> {
+  // Only the default view is cached — the other views are the same data
+  // rearranged, and they would otherwise overwrite each other.
+  return throughCache('overview', undefined, view === 'matchday-points' ? cache : { ...cache, store: null }, async () => {
   if (!(view in OVERVIEW_VIEWS)) {
     throw new Error(`Unknown view '${view}'. Options: ${OVERVIEW_VIEW_OPTIONS.join(', ')}`);
   }
@@ -435,9 +467,12 @@ export async function fetchOverview(page: Page, community: string, view = 'match
   });
 
   return { label, maxMatchday, players };
+  });
 }
 
-export async function fetchTable(page: Page, community: string, option?: 'home' | 'away'): Promise<{ label: string; teams: TableTeam[] }> {
+export async function fetchTable(page: Page, community: string, option?: 'home' | 'away', cache: CacheOptions = {}): Promise<{ label: string; teams: TableTeam[] }> {
+  // Home/away tables are separate payloads; only the full table is cached.
+  return throughCache('table', undefined, option === undefined ? cache : { ...cache, store: null }, async () => {
   let label = 'League Table';
   if (option === 'home') label = 'League Table (Home)';
   else if (option === 'away') label = 'League Table (Away)';
@@ -468,9 +503,11 @@ export async function fetchTable(page: Page, community: string, option?: 'home' 
   });
 
   return { label, teams };
+  });
 }
 
-export async function fetchRules(page: Page, community: string): Promise<RulesSection[]> {
+export async function fetchRules(page: Page, community: string, cache: CacheOptions = {}): Promise<RulesSection[]> {
+  return throughCache('rules', undefined, cache, async () => {
   const $ = await loadPage(page, getRulesUrl(community));
   const pagecontent = $('#kicktipp-content div.pagecontent');
   if (!pagecontent.length) return [];
@@ -507,6 +544,7 @@ export async function fetchRules(page: Page, community: string): Promise<RulesSe
   });
 
   return sections;
+  });
 }
 
 export async function fetchCommunities(page: Page): Promise<string[]> {
@@ -659,4 +697,101 @@ export async function placeBonusBets(page: Page, community: string, bets: string
   }
 
   return placed;
+}
+
+/**
+ * Read every player's bets for one matchday from the leaderboard page.
+ *
+ * Kicktipp only reveals other players' predictions once the matchday's
+ * deadline has passed; before that the cells are blank. The bet columns sit
+ * between the name and the points columns, so they are identified by
+ * elimination and then aligned with the match list. If that alignment does
+ * not come out exactly, no bets are returned and `note` says why — a wrong
+ * alignment would silently attribute predictions to the wrong fixture.
+ */
+export async function fetchMatchdayBets(
+  page: Page,
+  community: string,
+  matchday?: number,
+  cache: CacheOptions = {},
+): Promise<MatchdayBets> {
+  return throughCache('matchdayBets', matchday, cache, async () => {
+  const $ = await loadPage(page, getLeaderboardUrl(community, matchday));
+  const content = $('#kicktipp-content');
+
+  const matches: ScheduleMatch[] = [];
+  content.find('table#spielplanSpiele tbody tr').each((_, tr) => {
+    const cols = $(tr).children('td');
+    if (cols.length < 4) return;
+    const resultSpan = $(cols[3]).find('span.kicktipp-ergebnis');
+    const result = resultSpan.length
+      ? `${resultSpan.find('span.kicktipp-heim').text().trim()}:${resultSpan.find('span.kicktipp-gast').text().trim()}`
+      : '-:-';
+    matches.push({
+      date: $(cols[0]).text().trim(),
+      home: $(cols[1]).text().trim(),
+      away: $(cols[2]).text().trim(),
+      result,
+    });
+  });
+
+  if (!matches.length) {
+    return { matchday, matches, players: [], note: 'No match list found on the leaderboard page.' };
+  }
+
+  // Columns that are never bets: rank, name and the three points columns.
+  const NON_BET = 'td.position, td.spieltagspunkte, td.bonus, td.gesamtpunkte, td.punkte, td.siege';
+  const players: PlayerBets[] = [];
+  let misaligned = 0;
+
+  content.find('table#ranking tbody tr').each((_, tr) => {
+    const row = $(tr);
+    const name = row.find('div.mg_name').text().trim();
+    if (!name) return;
+
+    const betCells: string[] = [];
+    row.children('td').each((__, td) => {
+      const cell = $(td);
+      if (cell.is(NON_BET)) return;
+      if (cell.find('div.mg_name').length) return;
+      betCells.push(normalizeBetCell(cell.text()));
+    });
+
+    if (betCells.length !== matches.length) {
+      misaligned++;
+      return;
+    }
+    players.push({ player: name, bets: betCells });
+  });
+
+  if (!players.length) {
+    return {
+      matchday,
+      matches,
+      players: [],
+      note: misaligned
+        ? 'Bet columns did not line up with the match list, so no bets were read.'
+        : 'No per-player bets are published for this matchday yet (the deadline has probably not passed).',
+    };
+  }
+
+  const withBets = players.filter((p) => p.bets.some((b) => b !== ''));
+  if (!withBets.length) {
+    return {
+      matchday,
+      matches,
+      players: [],
+      note: 'Kicktipp is still hiding everyone\'s bets for this matchday (deadline not passed).',
+    };
+  }
+
+  return { matchday, matches, players };
+  });
+}
+
+/** A bet cell holds either a scoreline or a placeholder such as "-" or "–". */
+function normalizeBetCell(raw: string): string {
+  const text = raw.replace(/\s+/g, '');
+  const match = text.match(/(\d+):(\d+)/);
+  return match ? `${match[1]}:${match[2]}` : '';
 }
