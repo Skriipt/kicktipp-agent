@@ -30,7 +30,8 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pack:mcpb": "bash scripts/pack-mcpb.sh"
+    "pack:mcpb": "bash scripts/pack-mcpb.sh",
+    "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

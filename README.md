@@ -1,70 +1,137 @@
 # kicktipp-agent
 
-A helper for [Kicktipp](https://www.kicktipp.com) on both **kicktipp.com** and **kicktipp.de**. Check the table, fill the terminal tip sheet, or let Claude do it in a chat. Your password stays on your computer.
+A helper for [Kicktipp](https://www.kicktipp.com) on **kicktipp.com** and **kicktipp.de**. You can check the table, place tips in a TUI (terminal UI), or ask Claude to do it in a chat.
 
-Kicktipp has no public API. This talks to the website from your machine. You do not need to know how that works.
+Kicktipp has no public API, so this talks to the website from your own computer. Your password never leaves the machine. Do not type it into a chat.
 
 ## Start here
 
-Pick one path. Skip the rest.
+You only need one of the four sections below. Read the headings, pick the one that matches how you work, ignore the others.
 
-You need [Node.js 20](https://nodejs.org/) or newer on every path. On the site, press the LTS button, run the installer, leave the defaults, finish. Then open Terminal (or Command Prompt on Windows) and type `node -v`. You want a number like `v20` or `v22`, not an error.
+| If you… | Go to |
+|---------|--------|
+| Chat with Claude as a desktop app | [Claude Desktop](#claude-desktop) |
+| Use Claude in the terminal (Claude Code), or another MCP client | [Claude Code](#claude-code) |
+| Want `kicktipp` commands in the terminal yourself | [The `kicktipp` command](#the-kicktipp-command) |
+| Are editing this project's source | [Working on the code](#working-on-the-code) |
 
-Do not type your Kicktipp password into a chat. It stays on your computer.
+Every path needs [Node.js](https://nodejs.org/) 20 or newer. Open the site, click the big **LTS** button, run the installer, and leave the defaults. When it is done, open Terminal (macOS) or Command Prompt (Windows) and type:
 
-### I use Claude Desktop
+```bash
+node -v
+```
 
-You do not need to live in a terminal after Node is installed.
+You want a reply like `v20.19.0` or `v22.something`. If the computer says the command was not found, Node is not installed, or you need to close the terminal and open a new one so it picks up the installer.
 
-1. Download **[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest GitHub release. Same version number as the release.
+Two ways to get the program itself:
+
+- **npm** downloads the published package named `kicktipp-agent`. You do not keep a copy of this GitHub repo. This is the usual choice if you just want it to work.
+- **This repo** means `git clone` of the source, then `npm install` and `npm run build` on your machine. Use this if you want the code in a folder you can open, or you are working from git rather than the registry.
+
+### Claude Desktop
+
+This is the least terminal-heavy path. After Node is installed, you can stay in the Claude app.
+
+#### Install the Desktop file
+
+This is a zip Claude Desktop knows how to install. It is the same Node program, with a settings form.
+
+1. Download **[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest [GitHub release](https://github.com/christianheidorn/kicktipp-agent/releases). The file version should match the release tag, for example both `1.1.0`.
 2. Double-click the file. Claude Desktop should offer to install it. If nothing happens, open Claude Desktop and install the file from there.
-3. In the extension settings, enter the email and password you use on kicktipp.com or kicktipp.de. Community can wait. Tick read-only if you only want Claude to look, not tip.
-4. Fully quit Claude Desktop (not just the window) and open it again.
-5. Start a **new** chat. Ask "What's my Kicktipp status?"
+3. Fill in the email and password you use on kicktipp.com or kicktipp.de. You can leave community blank and pick the pool later. Tick read-only if you only want Claude to look, not submit tips.
+4. Fully quit Claude Desktop. Closing the window is not enough on a Mac. Use Claude → Quit, then open it again.
+5. Start a **new** chat. Ask something like "What's my Kicktipp status?"
 
-If the chat says it cannot find `node`, Node is not installed or not on your PATH. Install LTS, restart Desktop, try again.
+If Claude says it cannot find `node`, Node is missing from your PATH. Install LTS from nodejs.org, quit Desktop fully, try again.
 
-### I use Claude Code, or another assistant that talks MCP
+#### Or use a clone of this repo
 
-1. From a copy of this project:
+Same program, no `.mcpb` file. You clone the repo, build it, then tell Desktop to run `dist/server.js`. That needs a JSON edit. Step-by-step is under [Connecting Claude](#connecting-claude). Do not add the bundle *and* that JSON at the same time, or you will start two copies.
 
-   ```bash
-   npm install
-   npm run build
-   claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
-   ```
+### Claude Code
 
-   Replace the path with the real folder on your machine. When this package is on npm, you can skip the copy and run:
+Claude does not log into Kicktipp itself. It starts a small program on your computer. You attach that program once, then in a chat you tell it to set up your account. It will give you a link to `http://127.0.0.1:…` on your own machine. Open that in a normal browser, sign in, pick your pool. The password goes into that page, never into the chat.
 
-   ```bash
-   claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
-   ```
+#### From npm
 
-2. Open a new chat. Say **"Set up my Kicktipp account."** Open the `http://127.0.0.1:…` link in your normal browser, sign in, pick your pool.
+This command downloads the `kicktipp-agent` package when needed and starts the MCP server. You do not have to clone anything.
 
-Hand-editing Claude Desktop's JSON is a third option. Same program. See [Connecting Claude](#connecting-claude).
+```bash
+claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
+```
 
-### I want `kicktipp` in the terminal
+The long name `kicktipp-agent-mcp` is the server binary. `kicktipp-mcp` is the same binary under a shorter name.
 
-After Node is installed:
+#### From this repo
+
+You keep a folder with the source, compile it, then point Claude at that file. Run these from a terminal. The last line uses `pwd` so you do not have to type the folder path by hand. Run it while you are still inside `kicktipp-agent`.
+
+```bash
+git clone https://github.com/christianheidorn/kicktipp-agent.git
+cd kicktipp-agent
+npm install
+npm run build
+claude mcp add kicktipp -- node "$(pwd)/dist/server.js"
+```
+
+`npm install` fetches libraries. `npm run build` compiles TypeScript into `dist/`. On Windows, `$(pwd)` may not work. Use the full path to `dist\server.js` instead.
+
+#### After either option
+
+Open a **new** chat and say **Set up my Kicktipp account.** Open the local link, sign in, pick the community. After that, you can ask for status, the table, or to help with tips.
+
+Editing Claude Desktop's config by hand is this same server. Details are in [Connecting Claude](#connecting-claude).
+
+### The `kicktipp` command
+
+This is for using Kicktipp from the terminal without an assistant. After it is installed you run `kicktipp login --web` once, then commands like `kicktipp today` and `kicktipp bet`.
+
+#### From npm
+
+This puts `kicktipp` on your PATH so it works in any terminal window:
 
 ```bash
 npm install -g kicktipp-agent
 kicktipp login --web
 ```
 
-On a Mac or Linux, a page should open by itself. On Windows, copy the `http://127.0.0.1:…` line from the terminal into your browser. Sign in, pick your pool. Then `kicktipp today` lists today's matches, and `kicktipp bet` opens the full-screen tip sheet.
-
-The package is not on npm yet. From a copy of this project:
+If you would rather not install globally, this runs the same login without `-g`:
 
 ```bash
+npx -y -p kicktipp-agent kicktipp login --web
+```
+
+`-p kicktipp-agent` tells npx which package to download. The last `kicktipp` is the command inside that package.
+
+#### From this repo
+
+Clone, install libraries, compile, then `npm link` so the `kicktipp` command uses *this* folder's build:
+
+```bash
+git clone https://github.com/christianheidorn/kicktipp-agent.git
+cd kicktipp-agent
 npm install
 npm run build
 npm link
 kicktipp login --web
 ```
 
-### I am changing the code
+#### After either option
+
+`login --web` prints a `http://127.0.0.1:…/setup?token=…` link. On macOS and Linux it should open in your browser by itself. On Windows, copy that line into a browser if a window does not appear.
+
+Sign in with your Kicktipp email and password, then pick your pool. After that:
+
+```bash
+kicktipp today
+kicktipp bet
+```
+
+`today` lists today's matches. `bet` opens the TUI, a full-screen tip sheet, if you are in a real terminal.
+
+### Working on the code
+
+From a clone:
 
 ```bash
 npm install
@@ -72,7 +139,7 @@ npm run build
 npm test
 ```
 
-`npm run pack:mcpb` builds the Desktop file yourself. Download it from [releases](https://github.com/christianheidorn/kicktipp-agent/releases) if you only want to use it.
+`npm run pack:mcpb` builds the Desktop `.mcpb` file yourself. If you only want to *use* Desktop, download the file from [releases](https://github.com/christianheidorn/kicktipp-agent/releases) instead.
 
 ## CLI
 
@@ -108,7 +175,7 @@ $ kicktipp set-player
 | `schedule` | Show the match schedule |
 | `table` | Show the league table |
 | `bets` | Show your bets for a matchday |
-| `bet` | Place bets (full-screen tip sheet on a real terminal, or by fixture / bonus) |
+| `bet` | Place bets. Opens the TUI on a real terminal, or by fixture / bonus |
 | `today` | Show today's matches and which still need bets |
 | `rules` | Show the game rules |
 | `guide` | Print a detailed usage guide (useful for LLM agents) |
@@ -125,11 +192,11 @@ $ kicktipp set-player
 | `profiles` | List configured profiles |
 | `admin` | Spielleiter tools (members, bets for a member) |
 
-### The tip sheet (`kicktipp bet`)
+### The TUI (`kicktipp bet`)
 
-On a real terminal, `kicktipp bet` with no arguments opens a full-screen list of the matchday. Type scores in place, take the odds-based suggestion, submit with `w`.
+On a real terminal, `kicktipp bet` with no arguments opens the TUI: a full-screen list of the matchday. Type scores in place, take the odds-based suggestion, submit with `w`.
 
-![Kicktipp tip sheet in the terminal: fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
+![The kicktipp TUI: fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
 
 Keys:
 
@@ -359,16 +426,16 @@ Turn the extension off if you also added the JSON snippet, so only one server ru
 
 ### Claude Code
 
-From this checkout:
-
-```bash
-claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
-```
-
-When the package is on npm:
+**npm**
 
 ```bash
 claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
+```
+
+**This repo**, after `npm install` and `npm run build`. Replace the path.
+
+```bash
+claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
 ```
 
 Start a new chat. If Kicktipp is not signed in yet, tell the assistant to set up your account. Otherwise ask for Kicktipp status.
