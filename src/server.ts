@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { localizeMatchDates } from './helpers/match-date.js';
 import { applyNotifierSettings, notifierSnapshot } from './notify/backends.js';
 import { Page, launchBrowser } from './browser.js';
-import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials, getActiveProfile, readDefaultStrategy } from './config.js';
+import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, readDefaultStrategy } from './config.js';
+import { ensureSetupListener } from './setup/listener.js';
 import { CacheStore } from './cache/store.js';
 import { loadSeason } from './analytics/season.js';
 import { computeSeasonStats } from './analytics/season-stats.js';
@@ -49,14 +50,37 @@ import {
 
 let pageInstance: Page | null = null;
 
+async function setupPrompt(kind: 'missing' | 'expired'): Promise<{ url: string; text: string }> {
+  const url = await ensureSetupListener({
+    keepAlive: false,
+    onSaved: () => {
+      pageInstance = null;
+    },
+  });
+  const text =
+    kind === 'expired'
+      ? `Kicktipp session expired. Ask the user to open ${url} to reconnect.`
+      : `Not set up yet. Ask the user to open ${url} to connect their Kicktipp account.`;
+  return { url, text };
+}
+
 async function getPage(): Promise<Page> {
   if (pageInstance && !pageInstance.isClosed()) return pageInstance;
-  if (!hasCredentials()) {
-    throw new Error('No credentials found. Set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal.');
+  if (!hasUsableAuth()) {
+    const { text } = await setupPrompt('missing');
+    throw new Error(text);
   }
-  const { page } = await launchBrowser();
-  pageInstance = page;
-  return page;
+  try {
+    const { page } = await launchBrowser();
+    pageInstance = page;
+    return page;
+  } catch (err) {
+    if (err instanceof SessionOnlyExpiredError) {
+      const { text } = await setupPrompt('expired');
+      throw new Error(text);
+    }
+    throw err;
+  }
 }
 
 async function discardSession(): Promise<void> {
@@ -102,34 +126,78 @@ const readOnly = isReadOnly();
 
 const server = new McpServer(
   { name: 'kicktipp', version: '1.0.0' },
-  { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on kicktipp.com. Do not offer to place bets. ' : '') + 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.' },
+  { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on kicktipp.com. Do not offer to place bets. ' : '') + 'kicktipp.com football prediction game. If the user asks to set up, connect, or log in to Kicktipp, call connect_account and ask them to open the setup_url in their browser. Do not ask for a password in chat. Otherwise call get_status first. If only the community is missing, call get_communities then set_community.' },
 );
 
 server.registerTool(
   'get_status',
   {
-    description: 'Check current configuration. Call this first to see if a community, player and notifier are set. Most tools require a community. Use set_community, set_player and set_notify if not configured.',
+    description: 'Check current configuration. Call this first for a status snapshot. If the user wants to connect or set up Kicktipp, call connect_account instead. If setup_url is set, ask the user to open that localhost page. Most tools require a community.',
     inputSchema: {},
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => {
-    const credentials = hasCredentials();
+    const usable = hasUsableAuth();
     const community = loadCommunity();
     const player = loadPlayer();
+    let setup_url: string | null = null;
+    let setup_instructions: string | null = null;
+    if (!usable) {
+      const prompt = await setupPrompt('missing');
+      setup_url = prompt.url;
+      setup_instructions = prompt.text;
+    } else if (!community) {
+      setup_instructions = 'No community set. Call get_communities then set_community.';
+    }
     return jsonResult({
           read_only: readOnly,
           profile: getActiveProfile(),
-          credentials_saved: credentials,
+          credentials_saved: usable,
+          session_only: isSessionOnly(),
           community: community || null,
           player: player || null,
           notify: notifierSnapshot(),
-          setup_needed: !credentials || !community,
-          setup_instructions: !credentials
-            ? 'No credentials found. Set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal.'
-            : !community
-              ? 'No community set. Call get_communities then set_community.'
-              : null,
+          setup_needed: !usable || !community,
+          setup_url,
+          setup_instructions,
         });
+  },
+);
+
+server.registerTool(
+  'connect_account',
+  {
+    description:
+      'Connect or reconnect a Kicktipp account. Call this when the user asks to set up kicktipp-agent, log in, or reconnect. Returns a localhost URL they must open in a browser. Never ask them to paste a password into chat.',
+    inputSchema: {
+      reconnect: z
+        .boolean()
+        .optional()
+        .describe('If true, start a fresh setup even when an account is already connected.'),
+    },
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async ({ reconnect }) => {
+    const community = loadCommunity();
+    if (hasUsableAuth() && !reconnect) {
+      return jsonResult({
+        connected: true,
+        setup_url: null,
+        community: community || null,
+        session_only: isSessionOnly(),
+        message: community
+          ? 'Already connected. Pass reconnect=true to sign in again in the browser.'
+          : 'Account is connected but no community is set. Call get_communities then set_community.',
+      });
+    }
+    const prompt = await setupPrompt(hasUsableAuth() ? 'expired' : 'missing');
+    return jsonResult({
+      connected: false,
+      setup_url: prompt.url,
+      community: null,
+      session_only: isSessionOnly(),
+      message: prompt.text,
+    });
   },
 );
 

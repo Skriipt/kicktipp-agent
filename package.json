@@ -3,14 +3,33 @@
   "version": "1.0.0",
   "description": "CLI and MCP server for kicktipp.com",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christianheidorn/kicktipp-agent.git"
+  },
+  "homepage": "https://github.com/christianheidorn/kicktipp-agent",
+  "keywords": [
+    "kicktipp",
+    "mcp",
+    "cli"
+  ],
   "bin": {
     "kicktipp": "./dist/index.js",
-    "kicktipp-mcp": "./dist/server.js"
+    "kicktipp-mcp": "./dist/server.js",
+    "kicktipp-agent-mcp": "./dist/server.js"
   },
+  "files": [
+    "dist",
+    "mcpb/manifest.json",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "pack:mcpb": "bash scripts/pack-mcpb.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

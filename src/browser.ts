@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
 import { URL_LOGIN, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
-import { sessionFile, loadCredentials } from './config.js';
+import { sessionFile, loadCredentials, isSessionOnly, SessionOnlyExpiredError } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
 import { normalizeSlug } from './helpers/normalize-slug.js';
 import { CookieJar } from './http/cookie-jar.js';
@@ -43,6 +43,11 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
     status('Session expired, logging in again...');
   }
 
+  if (isSessionOnly()) {
+    statusClear();
+    throw new SessionOnlyExpiredError();
+  }
+
   statusClear();
   const { email, password } = await loadCredentials();
   const page = new Page(new CookieJar(), opts.fetchImpl);
@@ -51,7 +56,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
   return { page };
 }
 
-async function login(page: Page, username: string, password: string): Promise<void> {
+export async function login(page: Page, username: string, password: string): Promise<void> {
   status('Logging in...');
   await page.goto(URL_LOGIN);
 

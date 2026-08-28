@@ -178,6 +178,49 @@ describe('launchBrowser', () => {
   });
 });
 
+describe('session-only storage', () => {
+  let home: string;
+  let stdinTty: boolean | undefined;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-session-only-'));
+    stdinTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
+    vi.unstubAllEnvs();
+    delete process.env.KICKTIPP_EMAIL;
+    delete process.env.KICKTIPP_PASSWORD;
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    vi.spyOn(os, 'homedir').mockReturnValue(home);
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: stdinTty });
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.resetModules();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('asks to reconnect instead of logging in again when the cookie is dead', async () => {
+    const dir = path.join(home, '.config', 'kicktipp-agent');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.ini'), '[auth]\nemail = me@example.com\nstore = session\n');
+    fs.writeFileSync(
+      path.join(dir, 'session.json'),
+      JSON.stringify({ cookies: [{ name: 'sid', value: 'expired', domain: 'www.kicktipp.com' }] }),
+    );
+
+    const { launchBrowser: launch } = await import('../src/browser.js');
+    const { SessionOnlyExpiredError } = await import('../src/config.js');
+    const { mockFetch: mf } = await import('./helpers/mock-fetch.js');
+    const { fetchImpl } = mf(kicktipp());
+
+    await expect(launch({ fetchImpl })).rejects.toBeInstanceOf(SessionOnlyExpiredError);
+  });
+});
+
 describe('getCommunities', () => {
   it('lists single-segment community links and skips the rest', async () => {
     const { fetchImpl } = mockFetch(kicktipp());

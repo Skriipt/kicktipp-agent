@@ -134,6 +134,71 @@ function writeConfig(config: Record<string, any>): void {
 
 // ── Credentials ─────────────────────────────────────────────────────
 
+/** How credentials are kept on disk after a successful login. */
+export type AuthStore = 'password' | 'session';
+
+/**
+ * Session-only mode stored a cookie, not a password, so an expired session
+ * cannot be refreshed silently. The caller should send the user back through
+ * the localhost setup page.
+ */
+export class SessionOnlyExpiredError extends Error {
+  constructor() {
+    super('Kicktipp session expired. Reconnect via the setup page.');
+    this.name = 'SessionOnlyExpiredError';
+  }
+}
+
+function authBlock(config: Record<string, any>): Record<string, any> | undefined {
+  return profileSection(config) ?? config.auth;
+}
+
+export function isSessionOnly(): boolean {
+  if (process.env.KICKTIPP_PASSWORD) return false;
+  const block = authBlock(readConfig());
+  return block?.store === 'session' && !block?.password;
+}
+
+/**
+ * True when a later command can try to talk to Kicktipp: either a password
+ * is available, or a session-only login has been saved (the cookie may
+ * still turn out to be expired).
+ */
+export function hasUsableAuth(): boolean {
+  if (hasCredentials()) return true;
+  const block = authBlock(readConfig());
+  return !!(block?.email && block.store === 'session');
+}
+
+export function saveAuth(opts: { email: string; password?: string; store?: AuthStore }): void {
+  const store = opts.store ?? 'password';
+  const config = readConfig();
+  const profile = getActiveProfile();
+  const patch: Record<string, string> = { email: opts.email, store };
+
+  if (store === 'password') {
+    if (!opts.password) {
+      throw new Error('A password is required when storing credentials.');
+    }
+    patch.password = encrypt(opts.password);
+  }
+
+  if (profile) {
+    writeProfileSection(config, profile, patch);
+    if (store === 'session') delete readProfileSection(config, profile)?.password;
+  } else {
+    config.auth = { ...(config.auth ?? {}), ...patch };
+    if (store === 'session') delete config.auth.password;
+  }
+  writeConfig(config);
+}
+
+export function saveReadOnly(readOnly: boolean): void {
+  const config = readConfig();
+  config.server = { ...(config.server ?? {}), read_only: readOnly };
+  writeConfig(config);
+}
+
 export async function loadCredentials(): Promise<{ email: string; password: string }> {
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) {
     return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
@@ -153,9 +218,11 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: config.auth.email, password };
   }
 
+  if (isSessionOnly()) throw new SessionOnlyExpiredError();
+
   if (!process.stdin.isTTY) {
     throw new Error(
-      'No credentials found. Set KICKTIPP_EMAIL and KICKTIPP_PASSWORD, or run this command in a terminal to enter them.',
+      'No credentials found. Run `kicktipp login --web`, or set KICKTIPP_EMAIL and KICKTIPP_PASSWORD.',
     );
   }
 
