@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { spawn } from 'child_process';
 import {
   saveCommunity,
   savePlayer,
@@ -10,6 +11,7 @@ import {
   setCommunityOverride,
   getActiveProfile,
 } from './config.js';
+import { startSetupListener } from './setup/listener.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
 import { ask, ensureCommunity } from './shared.js';
 import { statusClear } from './helpers/spinner.js';
@@ -94,6 +96,37 @@ program
     for (const name of profiles) {
       console.log(`${name === active ? '*' : ' '} ${name}`);
     }
+  });
+
+program
+  .command('login')
+  .description('Connect a Kicktipp account')
+  .option('--web', 'Enter credentials in the browser instead of the terminal')
+  .action(async (opts) => {
+    if (!opts.web) {
+      const { page } = await launchBrowser();
+      try {
+        await setCommunityInteractive(page);
+      } finally {
+        await page.close();
+      }
+      return;
+    }
+    const handle = await startSetupListener();
+    console.log(`Open this page to connect your Kicktipp account:\n${handle.url}`);
+    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? undefined : 'xdg-open';
+    if (opener) spawn(opener, [handle.url], { detached: true, stdio: 'ignore' }).unref();
+    const outcome = await handle.finished;
+    if (outcome === 'saved') {
+      console.log('Connected.');
+      return;
+    }
+    if (outcome === 'timeout') {
+      console.error('Setup timed out. Run `kicktipp login --web` again.');
+      process.exit(1);
+    }
+    console.error('Setup did not finish. Open the page again with `kicktipp login --web`.');
+    process.exit(1);
   });
 
 program

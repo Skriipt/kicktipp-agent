@@ -19,36 +19,38 @@ saved session and skip the login flow entirely.
 
 Requires Node.js 20 or newer.
 
+Once the package is on npm:
+
+```bash
+npm install -g kicktipp-agent
+# or, without a global install:
+npx -y -p kicktipp-agent kicktipp
+```
+
+From a checkout:
+
 ```bash
 npm install
 npm run build
 npm link
 ```
 
-This gives you two commands:
+This gives you:
 
 - **`kicktipp`** — the CLI
-- **`kicktipp-mcp`** — the MCP server
+- **`kicktipp-mcp`** / **`kicktipp-agent-mcp`** — the MCP server (same binary)
 
 ## CLI
 
 ### First-time setup
 
-On first run, the CLI prompts for your kicktipp.com email and password. Credentials are stored locally in `~/.config/kicktipp-agent/config.ini` (chmod 600).
-
-```console
-$ kicktipp set-community
-No credentials found. Please enter your kicktipp.com login:
-Email: you@example.com
-Password: ********
-Credentials saved to ~/.config/kicktipp-agent/config.ini
-
-Available communities:
-  [1] testspiel
-  [2] bundesliga-tipps
-Select community (1-2): 1
-Saved 'testspiel' as default community.
+```bash
+kicktipp login --web
 ```
+
+That prints a `http://127.0.0.1:…/setup?token=…` link (and opens it on macOS/Linux). Email and password go into that page, not into the terminal. After a successful Kicktipp login you pick a community. Credentials land in `~/.config/kicktipp-agent/config.ini` with mode 600.
+
+`kicktipp login` without `--web` still prompts in the terminal, same as `set-community` on a first run.
 
 Optionally set your player name so the leaderboard highlights your position:
 
@@ -60,6 +62,8 @@ $ kicktipp set-player
 
 | Command | Description |
 |---------|-------------|
+| `login` | Connect an account (`--web` opens a localhost page) |
+| `logout` | Remove stored credentials and session |
 | `communities` | List all communities you belong to |
 | `set-community` | Select a default community |
 | `players` | List players in the saved community |
@@ -86,7 +90,6 @@ $ kicktipp set-player
 | `log` | What this agent submitted, and undo |
 | `profiles` | List configured profiles |
 | `admin` | Spielleiter tools (members, bets for a member) |
-| `logout` | Remove stored credentials and session |
 
 ### Placing bets
 
@@ -254,15 +257,102 @@ This recomputes every player's score for a finished matchday and checks it
 against the numbers Kicktipp itself reported — the only real proof the model
 matches the community. It exits 1 on a mismatch.
 
-## MCP Server
+## MCP server
 
-The MCP server exposes the same functionality as the CLI through the [Model Context Protocol](https://modelcontextprotocol.io), allowing AI assistants like Claude to interact with kicktipp.com on your behalf.
+Claude (or any MCP client) does not talk to Kicktipp itself. It starts a small Node program on your computer. That program logs into kicktipp.com and exposes tools. The assistant sees pool data. It never sees your password.
+
+The `.mcpb` file you can double-click is that program, zipped, with a recipe for Claude Desktop. It is not a remote server.
+
+Pick **one** Desktop path. Running the bundle and a manual config at the same time starts two copies.
+
+### Sign in
+
+Any of these writes `~/.config/kicktipp-agent/config.ini` (mode 600) and a session cookie. You only need one.
+
+```bash
+kicktipp login --web
+```
+
+Or, in a chat with the assistant already connected, ask it to set up Kicktipp. It should call `connect_account` and give you a `http://127.0.0.1:…/setup?token=…` link. Open that, sign in, pick a community. Do not paste the password into the chat.
+
+`get_status` returns the same link when nothing is saved yet. So does any tool that needs a login.
+
+### Claude Desktop, by hand
+
+Settings → Developer → Edit config opens `~/Library/Application Support/Claude/claude_desktop_config.json` on a Mac. Add this under `mcpServers`, then fully quit and reopen Desktop:
+
+```json
+"kicktipp": {
+  "command": "node",
+  "args": [
+    "/absolute/path/to/kicktipp-agent/dist/server.js"
+  ]
+}
+```
+
+No `env` block. The program reads `config.ini`. Build first (`npm run build`). After a `git pull` that changes the server, build again or Desktop keeps using the old `dist`.
+
+In a new chat, ask for Kicktipp status.
+
+### Claude Desktop, the bundle
+
+From a checkout:
+
+```bash
+npm run pack:mcpb
+```
+
+That writes `kicktipp.mcpb` in the repo root. Double-click it (or install it from Desktop). Desktop shows a settings form: email, password, optional community slug, read-only. The password goes in the OS keychain and is passed to the local process as env. Quit and reopen Desktop.
+
+If you already signed in with `kicktipp login --web`, the manual config above is simpler. You can skip the form.
+
+Turn the extension off if you also added the JSON snippet, so only one server runs.
+
+### Claude Code
+
+From this checkout:
+
+```bash
+claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
+```
+
+When the package is on npm:
+
+```bash
+claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
+```
+
+Start a new chat and ask for Kicktipp status, or ask it to connect the account.
+
+### Session-only storage
+
+The setup page has a checkbox to keep the login cookie and drop the password (`store = session` under `[auth]`). A leaked config then has no Kicktipp password, and you can revoke the cookie from kicktipp.com. When Kicktipp expires the session, this tool cannot log in again by itself. Tools return a fresh setup link instead. Opt-in, not the default.
+
+### Environment variables
+
+An `env` block in the client config still works and wins over the file. Use it only when a client cannot use the setup page or Desktop's settings form. The password then sits in that client's config:
+
+```json
+{
+  "mcpServers": {
+    "kicktipp": {
+      "command": "node",
+      "args": ["/absolute/path/to/kicktipp-agent/dist/server.js"],
+      "env": {
+        "KICKTIPP_EMAIL": "you@example.com",
+        "KICKTIPP_PASSWORD": "yourpassword"
+      }
+    }
+  }
+}
+```
 
 ### Available tools
 
 | Tool | Description |
 |------|-------------|
 | `get_status` | Check if credentials and community are configured |
+| `connect_account` | Open the localhost setup page (for "set up kicktipp" / reconnect) |
 | `get_today_matches` | Today's matches with bet status |
 | `get_bets` | Matches and current bets for a matchday |
 | `get_schedule` | Match schedule with results |
@@ -287,62 +377,9 @@ The MCP server exposes the same functionality as the CLI through the [Model Cont
 | `get_bet_log` | What this agent submitted, from the record |
 | `list_members` / `get_bets_for_member` / `place_bets_for_member` | Spielleiter tools |
 
-### Setup with Claude Desktop
-
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "kicktipp": {
-      "command": "kicktipp-mcp",
-      "env": {
-        "KICKTIPP_EMAIL": "you@example.com",
-        "KICKTIPP_PASSWORD": "yourpassword"
-      }
-    }
-  }
-}
-```
-
-The `env` block passes credentials directly to the server process — Claude never sees them. If you prefer, you can omit `env` and set credentials via the CLI instead (`kicktipp set-community`).
-
-After restarting Claude Desktop, the agent will have access to all kicktipp tools. It will call `get_status` first to check configuration, then prompt you to set a community if needed.
-
-### Setup with Claude Code
-
-Add to `.mcp.json` in your home directory or project:
-
-```json
-{
-  "mcpServers": {
-    "kicktipp": {
-      "command": "kicktipp-mcp",
-      "env": {
-        "KICKTIPP_EMAIL": "you@example.com",
-        "KICKTIPP_PASSWORD": "yourpassword"
-      }
-    }
-  }
-}
-```
-
-### Credentials
-
-The MCP server accepts credentials in two ways (checked in this order):
-
-1. **Environment variables** — `KICKTIPP_EMAIL` and `KICKTIPP_PASSWORD` passed via the `env` block in your MCP client config
-2. **Config file** — `~/.config/kicktipp-agent/config.ini`, shared with the CLI
-
-If neither is found, the server returns an error guiding the agent to inform you.
-
 ### Read-only mode
 
-For a connection that provably cannot bet, set `KICKTIPP_READ_ONLY=1` in the
-`env` block (or `read_only = true` under `[server]`). The betting and settings
-tools are then never registered, so they do not appear in the tool list at all,
-and the submitting functions refuse independently. This is the recommended way
-to try the MCP server for the first time.
+For a connection that provably cannot bet, check read-only on the setup page, set `read_only = true` under `[server]`, or set `KICKTIPP_READ_ONLY=1` in an `env` block. Betting and settings tools are then never registered, so they do not appear in the tool list at all, and the submitting functions refuse independently. This is the recommended way to try the MCP server for the first time.
 
 ### Choosing the Kicktipp host
 
@@ -357,6 +394,7 @@ so communities that only exist on one of the two still work either way.
 ```bash
 npm test          # run tests
 npm run build     # compile TypeScript
+npm run pack:mcpb # zip dist + production deps into kicktipp.mcpb
 ```
 
 ## Credits

@@ -86,6 +86,19 @@ describe('the MCP server as a client sees it', () => {
     expect(() => JSON.parse(result.content[0].text)).not.toThrow();
     expect(result.structuredContent.data).toMatchObject({ community: 'mycomm', player: 'Me' });
     expect(result.structuredContent.data.notify).toMatchObject({ kind: 'desktop' });
+    expect(result.structuredContent.data.setup_url).toBeNull();
+    expect(result.structuredContent.data).not.toHaveProperty('password');
+  });
+
+  it('connect_account reports already connected when credentials exist', async () => {
+    const messages = await callServer(
+      [INIT, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'connect_account', arguments: {} } }],
+      { HOME: home },
+    );
+    const data = messages.find((m) => m.id === 2)?.result?.structuredContent?.data;
+    expect(data.connected).toBe(true);
+    expect(data.setup_url).toBeNull();
+    expect(data.community).toBe('mycomm');
   });
 
   it('offers the cached-data resources', async () => {
@@ -158,5 +171,61 @@ describe('the MCP server as a client sees it', () => {
     const ini = fs.readFileSync(path.join(home, '.config', 'kicktipp-agent', 'config.ini'), 'utf8');
     expect(ini).toMatch(/kind\s*=\s*webhook/);
     expect(ini).toMatch(/kicktipp-tests/);
+  });
+
+  it('returns a localhost setup link when nothing is configured', async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-empty-'));
+    try {
+      const messages = await callServer(
+        [INIT, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_status', arguments: {} } }],
+        {
+          HOME: empty,
+          USERPROFILE: empty,
+          KICKTIPP_EMAIL: '',
+          KICKTIPP_PASSWORD: '',
+          KICKTIPP_COMMUNITY: '',
+        },
+      );
+      const result = messages.find((m) => m.id === 2)?.result;
+      expect(result.isError).toBeFalsy();
+      const data = result.structuredContent.data;
+      expect(data.setup_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/setup\?token=[0-9a-f]+$/);
+      expect(data.setup_needed).toBe(true);
+      expect(JSON.stringify(data)).not.toMatch(/"password"/);
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it('connect_account is the setup tool and stays available in read-only mode', async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-connect-'));
+    try {
+      const listed = await callServer([INIT, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }], {
+        HOME: empty,
+        USERPROFILE: empty,
+        KICKTIPP_EMAIL: '',
+        KICKTIPP_PASSWORD: '',
+        KICKTIPP_READ_ONLY: '1',
+      });
+      const names = (listed.find((m) => m.id === 2)?.result?.tools ?? []).map((t: { name: string }) => t.name);
+      expect(names).toContain('connect_account');
+
+      const called = await callServer(
+        [INIT, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'connect_account', arguments: {} } }],
+        {
+          HOME: empty,
+          USERPROFILE: empty,
+          KICKTIPP_EMAIL: '',
+          KICKTIPP_PASSWORD: '',
+          KICKTIPP_COMMUNITY: '',
+        },
+      );
+      const data = called.find((m) => m.id === 2)?.result?.structuredContent?.data;
+      expect(data.connected).toBe(false);
+      expect(data.setup_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/setup\?token=[0-9a-f]+$/);
+      expect(data.message).toMatch(/open/i);
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
   });
 });

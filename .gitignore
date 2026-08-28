@@ -3,3 +3,4 @@ dist/
 .session.json
 .env
 .claude/
+*.mcpb
