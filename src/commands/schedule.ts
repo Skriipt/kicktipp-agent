@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { launchBrowser } from '../browser.js';
+import { getScheduleUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 
@@ -11,23 +11,20 @@ export function registerScheduleCommand(program: Command): void {
     .description('Display the match schedule')
     .option('--matchday <n>', 'Matchday number (1-34)')
     .action(async (opts) => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
         status('Loading schedule...');
-        let url = `${URL_BASE}/${community}/schedule`;
+        let matchday: number | undefined;
         if (opts.matchday !== undefined) {
-          const matchday = parseInt(opts.matchday);
-          if (matchday < 1 || matchday > 34) {
-            console.error(`The matchday '${matchday}' is not valid, use only 1 to 34!`);
+          matchday = parseInt(opts.matchday);
+          if (!(matchday >= 1 && matchday <= 34)) {
+            console.error(`The matchday '${opts.matchday}' is not valid, use only 1 to 34!`);
             process.exit(1);
           }
-          url += `?spieltagIndex=${matchday}`;
         }
-        await page.goto(url);
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
+        await page.goto(getScheduleUrl(community, matchday));
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -77,7 +74,7 @@ export function registerScheduleCommand(program: Command): void {
           }
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

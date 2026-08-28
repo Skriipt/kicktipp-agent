@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { launchBrowser } from '../browser.js';
+import { getRulesUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 
@@ -10,14 +10,12 @@ export function registerRulesCommand(program: Command): void {
     .command('rules')
     .description('Display the game rules')
     .action(async () => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
         status('Loading rules...');
-        await page.goto(`${URL_BASE}/${community}/rules`);
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
+        await page.goto(getRulesUrl(community));
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -98,7 +96,7 @@ export function registerRulesCommand(program: Command): void {
           }
         });
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { launchBrowser } from '../browser.js';
+import { getOverviewUrl } from '../url.js';
 import { loadPlayer } from '../config.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
@@ -28,15 +28,12 @@ export function registerOverviewCommand(program: Command): void {
 
       const [ansicht, label] = OVERVIEW_VIEWS[view];
 
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
         status('Loading overview...');
-        const url = `${URL_BASE}/${community}/overview?ansicht=${ansicht}`;
-        await page.goto(url);
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
+        await page.goto(getOverviewUrl(community, ansicht));
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -127,7 +124,7 @@ export function registerOverviewCommand(program: Command): void {
           console.log(line);
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

@@ -1,99 +1,109 @@
-import { chromium, Page, Browser, BrowserContext } from 'playwright';
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
-import path from 'path';
-import { URL_BASE, URL_LOGIN, getLeaderboardUrl } from './url.js';
+import { URL_LOGIN, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
 import { SESSION_FILE, loadCredentials } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
 import { normalizeSlug } from './helpers/normalize-slug.js';
+import { CookieJar } from './http/cookie-jar.js';
+import { Page } from './http/page.js';
+import type { FetchLike } from './http/page.js';
 
-export async function launchBrowser(): Promise<{ browser: Browser; page: Page; context: BrowserContext }> {
-  const browser = await chromium.launch({ headless: true });
+export { Page } from './http/page.js';
+export type { FetchLike } from './http/page.js';
 
-  // Try restoring session
-  if (fs.existsSync(SESSION_FILE)) {
-    status('Restoring session...');
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 900 },
-      storageState: SESSION_FILE,
-    });
-    const page = await context.newPage();
-    await page.goto(URL_BASE);
-    await page.waitForLoadState('domcontentloaded');
-    if (!page.url().includes('/login')) {
-      statusClear();
-      return { browser, page, context };
-    }
-    status('Session expired, logging in again...');
-    await context.close();
-  }
-
-  // Fresh login
-  const { email, password } = await loadCredentials();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
-  await login(page, email, password);
-  fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
-  await context.storageState({ path: SESSION_FILE });
-  fs.chmodSync(SESSION_FILE, 0o600);
-  return { browser, page, context };
+export interface LaunchOptions {
+  /** Where to persist cookies. Pass null to keep the session in memory only. */
+  sessionFile?: string | null;
+  /** Injection point for tests. */
+  fetchImpl?: FetchLike;
 }
 
-export async function dismissConsent(page: Page): Promise<void> {
-  try {
-    await page.waitForSelector('iframe[src*="privacy-mgmt"]', { timeout: 2000 });
-    for (const frame of page.frames()) {
-      const btn = await frame.$('button:has-text("Accept and continue")');
-      if (btn) {
-        await btn.click();
-        await page.waitForSelector('iframe[src*="privacy-mgmt"]', { state: 'hidden', timeout: 3000 });
-        return;
+/**
+ * Open an authenticated Kicktipp session: restore the saved cookies when
+ * they still work, otherwise log in and save fresh ones.
+ */
+export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: Page }> {
+  const sessionFile = opts.sessionFile === undefined ? SESSION_FILE : opts.sessionFile;
+
+  if (sessionFile && fs.existsSync(sessionFile)) {
+    status('Restoring session...');
+    try {
+      const stored = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+      const page = new Page(CookieJar.fromJSON(stored), opts.fetchImpl);
+      await page.goto(getCommunitiesUrl());
+      if (!page.isAuthRedirect() && !page.isNotFound()) {
+        statusClear();
+        return { page };
       }
+    } catch {
+      // An unreadable or outdated session file is not worth reporting —
+      // logging in again produces a good one.
     }
-  } catch {
-    /* no consent dialog */
+    status('Session expired, logging in again...');
   }
+
+  const { email, password } = await loadCredentials();
+  const page = new Page(new CookieJar(), opts.fetchImpl);
+  await login(page, email, password);
+  if (sessionFile) page.saveSession(sessionFile);
+  return { page };
 }
 
 async function login(page: Page, username: string, password: string): Promise<void> {
   status('Logging in...');
   await page.goto(URL_LOGIN);
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
-  await page.fill('input[name="kennung"]', username);
-  await page.fill('input[name="passwort"]', password);
-  await Promise.all([page.waitForNavigation(), page.click('button[type="submit"]')]);
-  if (page.url().includes('/login')) {
+
+  if (!page.has('input[name="kennung"]')) {
     statusClear();
-    console.error('Login failed. Check your credentials (use --logout to re-enter).');
-    process.exit(1);
+    throw new Error(`Kicktipp login form not found at ${page.url()}.`);
+  }
+
+  page.setInputValue('input[name="kennung"]', username);
+  page.setInputValue('input[name="passwort"]', password);
+  await page.submitForm('input[name="kennung"]');
+
+  // A failed login lands back on the login page.
+  if (page.isAuthRedirect()) {
+    statusClear();
+    throw new Error('Login failed. Check your credentials (use --logout to re-enter).');
   }
   statusClear();
 }
 
 export async function getCommunities(page: Page): Promise<string[]> {
   status('Fetching communities...');
-  await page.goto(`${URL_BASE}/info/profil/meinetipprunden`);
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
+  await page.goto(getCommunitiesUrl());
+  if (page.isAuthRedirect()) {
+    statusClear();
+    throw new Error(
+      `Kicktipp session is not authenticated (redirected to ${page.url()}). Verify credentials.`,
+    );
+  }
 
   const $ = cheerio.load(await page.content());
-  const links = $('#kicktipp-content a');
-  const communities: string[] = [];
-  links.each((_, el) => {
-    const href = ($(el).attr('href') || '').replace(/\//g, '');
-    const text = $(el).text().trim();
+  const communities = new Set<string>();
+  // A community link is a single path segment ("/<slug>" or "/<slug>/") whose
+  // slug matches the link's own label. Kicktipp derives the slug from the
+  // community name — dropping underscores and turning spaces into hyphens —
+  // so the comparison has to be made on normalized forms.
+  const reserved = new Set(['info', 'service']);
+  $('#kicktipp-content a').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const match = href.match(/^\/([^/?#]+)\/?$/);
+    if (!match) return;
+    const slug = decodeURIComponent(match[1]);
+    if (reserved.has(slug.toLowerCase())) return;
     const menuDiv = $(el).find('div.menu-title-mit-tippglocke');
     if (
-      normalizeSlug(href) === normalizeSlug(text) ||
-      (menuDiv.length && normalizeSlug(menuDiv.text().trim()) === normalizeSlug(href))
+      normalizeSlug(slug) === normalizeSlug($(el).text().trim()) ||
+      (menuDiv.length && normalizeSlug(menuDiv.text().trim()) === normalizeSlug(slug))
     ) {
-      communities.push(href);
+      communities.add(slug);
     }
   });
   statusClear();
-  return communities;
+  return Array.from(communities);
 }
 
 export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, string] {
@@ -107,8 +117,6 @@ export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, 
 export async function getPlayers(page: Page, community: string): Promise<string[]> {
   status('Fetching players...');
   await page.goto(getLeaderboardUrl(community));
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
   statusClear();
 
   const $ = cheerio.load(await page.content());

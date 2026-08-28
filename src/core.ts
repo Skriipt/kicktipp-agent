@@ -1,7 +1,14 @@
-import { Page } from 'playwright';
 import * as cheerio from 'cheerio';
-import { dismissConsent, parseOdds, getCommunities, getPlayers } from './browser.js';
-import { getPredictUrl, getLeaderboardUrl, URL_BASE } from './url.js';
+import { Page, parseOdds, getCommunities, getPlayers } from './browser.js';
+import {
+  getBonusPredictUrl,
+  getLeaderboardUrl,
+  getOverviewUrl,
+  getPredictUrl,
+  getRulesUrl,
+  getScheduleUrl,
+  getTableUrl,
+} from './url.js';
 import { loadCommunity, loadPlayer } from './config.js';
 import {
   parseBetArg,
@@ -10,12 +17,39 @@ import {
 } from './helpers/parse-bet-arg.js';
 import { escapeCssValue } from './helpers/escape-css-value.js';
 
+// ── Errors ─────────────────────────────────────────────────────────
+
+/** The session is gone or was never valid — logging in again may help. */
+export class AuthError extends Error {}
+
+/** The page does not exist — usually a wrong community name. */
+export class NotFoundError extends Error {}
+
+/** The page exists but requires Spielleiter (admin) rights. */
+export class AdminRequiredError extends Error {}
+
 // ── Shared helpers ─────────────────────────────────────────────────
 
 async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   await page.goto(url);
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
+
+  // Kicktipp answers an invalid session with a redirect to its login page,
+  // and a wrong community with a "not found" page. Keep them apart: only
+  // the first one is worth throwing away the session over.
+  if (page.isAdminRequired()) {
+    throw new AdminRequiredError(
+      `Spielleiter (admin) rights are required for ${url}.`,
+    );
+  }
+  if (page.isAuthRedirect()) {
+    throw new AuthError(
+      `Kicktipp session is not authenticated (redirected to ${page.url()}). Verify credentials.`,
+    );
+  }
+  if (page.isNotFound()) {
+    throw new NotFoundError(`Kicktipp page not found: ${url}. Check the community name.`);
+  }
+
   return cheerio.load(await page.content());
 }
 
@@ -249,12 +283,7 @@ export async function fetchBets(page: Page, community: string, matchday?: number
 }
 
 export async function fetchSchedule(page: Page, community: string, matchday?: number): Promise<{ title: string; matches: ScheduleMatch[] }> {
-  let url = `${URL_BASE}/${encodeURIComponent(community)}/schedule`;
-  if (matchday !== undefined) {
-    if (matchday < 1 || matchday > 34) throw new RangeError(`Matchday '${matchday}' is not valid, use 1-34.`);
-    url += `?spieltagIndex=${matchday}`;
-  }
-  const $ = await loadPage(page, url);
+  const $ = await loadPage(page, getScheduleUrl(community, matchday));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
   const table = content.find('table#spiele');
@@ -368,7 +397,7 @@ export async function fetchOverview(page: Page, community: string, view = 'match
     throw new Error(`Unknown view '${view}'. Options: ${OVERVIEW_VIEW_OPTIONS.join(', ')}`);
   }
   const [ansicht, label] = OVERVIEW_VIEWS[view];
-  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/overview?ansicht=${ansicht}`);
+  const $ = await loadPage(page, getOverviewUrl(community, ansicht));
   const content = $('#kicktipp-content');
   const savedPlayer = loadPlayer();
 
@@ -409,12 +438,11 @@ export async function fetchOverview(page: Page, community: string, view = 'match
 }
 
 export async function fetchTable(page: Page, community: string, option?: 'home' | 'away'): Promise<{ label: string; teams: TableTeam[] }> {
-  let url = `${URL_BASE}/${encodeURIComponent(community)}/tables`;
   let label = 'League Table';
-  if (option === 'home') { url += '?option=heim'; label = 'League Table (Home)'; }
-  else if (option === 'away') { url += '?option=gast'; label = 'League Table (Away)'; }
+  if (option === 'home') label = 'League Table (Home)';
+  else if (option === 'away') label = 'League Table (Away)';
 
-  const $ = await loadPage(page, url);
+  const $ = await loadPage(page, getTableUrl(community, option));
   const content = $('#kicktipp-content');
   const table = content.find('table').first();
   if (!table.length) return { label, teams: [] };
@@ -443,7 +471,7 @@ export async function fetchTable(page: Page, community: string, option?: 'home' 
 }
 
 export async function fetchRules(page: Page, community: string): Promise<RulesSection[]> {
-  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/rules`);
+  const $ = await loadPage(page, getRulesUrl(community));
   const pagecontent = $('#kicktipp-content div.pagecontent');
   if (!pagecontent.length) return [];
 
@@ -535,17 +563,14 @@ export async function placeBets(page: Page, community: string, bets: string[], m
   }
 
   if (submit) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
+    await page.click('button[name="submitbutton"]');
   }
 
   return placed;
 }
 
 export async function fetchBonusQuestions(page: Page, community: string): Promise<BonusQuestion[]> {
-  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
+  const $ = await loadPage(page, getBonusPredictUrl(community));
   const content = $('#kicktipp-content');
   const table = content.find('table#tippabgabeFragen');
   if (!table.length) return [];
@@ -630,10 +655,7 @@ export async function placeBonusBets(page: Page, community: string, bets: string
   }
 
   if (submit) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
+    await page.click('button[name="submitbutton"]');
   }
 
   return placed;

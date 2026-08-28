@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { saveCommunity, savePlayer, logout } from './config.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
 import { ask, ensureCommunity } from './shared.js';
+import { statusClear } from './helpers/spinner.js';
 import { registerLeaderboardCommand } from './commands/leaderboard.js';
 import { registerOverviewCommand } from './commands/overview.js';
 import { registerScheduleCommand } from './commands/schedule.js';
@@ -54,40 +55,40 @@ program
   .command('communities')
   .description('List all communities you belong to')
   .action(async () => {
-    const { browser, page } = await launchBrowser();
+    const { page } = await launchBrowser();
     const communities = await getCommunities(page);
     communities.forEach((c) => console.log(c));
-    await browser.close();
+    await page.close();
   });
 
 program
   .command('set-community')
   .description('Select a default community')
   .action(async () => {
-    const { browser, page } = await launchBrowser();
+    const { page } = await launchBrowser();
     await setCommunityInteractive(page);
-    await browser.close();
+    await page.close();
   });
 
 program
   .command('players')
   .description('List players in the saved community')
   .action(async () => {
-    const { browser, page } = await launchBrowser();
+    const { page } = await launchBrowser();
     const community = await ensureCommunity(page);
     const players = await getPlayers(page, community);
     players.forEach((p) => console.log(p));
-    await browser.close();
+    await page.close();
   });
 
 program
   .command('set-player')
   .description('Select which player you are')
   .action(async () => {
-    const { browser, page } = await launchBrowser();
+    const { page } = await launchBrowser();
     const community = await ensureCommunity(page);
     await setPlayerInteractive(page, community);
-    await browser.close();
+    await page.close();
   });
 
 registerLeaderboardCommand(program);
@@ -102,4 +103,10 @@ registerGuideCommand(program);
 
 export { program, ensureCommunity, ask };
 
-program.parse();
+// Errors from the Kicktipp layer (failed login, expired session, unknown
+// community) are reported as plain messages rather than stack traces.
+program.parseAsync().catch((err) => {
+  statusClear();
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+});

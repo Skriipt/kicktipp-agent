@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
-import { getPredictUrl, URL_BASE } from '../url.js';
+import { launchBrowser } from '../browser.js';
+import { getBonusPredictUrl, getPredictUrl } from '../url.js';
 import { ensureCommunity, ask } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import {
@@ -118,8 +118,6 @@ function findOption(
 async function interactiveMatchBets(page: any, community: string, matchday?: number): Promise<void> {
   status('Loading bets...');
   await page.goto(getPredictUrl(community, matchday));
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
   statusClear();
 
   const $ = cheerio.load(await page.content());
@@ -201,10 +199,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
   }
 
   if (changed) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
+    await page.click('button[name="submitbutton"]');
     console.log('\nBets saved.');
   } else {
     console.log('\nNo changes made.');
@@ -214,8 +209,6 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
 async function fixtureBets(page: any, community: string, bets: string[], matchday?: number): Promise<void> {
   status('Loading bets...');
   await page.goto(getPredictUrl(community, matchday));
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
   statusClear();
 
   const $ = cheerio.load(await page.content());
@@ -269,10 +262,7 @@ async function fixtureBets(page: any, community: string, bets: string[], matchda
     if (gastEl) await gastEl.fill(String(g));
   }
 
-  await Promise.all([
-    page.waitForNavigation(),
-    page.click('button[name="submitbutton"]'),
-  ]);
+  await page.click('button[name="submitbutton"]');
   console.log('\nBets saved.');
 }
 
@@ -388,9 +378,7 @@ async function bonusBetsInteractive(
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
   status('Loading bonus questions...');
-  await page.goto(`${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
+  await page.goto(getBonusPredictUrl(community));
   statusClear();
 
   const $ = cheerio.load(await page.content());
@@ -412,10 +400,7 @@ async function bonusBets(page: any, community: string, bets: string[]): Promise<
   }
 
   if (changed) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
+    await page.click('button[name="submitbutton"]');
     console.log('\nBonus bets saved.');
   } else {
     console.log('\nNo changes made.');
@@ -434,7 +419,7 @@ export function registerBetCommand(program: Command): void {
     .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
     .option('--bonus', 'Place bonus question bets')
     .action(async (bets: string[], opts) => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
@@ -446,7 +431,7 @@ export function registerBetCommand(program: Command): void {
           await interactiveMatchBets(page, community, opts.matchday);
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

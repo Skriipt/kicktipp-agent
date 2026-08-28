@@ -17,8 +17,10 @@
     "cheerio": "^1.0.0",
     "commander": "^13.0.0",
     "ini": "^5.0.0",
-    "ora": "^8.0.0",
-    "playwright": "^1.40.0"
+    "ora": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "@types/ini": "^4.1.0",

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { launchBrowser } from '../browser.js';
+import { getTableUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 
@@ -12,32 +12,26 @@ export function registerTableCommand(program: Command): void {
     .option('--home', 'Show home table only')
     .option('--away', 'Show away table only')
     .action(async (opts) => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
         status('Loading table...');
-        let url = `${URL_BASE}/${community}/tables`;
-        let option: string | null = null;
-        if (opts.home) {
-          option = 'heim';
-          url += '?option=heim';
-        } else if (opts.away) {
-          option = 'gast';
-          url += '?option=gast';
-        }
-        await page.goto(url);
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
+        const option: 'home' | 'away' | undefined = opts.home
+          ? 'home'
+          : opts.away
+            ? 'away'
+            : undefined;
+        await page.goto(getTableUrl(community, option));
         statusClear();
 
         const $ = cheerio.load(await page.content());
         const content = $('#kicktipp-content');
 
         let label = 'League Table';
-        if (option === 'heim') {
+        if (option === 'home') {
           label = 'League Table (Home)';
-        } else if (option === 'gast') {
+        } else if (option === 'away') {
           label = 'League Table (Away)';
         }
         console.log(label);
@@ -82,7 +76,7 @@ export function registerTableCommand(program: Command): void {
           }
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

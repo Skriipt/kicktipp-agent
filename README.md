@@ -10,13 +10,17 @@ Kicktipp has no public API. Everything goes through the website. This project gi
 
 - **MCP Server** — Connect an AI assistant (Claude Desktop, Claude Code, or any MCP client) to your kicktipp account. Ask it to show today's matches, check who's leading your league, or place bets for you — all through natural conversation. The assistant sees your community's data but never your password.
 
-Headless Chromium with session caching keeps things fast. After the first login, subsequent commands reuse the saved session and skip the login flow entirely.
+No browser required. Kicktipp's pages are server-rendered, so this talks to
+them over plain HTTP — nothing to download, nothing to keep running. Session
+caching keeps it fast: after the first login, subsequent commands reuse the
+saved session and skip the login flow entirely.
 
 ## Installation
 
+Requires Node.js 20 or newer.
+
 ```bash
 npm install
-npx playwright install chromium
 npm run build
 npm link
 ```
@@ -167,6 +171,14 @@ The MCP server accepts credentials in two ways (checked in this order):
 2. **Config file** — `~/.config/kicktipp-agent/config.ini`, shared with the CLI
 
 If neither is found, the server returns an error guiding the agent to inform you.
+
+### Choosing the Kicktipp host
+
+By default everything runs against `https://www.kicktipp.com`. Set
+`KICKTIPP_BASE_URL=https://www.kicktipp.de` to use the German site and its
+German page names instead. You rarely need to: when a page is missing under
+one host or spelling, the same page is retried under the other automatically,
+so communities that only exist on one of the two still work either way.
 
 ## Development
 

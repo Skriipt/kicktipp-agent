@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
+import { launchBrowser } from '../browser.js';
 import { getLeaderboardUrl } from '../url.js';
 import { loadPlayer } from '../config.js';
 import { ensureCommunity } from '../shared.js';
@@ -143,7 +143,7 @@ export function registerLeaderboardCommand(program: Command): void {
     .option('--matchday <n>', 'Matchday number (1-34)')
     .option('--bonus', 'Show bonus questions instead of matches')
     .action(async (opts) => {
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         const matchday = opts.matchday !== undefined ? parseInt(opts.matchday) : undefined;
@@ -151,8 +151,6 @@ export function registerLeaderboardCommand(program: Command): void {
 
         status('Loading leaderboard...');
         await page.goto(getLeaderboardUrl(community, matchday, bonus));
-        await page.waitForLoadState('domcontentloaded');
-        await dismissConsent(page);
         statusClear();
 
         const $ = cheerio.load(await page.content());
@@ -173,7 +171,7 @@ export function registerLeaderboardCommand(program: Command): void {
 
         showRankings($, content, bonus);
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }
