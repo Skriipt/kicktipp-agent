@@ -172,6 +172,7 @@ $ kicktipp set-player
 
 | Command | Description |
 |---------|-------------|
+| `tui` | Full-screen dashboard for every feature (`--demo` to explore with sample data) |
 | `login` | Connect an account (`--web` opens a localhost page) |
 | `logout` | Remove stored credentials and session |
 | `communities` | List all communities you belong to |
@@ -203,9 +204,22 @@ $ kicktipp set-player
 | `profiles` | List configured profiles |
 | `admin` | Spielleiter tools (members, bets for a member) |
 
-### The TUI (`kicktipp bet`)
+### The dashboard (`kicktipp tui`)
 
-On a real terminal, `kicktipp bet` with no arguments opens the TUI: a full-screen list of the matchday. Type scores in place, take the odds-based suggestion, submit with `w`.
+`kicktipp tui` opens a full-screen dashboard that covers everything the CLI does from one keyboard-driven interface: today's matches, your bets, the interactive place-bets grid, odds-based suggestions, the leaderboard, season overview, league table, schedule, deadlines, stats, rival watch, scenarios, what-if replays, sync/cache, rules, the audit log, community and player selection, notification settings, and the Spielleiter admin tools.
+
+Move through the grouped menu on the left with the arrow keys, press `enter` to open a screen, and `esc` to come back. `[` and `]` step through matchdays, `?` shows the shortcuts, and each screen lists its own keys along the bottom.
+
+```bash
+kicktipp tui            # live, against your account
+kicktipp tui --demo     # explore the whole interface with sample data, no login
+```
+
+The `--demo` flag fills the dashboard with a generated Bundesliga season so you can try every screen — including the analytics — without connecting an account.
+
+### The prediction grid (`kicktipp bet`)
+
+On a real terminal, `kicktipp bet` with no arguments opens the prediction grid: a full-screen list of the matchday. Type scores in place, take the odds-based suggestion, submit with `w`. The same grid is reachable as "Place bets" inside `kicktipp tui`.
 
 ![The kicktipp TUI: fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
 

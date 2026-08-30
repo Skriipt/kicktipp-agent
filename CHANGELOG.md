@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `kicktipp tui`: a full-screen dashboard that covers every CLI feature from one keyboard-driven interface — today, bets, an interactive place-bets grid, odds-based suggestions, leaderboard, season overview, league table, schedule, deadlines, stats, rival watch, scenarios, what-if replay, sync/cache, rules, audit log (with undo), community/player selection, notification settings, and Spielleiter admin tools.
+- `kicktipp tui --demo` explores the whole interface with a generated Bundesliga season, so every screen (including the analytics) works without connecting an account.
+
+The dashboard is dependency-free: it reuses the existing data and analytics layer and renders with a small hand-rolled terminal toolkit, in the same spirit as the existing `kicktipp bet` prediction grid.
+
 ## [1.1.2] - 2026-08-28
 
 ### Fixed

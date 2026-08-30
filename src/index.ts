@@ -41,6 +41,7 @@ import { registerLogCommand } from './commands/log.js';
 import { registerScenarioCommand } from './commands/scenario.js';
 import { registerWhatifCommand } from './commands/whatif.js';
 import { registerAdminCommand } from './commands/admin.js';
+import { registerTuiCommand } from './commands/tui.js';
 import { currentLanguage, parseLanguage, resolveLanguage, setLanguage, t } from './i18n/index.js';
 import { parseSite, resolveBaseUrl, setUrlBase, siteLabel, urlBase } from './url.js';
 
@@ -255,6 +256,7 @@ registerLogCommand(program);
 registerScenarioCommand(program);
 registerWhatifCommand(program);
 registerAdminCommand(program);
+registerTuiCommand(program);
 
 export { program, ensureCommunity, ask };
 

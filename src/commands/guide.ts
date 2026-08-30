@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { t } from '../i18n/index.js';
 
-function getGuideText(): string {
+export function getGuideText(): string {
   return `# kicktipp CLI — Agent Guide
 
 kicktipp is a CLI for kicktipp.com, a football prediction game.
