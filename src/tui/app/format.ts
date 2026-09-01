@@ -12,7 +12,7 @@ import { rule, bar, sparkline, badge, field } from './box.js';
 import { renderTable } from './table.js';
 import type {
   BetMatch,
-  BonusQuestion,
+  BonusAnswer,
   LeaderboardData,
   Member,
   OverviewData,
@@ -595,17 +595,30 @@ export function auditView(records: AuditRecord[], width: number): string[] {
 
 // ── Bonus questions ───────────────────────────────────────────────
 
-export function bonusView(questions: BonusQuestion[], width: number): string[] {
-  if (!questions.length) return empty('No bonus questions available.');
-  const out: string[] = [];
-  questions.forEach((q, i) => {
-    out.push(`${fg(palette.accent, `${i + 1}.`)} ${bold(q.question)}`);
-    q.selects.forEach((sel, s) => {
-      const chosen = sel.options.find((o) => o.value === sel.selected);
-      const label = chosen ? fg(palette.primary, chosen.text) : dim('— not answered —');
-      const slot = q.selects.length > 1 ? dim(` slot ${s + 1}`) : '';
-      out.push(`   ${dim(glyph.arrow)}${slot} ${label}`);
-    });
+export function bonusView(answers: BonusAnswer[], width: number): string[] {
+  if (!answers.length) {
+    return empty('No bonus questions for this community, or the bonus round is closed.');
+  }
+  const anyOpen = answers.some((a) => a.editable);
+  const out: string[] = [
+    dim(anyOpen ? 'The bonus round is open — press e to answer a question.' : 'The bonus round is closed. Showing the bets you placed.'),
+    '',
+  ];
+  answers.forEach((a, i) => {
+    const status = !a.editable
+      ? badge('locked', palette.bg, palette.faint)
+      : a.answers.length
+        ? badge('answered', palette.bg, palette.primary)
+        : badge('open', palette.bg, palette.amber);
+    out.push(`${fg(palette.accent, `${i + 1}.`)} ${bold(a.question)}  ${status}`);
+    if (a.answers.length) {
+      a.answers.forEach((ans, s) => {
+        const slot = a.answers.length > 1 ? dim(` ${s + 1}.`) : '';
+        out.push(`   ${fg(palette.primary, glyph.arrow)}${slot} ${fg(palette.primary, truncate(ans, width - 6))}`);
+      });
+    } else {
+      out.push(`   ${dim(glyph.arrow)} ${dim(a.editable ? 'not answered yet' : 'no answer recorded')}`);
+    }
     out.push('');
   });
   return out;

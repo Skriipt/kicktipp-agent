@@ -166,7 +166,7 @@ describe('formatters render within their width', () => {
     check(F.scenarioView(await source.scenario(), width));
     check(F.replayView(await source.replay('favorite'), width));
     check(F.auditView(source.auditLog(), width));
-    check(F.bonusView(await source.bonusQuestions(), width));
+    check(F.bonusView(await source.bonusBets(), width));
     check(F.membersView(await source.members(), width));
   });
 });
