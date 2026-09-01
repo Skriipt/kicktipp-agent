@@ -2,12 +2,26 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-01
+
 ### Added
 
-- `kicktipp tui`: a full-screen dashboard that covers every CLI feature from one keyboard-driven interface — today, bets, an interactive place-bets grid, odds-based suggestions, leaderboard, season overview, league table, schedule, deadlines, stats, rival watch, scenarios, what-if replay, sync/cache, rules, audit log (with undo), community/player selection, notification settings, and Spielleiter admin tools.
+- `kicktipp tui`: a full-screen dashboard that covers every CLI feature from one keyboard-driven interface. Today, bets, an interactive place-bets grid, odds-based suggestions, leaderboard, season overview, league table, schedule, deadlines, stats, rival watch, scenarios, what-if replay, sync/cache, rules, audit log (with undo), community/player selection, notification settings, and Spielleiter admin tools.
 - `kicktipp tui --demo` explores the whole interface with a generated Bundesliga season, so every screen (including the analytics) works without connecting an account.
+- Opt-in German UI (`kicktipp set-lang`) and a persistent Kicktipp host (`kicktipp set-site`). English and kicktipp.com stay the default.
 
 The dashboard is dependency-free: it reuses the existing data and analytics layer and renders with a small hand-rolled terminal toolkit, in the same spirit as the existing `kicktipp bet` prediction grid.
+
+### Changed
+
+- `kicktipp sync` and MCP `sync_history` stop at Kicktipp's current matchday, skip finished and still-upcoming cached matchdays, and only refetch an open one. `--to 34` still walks the rest of the season.
+- TUI navigation: Enter opens a section and leaves you on the menu. → or a second Enter moves into the pane. Escape or ← returns.
+
+### Fixed
+
+- Live TUI exited after the session spinner. ora paused stdin when it stopped. Wide menu icons also overflowed the frame by a column.
+- Screens that load nothing on purpose (sync, rival picker) stayed on "Loading…".
+- Rival watch on kicktipp.com treated the rank-change column and hyphen tips with point subscripts as a column mismatch, so finished matchdays showed empty grids. Tied or unpublished matchdays no longer say the rival is out of reach.
 
 ## [1.1.2] - 2026-08-28
 

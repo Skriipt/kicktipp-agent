@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "kicktipp",
   "display_name": "Kicktipp",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "CLI and MCP server for kicktipp.com and kicktipp.de prediction pools.",
   "author": {
     "name": "Christian Heidorn",
@@ -19,7 +19,9 @@
     "entry_point": "dist/server.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/dist/server.js"],
+      "args": [
+        "${__dirname}/dist/server.js"
+      ],
       "env": {
         "KICKTIPP_EMAIL": "${user_config.email}",
         "KICKTIPP_PASSWORD": "${user_config.password}",
@@ -72,7 +74,11 @@
   },
   "tools_generated": true,
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "node": ">=20"
     }
