@@ -80,20 +80,31 @@ export class App implements AppApi {
     detectColor();
     this.measure();
     const input = process.stdin;
-    if (input.isTTY) input.setRawMode(true);
-    input.resume();
+    this.ownInput();
     input.setEncoding('utf8');
     process.stdout.write(enterAltScreen + hideCursor + clearScreen);
     input.on('data', this.onData);
     process.stdout.on('resize', this.onResize);
 
     this.running = true;
-    await this.loadScreen(); // first screen (today)
-    this.render();
+    try {
+      await this.loadScreen(); // first screen (today)
+      this.render();
+      await new Promise<void>((resolve) => {
+        this.resolveRun = resolve;
+      });
+    } catch (err) {
+      this.quit();
+      throw err;
+    }
+  }
 
-    await new Promise<void>((resolve) => {
-      this.resolveRun = resolve;
-    });
+  /** Raw mode + flowing stdin. Re-applied after any CLI spinner, because
+   *  ora's stdin-discarder pauses stdin and turns raw mode off when it stops. */
+  private ownInput(): void {
+    const input = process.stdin;
+    if (input.isTTY) input.setRawMode(true);
+    input.resume();
   }
 
   quit(): void {
@@ -181,6 +192,7 @@ export class App implements AppApi {
     } finally {
       this.loading = false;
       this.stopSpinner();
+      this.ownInput();
     }
   }
 

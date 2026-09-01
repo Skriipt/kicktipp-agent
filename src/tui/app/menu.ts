@@ -14,6 +14,8 @@ export interface MenuGroup {
   items: MenuItem[];
 }
 
+/** Icons must be a single terminal column. Emoji like ✨ ⏳ ⚔ are two
+ *  columns and shove the whole frame off by one. */
 export const MENU: MenuGroup[] = [
   {
     title: 'Play',
@@ -22,7 +24,7 @@ export const MENU: MenuGroup[] = [
       { id: 'bets', label: 'My bets', icon: '✎' },
       { id: 'place', label: 'Place bets', icon: '✦' },
       { id: 'bonus', label: 'Bonus bets', icon: '?' },
-      { id: 'suggest', label: 'Suggestions', icon: '✨' },
+      { id: 'suggest', label: 'Suggestions', icon: '✶' },
     ],
   },
   {
@@ -32,14 +34,14 @@ export const MENU: MenuGroup[] = [
       { id: 'overview', label: 'Season overview', icon: '▦' },
       { id: 'table', label: 'League table', icon: '⚑' },
       { id: 'schedule', label: 'Schedule', icon: '◷' },
-      { id: 'deadline', label: 'Deadlines', icon: '⏳' },
+      { id: 'deadline', label: 'Deadlines', icon: '◔' },
     ],
   },
   {
     title: 'Analytics',
     items: [
       { id: 'stats', label: 'Stats', icon: '∿' },
-      { id: 'rival', label: 'Rival watch', icon: '⚔' },
+      { id: 'rival', label: 'Rival watch', icon: '‡' },
       { id: 'scenario', label: 'Scenarios', icon: '⎇' },
       { id: 'whatif', label: 'What-if replay', icon: '↺' },
     ],

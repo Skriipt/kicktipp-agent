@@ -2,6 +2,7 @@
  * Entry point for the dashboard. Picks a data source (live or demo) and hands
  * control to the app until the user quits.
  */
+import { silenceStatus } from '../../helpers/spinner.js';
 import { App } from './app.js';
 import { LiveDataSource } from './live-source.js';
 import { DemoDataSource } from './demo-source.js';
@@ -20,5 +21,10 @@ export async function runTui(opts: LaunchOptions = {}): Promise<void> {
   }
   const source: DataSource = opts.demo ? new DemoDataSource() : new LiveDataSource();
   const app = new App(source, { matchday: opts.matchday ?? null });
-  await app.run();
+  silenceStatus(true);
+  try {
+    await app.run();
+  } finally {
+    silenceStatus(false);
+  }
 }

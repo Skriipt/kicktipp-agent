@@ -8,6 +8,7 @@ import { buildDemoWorld, DEMO_CURRENT_MATCHDAY, DEMO_PLAYER } from '../src/tui/a
 import { DemoDataSource } from '../src/tui/app/demo-source.js';
 import * as F from '../src/tui/app/format.js';
 import { App } from '../src/tui/app/app.js';
+import { silenceStatus, status, statusClear } from '../src/helpers/spinner.js';
 
 // Colour off keeps every assertion about the visible text, not escape codes.
 beforeAll(() => setColorMode({ color: false }));
@@ -79,6 +80,16 @@ describe('menu', () => {
     }
     expect(findItem('today')?.label).toBe('Today');
     expect(MENU.length).toBeGreaterThan(4);
+  });
+
+  it('uses single-column icons so the sidebar does not overflow', () => {
+    // These three were in the first dashboard and drew two columns each.
+    const wide = new Set([0x2728, 0x23f3, 0x2694]);
+    for (const item of flatItems()) {
+      const cp = item.icon.codePointAt(0) ?? 0;
+      expect(item.icon, item.id).toHaveLength(1);
+      expect(wide.has(cp), `${item.id} icon ${item.icon} is double-width`).toBe(false);
+    }
   });
 });
 
@@ -171,6 +182,20 @@ describe('formatters render within their width', () => {
   });
 });
 
+describe('CLI spinner vs dashboard', () => {
+  it('can silence ora so a live load does not pause stdin', () => {
+    silenceStatus(true);
+    try {
+      expect(() => {
+        status('Restoring session...');
+        statusClear();
+      }).not.toThrow();
+    } finally {
+      silenceStatus(false);
+    }
+  });
+});
+
 describe('app composes a full frame headlessly', () => {
   it('renders the dashboard to a fixed viewport', async () => {
     const app = new App(new DemoDataSource());
@@ -182,6 +207,19 @@ describe('app composes a full frame headlessly', () => {
     expect(text).toContain('kicktipp');
     expect(text).toContain('Leaderboard');
     expect(text).toContain('Menu');
+  });
+
+  it('keeps every composed line within the terminal width', async () => {
+    const wide = new Set([0x2728, 0x23f3, 0x2694]);
+    const displayWidth = (text: string): number =>
+      [...stripAnsi(text)].reduce((n, ch) => n + (wide.has(ch.codePointAt(0) ?? 0) ? 2 : 1), 0);
+    const app = new App(new DemoDataSource());
+    app.setViewport(24, 80);
+    const frame = await app.snapshot('today');
+    for (const line of frame) {
+      expect(displayWidth(line), stripAnsi(line)).toBeLessThanOrEqual(80);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(80);
+    }
   });
 
   it('renders the interactive place-bets grid', async () => {
