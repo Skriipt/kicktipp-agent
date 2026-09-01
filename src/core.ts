@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import type { AnyNode } from 'domhandler';
 import { Page, parseOdds, getCommunities, getPlayers } from './browser.js';
 import {
   getBonusPredictUrl,
@@ -66,10 +67,18 @@ async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
 }
 
 function spieltagIndexFromPage($: cheerio.CheerioAPI): number | undefined {
-  const raw = $('input[name="spieltagIndex"]').attr('value');
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n > 34) return undefined;
-  return n;
+  const hidden = $('input[name="spieltagIndex"]').attr('value');
+  const selected =
+    $('select[name="spieltagIndex"] option:selected').attr('value') ??
+    $('select[name="spieltagIndex"]').attr('value');
+  const titled = $('#kicktipp-content div.pagetitle')
+    .text()
+    .match(/(?:Spieltag|Matchday)\s+(\d{1,2})\b/i)?.[1];
+  for (const raw of [hidden, selected, titled]) {
+    const n = Number(raw);
+    if (Number.isInteger(n) && n >= 1 && n <= 34) return n;
+  }
+  return undefined;
 }
 
 /**
@@ -91,6 +100,12 @@ export async function loadMatchPredictPage(
   return loadPage(page, getPredictUrl(community, index));
 }
 
+
+/** Kicktipp's "current" matchday: the spieltag the bare predict page opens. */
+export async function fetchCurrentMatchday(page: Page, community: string): Promise<number | null> {
+  const $ = await loadMatchPredictPage(page, community);
+  return spieltagIndexFromPage($) ?? null;
+}
 
 export async function resolveCommunity(page: Page): Promise<string> {
   const saved = loadCommunity();
@@ -906,6 +921,7 @@ export async function fetchMatchdayBets(
 ): Promise<MatchdayBets> {
   return throughCache('matchdayBets', matchday, cache, async () => {
   const $ = await loadPage(page, getLeaderboardUrl(community, matchday));
+  const resolved = matchday ?? spieltagIndexFromPage($);
   const content = $('#kicktipp-content');
 
   const matches: ScheduleMatch[] = [];
@@ -928,29 +944,34 @@ export async function fetchMatchdayBets(
   });
 
   if (!matches.length) {
-    return { matchday, matches, players: [], note: 'No match list found on the leaderboard page.' };
+    return { matchday: resolved, matches, players: [], note: 'No match list found on the leaderboard page.' };
   }
 
-  // Columns that are never bets: rank, name and the three points columns.
-  const NON_BET = 'td.position, td.spieltagspunkte, td.bonus, td.gesamtpunkte, td.punkte, td.siege';
+  // Columns that are never bets: rank, rank-change icon, name and points.
+  const NON_BET =
+    'td.position, td.positionsdifferenz, td.spieltagspunkte, td.bonus, td.gesamtpunkte, td.punkte, td.siege';
   const players: PlayerBets[] = [];
-  let misaligned = 0;
+  let extraOrMissing = 0;
 
   content.find('table#ranking tbody tr').each((_, tr) => {
     const row = $(tr);
     const name = row.find('div.mg_name').text().trim();
     if (!name) return;
 
-    const betCells: string[] = [];
-    row.children('td').each((__, td) => {
-      const cell = $(td);
-      if (cell.is(NON_BET)) return;
-      if (cell.find('div.mg_name').length) return;
-      betCells.push(normalizeBetCell(cell.text()));
-    });
+    const marked = row.children('td.ereignis');
+    const betCells = marked.length
+      ? marked.toArray().map((td) => readBetCell($(td)))
+      : row.children('td').toArray().flatMap((td) => {
+          const cell = $(td);
+          if (cell.is(NON_BET)) return [];
+          if (cell.find('div.mg_name').length) return [];
+          return [readBetCell(cell)];
+        });
 
     if (betCells.length !== matches.length) {
-      misaligned++;
+      // A ranking with no tip cells is the usual pre-deadline page, not a
+      // broken scrape. Only a *partial* column count is untrustworthy.
+      if (betCells.length > 0) extraOrMissing++;
       return;
     }
     players.push({ player: name, bets: betCells });
@@ -958,10 +979,10 @@ export async function fetchMatchdayBets(
 
   if (!players.length) {
     return {
-      matchday,
+      matchday: resolved,
       matches,
       players: [],
-      note: misaligned
+      note: extraOrMissing
         ? 'Bet columns did not line up with the match list, so no bets were read.'
         : 'No per-player bets are published for this matchday yet (the deadline has probably not passed).',
     };
@@ -970,21 +991,28 @@ export async function fetchMatchdayBets(
   const withBets = players.filter((p) => p.bets.some((b) => b !== ''));
   if (!withBets.length) {
     return {
-      matchday,
+      matchday: resolved,
       matches,
       players: [],
       note: 'Kicktipp is still hiding everyone\'s bets for this matchday (deadline not passed).',
     };
   }
 
-  return { matchday, matches, players };
+  return { matchday: resolved, matches, players };
   });
+}
+
+/** Kicktipp.com writes 2-1 and tucks the points in <sub class="p">. */
+function readBetCell(cell: cheerio.Cheerio<AnyNode>): string {
+  const clone = cell.clone();
+  clone.find('sub').remove();
+  return normalizeBetCell(clone.text());
 }
 
 /** A bet cell holds either a scoreline or a placeholder such as "-" or "–". */
 function normalizeBetCell(raw: string): string {
   const text = raw.replace(/\s+/g, '');
-  const match = text.match(/(\d+):(\d+)/);
+  const match = text.match(/(\d+)[:\-](\d+)/);
   return match ? `${match[1]}:${match[2]}` : '';
 }
 

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { CacheStore, isMatchdayFinished, SCHEMA_VERSION } from '../src/cache/store.js';
+import { CacheStore, isMatchdayFinished, isMatchdayUpcoming, SCHEMA_VERSION } from '../src/cache/store.js';
 import { throughCache, OfflineCacheMiss } from '../src/cache/cached-fetch.js';
 
 let tmp: string;
@@ -117,6 +117,39 @@ describe('isMatchdayFinished', () => {
     expect(isMatchdayFinished(SCHEDULE.matches)).toBe(true);
     expect(isMatchdayFinished([{ date: '', home: 'a', away: 'b', result: '-:-' }])).toBe(false);
     expect(isMatchdayFinished([])).toBe(false);
+  });
+});
+
+describe('isMatchdayUpcoming', () => {
+  const now = new Date('2026-09-01T12:00:00.000Z');
+
+  it('is true when every kickoff is still in the future', () => {
+    expect(
+      isMatchdayUpcoming(
+        [
+          { date: '04.09.26 20:30', home: 'a', away: 'b', result: '-:-' },
+          { date: '05.09.26 15:30', home: 'c', away: 'd', result: '-:-' },
+        ],
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it('is false once any match has kicked off', () => {
+    expect(
+      isMatchdayUpcoming(
+        [
+          { date: '31.08.26 20:30', home: 'a', away: 'b', result: '1:0' },
+          { date: '05.09.26 15:30', home: 'c', away: 'd', result: '-:-' },
+        ],
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it('is false when a date cannot be parsed', () => {
+    expect(isMatchdayUpcoming([{ date: '', home: 'a', away: 'b', result: '-:-' }], now)).toBe(false);
+    expect(isMatchdayUpcoming([], now)).toBe(false);
   });
 });
 

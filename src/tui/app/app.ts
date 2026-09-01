@@ -148,12 +148,24 @@ export class App implements AppApi {
     this.render();
   }
 
-  async goto(id: string): Promise<void> {
-    this.screen = createScreen(this, id);
-    this.scroll = 0;
-    await this.loadScreen();
-    this.focus = 'content';
+  async goto(id: string, opts: { focus?: boolean } = {}): Promise<void> {
+    if (this.screen.id !== id) {
+      this.screen = createScreen(this, id);
+      this.scroll = 0;
+      await this.loadScreen();
+    }
+    if (opts.focus) this.focus = 'content';
     this.render();
+  }
+
+  /** Which pane has the keyboard. Used by tests. */
+  focused(): 'nav' | 'content' {
+    return this.focus;
+  }
+
+  /** Feed one key through the same path as the terminal. Used by tests. */
+  async press(key: Key): Promise<void> {
+    await this.dispatch(key);
   }
 
   async setMatchday(matchday: number | null): Promise<void> {
@@ -275,9 +287,16 @@ export class App implements AppApi {
         this.navIndex = items.length - 1;
         break;
       case 'enter':
+        if (this.screen.id === items[this.navIndex].id) {
+          this.focus = 'content';
+          this.render();
+          return;
+        }
+        await this.goto(items[this.navIndex].id);
+        return;
       case 'right':
       case 'tab':
-        await this.goto(items[this.navIndex].id);
+        await this.goto(items[this.navIndex].id, { focus: true });
         return;
       case 'char':
         if (key.value === '?') return this.showHelp();
@@ -356,15 +375,15 @@ export class App implements AppApi {
       width: 60,
       footer: 'esc  close',
       render: () => [
-        row('↑ ↓', 'move / scroll'),
-        row('enter →', 'open the highlighted screen'),
+        row('↑ ↓', 'move in the menu, or scroll the pane'),
+        row('enter', 'open the highlighted screen, keep the menu'),
+        row('→ tab', 'move into the pane to scroll or act'),
         row('esc ←', 'back to the menu'),
-        row('tab', 'switch focus'),
         row('[ ]', 'previous / next matchday'),
         row('? ', 'this help'),
         row('q', 'quit'),
         '',
-        dim('Screen-specific keys appear in the footer.'),
+        dim('Screen-specific keys appear in the footer once the pane is focused.'),
       ],
       onKey: (key) => {
         if (key.type === 'escape' || key.type === 'enter' || key.type === 'quit') this.closeOverlay();
@@ -561,7 +580,15 @@ export class App implements AppApi {
   private renderFooter(): string[] {
     const cols = this.size.cols;
     const hints = [
-      ...this.screen.footer().map((h) => `${fg(palette.accent, h.key)} ${dim(h.label)}`),
+      ...(this.focus === 'nav'
+        ? [
+            `${fg(palette.accent, 'enter')} ${dim('open')}`,
+            `${fg(palette.accent, '→')} ${dim('pane')}`,
+          ]
+        : [
+            ...this.screen.footer().map((h) => `${fg(palette.accent, h.key)} ${dim(h.label)}`),
+            `${fg(palette.accent, 'esc')} ${dim('menu')}`,
+          ]),
       `${fg(palette.accent, '?')} ${dim('help')}`,
       `${fg(palette.accent, 'q')} ${dim('quit')}`,
     ];
@@ -588,7 +615,7 @@ export class App implements AppApi {
       toastLine = ` ${fg(color, icon)} ${fg(color, truncate(this.toastState.message, cols - 4))}`;
     } else {
       const ctx = this.source.getContext();
-      toastLine = ` ${dim(`${ctx.demo ? 'demo mode · ' : ''}${this.focus === 'nav' ? 'browse the menu, then press enter' : 'esc returns to the menu'}`)}`;
+      toastLine = ` ${dim(`${ctx.demo ? 'demo mode · ' : ''}${this.focus === 'nav' ? 'enter opens a screen, → works in it' : 'esc returns to the menu'}`)}`;
     }
     return [fit(hintLine, cols), fit(toastLine, cols)];
   }

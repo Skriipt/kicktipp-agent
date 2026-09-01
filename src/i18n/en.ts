@@ -69,10 +69,10 @@ export const en = {
     today: { description: "Show today's matches and which still need bets" },
     guide: { description: 'Print a detailed usage guide (useful for LLM agents)' },
     sync: {
-      description: 'Download this season into the local cache for offline use and analytics',
+      description: 'Update the local season cache (current matchday and any holes; skips finished and future ones)',
       optionRefresh: 'Re-download matchdays that are already cached',
       optionFrom: 'First matchday to sync',
-      optionTo: 'Last matchday to sync',
+      optionTo: 'Last matchday to sync (default: the current one)',
     },
     cache: {
       description: 'Inspect or clear the local season cache',
@@ -282,7 +282,7 @@ export const en = {
   },
   sync: {
     done: 'Synced {n} matchday(s){skipped}.\nCache: {dir}',
-    skipped: ', skipped {n} already complete',
+    skipped: ', skipped {n} already up to date',
   },
   suggest: {
     unknownStrategy: "Unknown strategy '{name}'. Options: {options}",

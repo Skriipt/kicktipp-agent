@@ -45,21 +45,21 @@ function readScreen<T>(
     onKey?: (data: T | null, key: Key) => boolean | Promise<boolean>;
   },
 ): Screen {
-  let data: T | null = null;
+  let state: { ready: false } | { ready: true; data: T } = { ready: false };
   return {
     id: cfg.id,
     title: cfg.title,
     matchdayScoped: cfg.matchdayScoped,
     status: cfg.status ?? (() => defaultStatus(app)),
     async load() {
-      data = await cfg.load();
+      state = { ready: true, data: await cfg.load() };
     },
     render(width, height) {
-      if (data === null) return [dim('  Loading…')];
-      return cfg.render(data, width, height);
+      if (!state.ready) return [dim('  Loading…')];
+      return cfg.render(state.data, width, height);
     },
     footer: () => cfg.footer ?? NO_HINTS,
-    onKey: (key) => (cfg.onKey ? cfg.onKey(data, key) : false),
+    onKey: (key) => (cfg.onKey ? cfg.onKey(state.ready ? state.data : null, key) : false),
   };
 }
 
@@ -733,8 +733,8 @@ function syncScreen(app: AppApi): Screen {
     title: 'Sync season',
     load: async () => null,
     render: () => [
-      dim('Download the whole season into the local cache for offline'),
-      dim('analytics (stats, what-if replay, rival and scenarios).'),
+      dim('Update the local cache for offline analytics (stats, what-if,'),
+      dim('rival, scenarios). Finished and future matchdays are skipped.'),
       '',
       lastResult ? fg(palette.primary, lastResult) : dim('Press enter to sync now.'),
     ],

@@ -254,7 +254,7 @@ Once a season is cached locally, the agent can answer questions Kicktipp
 itself does not:
 
 ```bash
-kicktipp sync                      # download this season into a local cache
+kicktipp sync                      # update the local cache (current matchday and holes)
 kicktipp stats                     # your form, hit types, biases, consistency
 kicktipp stats --player Papa       # or somebody else's
 kicktipp rival Papa                # what has to happen for you to overtake them

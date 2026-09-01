@@ -71,10 +71,10 @@ export const de = {
     today: { description: 'Heutige Spiele und offene Tipps anzeigen' },
     guide: { description: 'Ausführliche Anleitung ausgeben (für LLM-Agenten)' },
     sync: {
-      description: 'Diese Saison in den lokalen Cache laden, für Offline und Auswertungen',
+      description: 'Lokalen Saison-Cache aktualisieren (aktueller Spieltag und Lücken; fertige und zukünftige werden übersprungen)',
       optionRefresh: 'Bereits gecachte Spieltage erneut laden',
       optionFrom: 'Erster Spieltag',
-      optionTo: 'Letzter Spieltag',
+      optionTo: 'Letzter Spieltag (Standard: der aktuelle)',
     },
     cache: {
       description: 'Lokalen Saison-Cache anzeigen oder leeren',
@@ -283,7 +283,7 @@ export const de = {
   },
   sync: {
     done: '{n} Spieltag(e) abgeglichen{skipped}.\nCache: {dir}',
-    skipped: ', {n} bereits vollständige übersprungen',
+    skipped: ', {n} unveränderte übersprungen',
   },
   suggest: {
     unknownStrategy: "Unbekannte Strategie '{name}'. Auswahl: {options}",

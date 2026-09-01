@@ -448,11 +448,14 @@ export function rivalView(a: RivalAnalysis, width: number): string[] {
   const gap =
     a.gap === null
       ? dim('gap unknown')
-      : a.gap >= 0
+      : a.gap > 0
         ? fg(palette.primary, `+${a.gap} ahead`)
-        : fg(palette.red, `${a.gap} behind`);
+        : a.gap < 0
+          ? fg(palette.red, `${a.gap} behind`)
+          : dim('level');
+  const md = a.matchday != null ? dim(` · matchday ${a.matchday}`) : '';
   out.push(
-    `${bold(a.player)} ${dim('vs')} ${bold(a.rival)}   ${gap}   ${dim(`mode: ${a.mode}`)}`,
+    `${bold(a.player)} ${dim('vs')} ${bold(a.rival)}   ${gap}   ${dim(`mode: ${a.mode}`)}${md}`,
     dim(`Swing still available: best +${a.swingRange.best}, worst ${a.swingRange.worst}`),
     '',
   );

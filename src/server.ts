@@ -628,10 +628,10 @@ server.registerTool(
 server.registerTool(
   'sync_history',
   {
-    description: 'Download this season into the local cache so get_stats has data to work with. Makes several requests per matchday and paces them politely, so the first run can take a minute. Safe to repeat: matchdays already complete are skipped.',
+    description: 'Update the local season cache so get_stats has data to work with. Stops at the current matchday, skips finished and still-upcoming ones, and paces requests politely. The first run backfills holes; later runs usually cost one matchday. Pass to=34 to walk the rest of the season.',
     inputSchema: {
     from: z.number().int().min(1).max(34).optional().describe('First matchday (default 1).'),
-    to: z.number().int().min(1).max(34).optional().describe('Last matchday (default: end of season).'),
+    to: z.number().int().min(1).max(34).optional().describe('Last matchday (default: Kicktipp current matchday, not 34).'),
   },
     outputSchema: OUTPUT_SCHEMA,
   },

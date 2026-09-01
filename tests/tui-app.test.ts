@@ -222,6 +222,45 @@ describe('app composes a full frame headlessly', () => {
     }
   });
 
+  it('shows sync instructions after load, not a stuck Loading line', async () => {
+    const app = new App(new DemoDataSource());
+    app.setViewport(24, 80);
+    const text = (await app.snapshot('sync')).map(stripAnsi).join('\n');
+    expect(text).toMatch(/Press enter to sync now/);
+    expect(text).not.toMatch(/Loading/);
+  });
+
+  it('shows the rival picker when none is chosen', async () => {
+    const app = new App(new DemoDataSource());
+    app.setViewport(24, 80);
+    const text = (await app.snapshot('rival')).map(stripAnsi).join('\n');
+    expect(text).toMatch(/Pick a rival/);
+    expect(text).not.toMatch(/Loading/);
+  });
+
+  it('keeps the menu focused after opening a screen', async () => {
+    const app = new App(new DemoDataSource());
+    app.setViewport(24, 80);
+    expect(app.focused()).toBe('nav');
+
+    await app.press({ type: 'down' });
+    await app.press({ type: 'enter' });
+    expect(app.focused()).toBe('nav');
+
+    await app.press({ type: 'right' });
+    expect(app.focused()).toBe('content');
+
+    await app.press({ type: 'escape' });
+    expect(app.focused()).toBe('nav');
+  });
+
+  it('moves into the pane when enter is pressed on the already-open screen', async () => {
+    const app = new App(new DemoDataSource());
+    app.setViewport(24, 80);
+    await app.press({ type: 'enter' });
+    expect(app.focused()).toBe('content');
+  });
+
   it('renders the interactive place-bets grid', async () => {
     const app = new App(new DemoDataSource());
     app.setViewport(30, 100);

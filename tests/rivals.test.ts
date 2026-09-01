@@ -101,6 +101,12 @@ describe('analyseRival', () => {
     expect(analysis.conditions[0]).toMatch(/out of reach/);
   });
 
+  it('treats a tied gap as level, not as trailing', () => {
+    const analysis = analyseRival(grid(), 'Me', 'Papa', RULES, 0);
+    expect(analysis.conditions[0]).toMatch(/level/);
+    expect(analysis.conditions[0]).not.toMatch(/out of reach|trail/);
+  });
+
   it('confirms an unassailable lead', () => {
     const analysis = analyseRival(grid(), 'Me', 'Papa', RULES, 10);
     expect(analysis.conditions[0]).toMatch(/stay ahead whatever happens/);
@@ -109,6 +115,22 @@ describe('analyseRival', () => {
   it('warns when a lead is still catchable', () => {
     const analysis = analyseRival(grid(), 'Me', 'Papa', RULES, 2);
     expect(analysis.conditions[0]).toMatch(/can still be caught/);
+  });
+
+  it('says the matchday is over when every fixture is settled', () => {
+    const settled = grid({
+      matches: [
+        { date: '', home: 'Bayern', away: 'BVB', result: '2:1' },
+        { date: '', home: 'Freiburg', away: 'VfB', result: '1:1' },
+      ],
+    });
+    // Exact on Bayern (4 vs 0), same draw on Freiburg (2 vs 2) → +4 on a -5 start.
+    const analysis = analyseRival(settled, 'Me', 'Papa', RULES, -5);
+    expect(analysis.gap).toBe(-1);
+    expect(analysis.swingRange).toEqual({ best: 0, worst: 0 });
+    expect(analysis.conditions[0]).toMatch(/finished/);
+    expect(analysis.conditions[0]).toMatch(/behind Papa/);
+    expect(analysis.conditions[0]).not.toMatch(/out of reach/);
   });
 
   it('folds already-decided matches into the gap', () => {
@@ -138,6 +160,16 @@ describe('analyseRival', () => {
     const analysis = analyseRival(empty, 'Me', 'Papa', RULES, -3);
     expect(analysis.mode).toBe('bounds');
     expect(analysis.note).toBe('Deadline has not passed.');
+    expect(analysis.conditions[0]).toMatch(/Bets are not in yet/);
+    expect(analysis.conditions.join(' ')).not.toMatch(/out of reach/);
+  });
+
+  it('does not call a tied, unpublished matchday out of reach', () => {
+    const empty = grid({ players: [], note: 'Deadline has not passed.' });
+    const analysis = analyseRival(empty, 'Me', 'Papa', RULES, 0);
+    expect(analysis.conditions[0]).toMatch(/level/);
+    expect(analysis.conditions[0]).toMatch(/Bets are not in yet/);
+    expect(analysis.conditions.join(' ')).not.toMatch(/out of reach/);
   });
 
   it('reports only the swing range when standings are unknown', () => {

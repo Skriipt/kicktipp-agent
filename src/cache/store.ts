@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { parseMatchDate } from '../helpers/match-date.js';
 import { communityDir } from './paths.js';
 import type {
   BetMatch,
@@ -172,4 +173,17 @@ export class CacheStore {
 /** A matchday counts as finished once every match has a real result. */
 export function isMatchdayFinished(matches: ScheduleMatch[]): boolean {
   return matches.length > 0 && matches.every((m) => /^\d+:\d+$/.test(m.result));
+}
+
+/** True when every fixture has a kickoff after `now`. Unparseable dates
+ *  mean we cannot tell, so this stays false and the matchday is fetched. */
+export function isMatchdayUpcoming(matches: ScheduleMatch[], now: Date = new Date()): boolean {
+  if (!matches.length) return false;
+  const kickoffs: Date[] = [];
+  for (const match of matches) {
+    const at = parseMatchDate(match.date);
+    if (!at) return false;
+    kickoffs.push(at);
+  }
+  return kickoffs.every((at) => at.getTime() > now.getTime());
 }

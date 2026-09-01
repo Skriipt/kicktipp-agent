@@ -132,6 +132,32 @@ export function matchSwing(
   };
 }
 
+function describeFinished(rival: string, startingGap: number | null): string {
+  if (startingGap === null) {
+    return 'This matchday is finished. Standings for the gap are not cached.';
+  }
+  if (startingGap > 0) {
+    return `This matchday is finished. You finished ${startingGap} ahead of ${rival}.`;
+  }
+  if (startingGap < 0) {
+    return `This matchday is finished. You finished ${-startingGap} behind ${rival}.`;
+  }
+  return `This matchday is finished. You finished level with ${rival}.`;
+}
+
+function describeWithoutTips(rival: string, startingGap: number | null): string {
+  if (startingGap === null) {
+    return 'Bets are not in yet, so there is no swing to compute.';
+  }
+  if (startingGap > 0) {
+    return `You are ${startingGap} ahead going into this matchday. Bets are not in yet, so nothing can swing.`;
+  }
+  if (startingGap < 0) {
+    return `You trail ${rival} by ${-startingGap} going into this matchday. Bets are not in yet, so nothing can swing.`;
+  }
+  return `You and ${rival} are level going into this matchday. Bets are not in yet, so nothing can swing.`;
+}
+
 function describe(swing: MatchSwing): string | null {
   if (!swing.byOutcome) return null;
   const gains = (['home', 'draw', 'away'] as Outcome[])
@@ -172,15 +198,26 @@ export function analyseRival(
   };
 
   const startingGap = gapBefore === null ? null : gapBefore + settledDelta;
+  const anyTip = perMatch.some((m) => m.myBet || m.rivalBet);
   const conditions: string[] = [];
 
-  if (startingGap === null) {
+  if (!anyTip) {
+    conditions.push(describeWithoutTips(rival, startingGap));
+  } else if (open.length === 0) {
+    conditions.push(describeFinished(rival, startingGap));
+  } else if (startingGap === null) {
     conditions.push('Standings for this matchday are not cached, so only the swing range is known.');
   } else if (startingGap > 0) {
     conditions.push(
       swingRange.worst + startingGap > 0
         ? `You stay ahead whatever happens (worst case still +${startingGap + swingRange.worst}).`
         : `You are ${startingGap} ahead, but can still be caught (worst case ${startingGap + swingRange.worst}).`,
+    );
+  } else if (startingGap === 0) {
+    conditions.push(
+      swingRange.best > 0
+        ? `You are level; out-scoring ${rival} by 1 would take the lead, and up to ${swingRange.best} is available.`
+        : `You are level, and the remaining matches cannot change that.`,
     );
   } else {
     const needed = -startingGap;
