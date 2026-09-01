@@ -17,6 +17,7 @@ import {
   fetchPlayers,
   fetchMatchdayBets,
   fetchBonusQuestions,
+  fetchBonusBets,
   fetchMembers,
   fetchBetsForMember,
   placeBets,
@@ -140,6 +141,11 @@ export class LiveDataSource implements DataSource {
   async bonusQuestions() {
     const page = await this.ensurePage();
     return fetchBonusQuestions(page, this.requireCommunity());
+  }
+
+  async bonusBets() {
+    const page = await this.ensurePage();
+    return fetchBonusBets(page, this.requireCommunity());
   }
 
   async members() {

@@ -6,6 +6,7 @@
  */
 import type {
   BetMatch,
+  BonusAnswer,
   BonusQuestion,
   LeaderboardData,
   MatchdayBets,
@@ -131,6 +132,15 @@ export class DemoDataSource implements DataSource {
 
   async bonusQuestions(): Promise<BonusQuestion[]> {
     return this.world.bonusQuestions;
+  }
+
+  async bonusBets(): Promise<BonusAnswer[]> {
+    return this.world.bonusQuestions.map((q) => {
+      const answers = q.selects
+        .map((sel) => sel.options.find((o) => o.value === sel.selected)?.text)
+        .filter((t): t is string => Boolean(t));
+      return { question: q.question, answers, editable: true };
+    });
   }
 
   async members(): Promise<Member[]> {

@@ -712,6 +712,64 @@ export async function fetchBonusQuestions(page: Page, community: string): Promis
   return questions;
 }
 
+/** One bonus question with the answer(s) currently recorded for the player. */
+export interface BonusAnswer {
+  question: string;
+  /** Chosen answers, in slot order. Empty when nothing is answered. */
+  answers: string[];
+  /** True while the question can still be edited (the form has dropdowns). */
+  editable: boolean;
+}
+
+/**
+ * Read the player's bonus answers, whether the round is open or closed.
+ *
+ * `fetchBonusQuestions` only returns the editable form, so once the bonus
+ * deadline passes it goes empty. This reads the same page but keeps every
+ * question: open ones report the option currently selected in each dropdown,
+ * locked ones report the answer Kicktipp now prints as plain text. That way
+ * "what did I bet?" is answerable after the deadline, not just before it.
+ */
+export async function fetchBonusBets(page: Page, community: string): Promise<BonusAnswer[]> {
+  const $ = await loadPage(page, getBonusPredictUrl(community));
+  const tbody = $('#kicktipp-content table#tippabgabeFragen tbody');
+  if (!tbody.length) return [];
+
+  const out: BonusAnswer[] = [];
+  tbody.children('tr').each((_, tr) => {
+    const cols = $(tr).children('td');
+    if (cols.length < 3) return;
+    const question = $(cols[1]).text().trim();
+    if (!question) return;
+
+    const answerTd = $(cols[2]);
+    const selectEls = answerTd.find('select');
+
+    if (selectEls.length) {
+      const answers: string[] = [];
+      selectEls.each((__, sel) => {
+        let chosen = '';
+        $(sel).find('option').each((___, opt) => {
+          const value = $(opt).attr('value') || '';
+          if ($(opt).attr('selected') !== undefined && value !== '-1') {
+            chosen = $(opt).text().trim();
+          }
+        });
+        if (chosen) answers.push(chosen);
+      });
+      out.push({ question, answers, editable: true });
+      return;
+    }
+
+    // Locked: the chosen answer is printed as text. Keep it as-is rather than
+    // guessing at separators, so multi-part answers are not mangled.
+    const text = answerTd.text().replace(/\s+/g, ' ').trim();
+    out.push({ question, answers: text ? [text] : [], editable: false });
+  });
+
+  return out;
+}
+
 function parseBonusBetArg(arg: string): { question: string; answer: string } {
   const eqIdx = arg.lastIndexOf('=');
   if (eqIdx === -1) throw new Error(`Invalid bonus bet '${arg}'. Use format: "Question text=Answer"`);

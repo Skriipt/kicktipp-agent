@@ -9,6 +9,7 @@
  */
 import type {
   BetMatch,
+  BonusAnswer,
   BonusQuestion,
   LeaderboardData,
   MatchdayBets,
@@ -72,6 +73,7 @@ export interface DataSource {
   players(): Promise<string[]>;
   matchdayBets(matchday?: number): Promise<MatchdayBets>;
   bonusQuestions(): Promise<BonusQuestion[]>;
+  bonusBets(): Promise<BonusAnswer[]>;
   members(): Promise<Member[]>;
   betsForMember(member: Member, matchday?: number): Promise<{ member: Member; matches: BetMatch[] }>;
   deadline(matchday?: number): Promise<DeadlineReport>;

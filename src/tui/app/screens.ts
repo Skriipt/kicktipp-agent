@@ -561,42 +561,50 @@ function bonusScreen(app: AppApi): Screen {
   return readScreen(app, {
     id: 'bonus',
     title: 'Bonus bets',
-    load: () => app.source.bonusQuestions(),
+    load: () => app.source.bonusBets(),
     render: (d, w) => F.bonusView(d, w),
     footer: [{ key: 'e', label: 'answer a question' }],
-    onKey: async (questions, key) => {
-      if (key.type === 'char' && key.value === 'e' && questions && questions.length) {
-        if (app.source.getContext().readOnly) {
-          app.toast('Read-only mode: placing bets is disabled.', 'warn');
-          return true;
-        }
-        app.openOverlay(
-          listOverlay(app, {
-            title: 'Which question?',
-            items: questions.map((q) => q.question),
-            onSelect: async (question, index) => {
-              const options = questions[index].selects[0]?.options.map((o) => o.text) ?? [];
-              app.openOverlay(
-                listOverlay(app, {
-                  title: 'Choose an answer',
-                  items: options,
-                  onSelect: async (answer) => {
-                    try {
-                      await app.source.placeBonusBets([`${question}=${answer}`]);
-                      app.toast(`Answered: ${answer}`, 'success');
-                      await app.reload();
-                    } catch (err) {
-                      app.toast(errMessage(err), 'error');
-                    }
-                  },
-                }),
-              );
-            },
-          }),
-        );
+    onKey: async (answers, key) => {
+      if (key.type !== 'char' || key.value !== 'e') return false;
+      if (app.source.getContext().readOnly) {
+        app.toast('Read-only mode: placing bets is disabled.', 'warn');
         return true;
       }
-      return false;
+      if (answers && answers.length && !answers.some((a) => a.editable)) {
+        app.toast('The bonus round is closed — these answers can no longer be changed.', 'warn');
+        return true;
+      }
+      // The place flow needs the editable form (options + slot names).
+      const questions = await safe(app, () => app.source.bonusQuestions());
+      if (!questions || !questions.length) {
+        app.toast('No open bonus questions to answer.', 'warn');
+        return true;
+      }
+      app.openOverlay(
+        listOverlay(app, {
+          title: 'Which question?',
+          items: questions.map((q) => q.question),
+          onSelect: async (question, index) => {
+            const options = questions[index].selects[0]?.options.map((o) => o.text) ?? [];
+            app.openOverlay(
+              listOverlay(app, {
+                title: 'Choose an answer',
+                items: options,
+                onSelect: async (answer) => {
+                  try {
+                    await app.source.placeBonusBets([`${question}=${answer}`]);
+                    app.toast(`Answered: ${answer}`, 'success');
+                    await app.reload();
+                  } catch (err) {
+                    app.toast(errMessage(err), 'error');
+                  }
+                },
+              }),
+            );
+          },
+        }),
+      );
+      return true;
     },
   });
 }
