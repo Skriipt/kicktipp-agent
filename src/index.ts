@@ -37,6 +37,7 @@ import { registerLogCommand } from './commands/log.js';
 import { registerScenarioCommand } from './commands/scenario.js';
 import { registerWhatifCommand } from './commands/whatif.js';
 import { registerAdminCommand } from './commands/admin.js';
+import { registerTuiCommand } from './commands/tui.js';
 
 const program = new Command();
 
@@ -214,6 +215,7 @@ registerLogCommand(program);
 registerScenarioCommand(program);
 registerWhatifCommand(program);
 registerAdminCommand(program);
+registerTuiCommand(program);
 
 export { program, ensureCommunity, ask };
 

@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
-import { fetchBonusQuestions, placeBonusBets } from '../src/core.js';
+import { fetchBonusQuestions, fetchBonusBets, placeBonusBets } from '../src/core.js';
 import { mockFetch, page as htmlPage, type RecordedRequest } from './helpers/mock-fetch.js';
 
 const BASE = 'https://www.kicktipp.com';
@@ -100,6 +100,66 @@ describe('fetchBonusQuestions', () => {
       'tippabgabeFragenForms[223].tipp',
       'tippabgabeFragenForms[224].tipp',
     ]);
+  });
+});
+
+describe('fetchBonusBets', () => {
+  function pageWith(html: string) {
+    const { fetchImpl } = mockFetch((req) =>
+      req.method === 'GET' && req.url.startsWith(BONUS_URL) ? htmlPage(html) : htmlPage('saved'),
+    );
+    return new Page(new CookieJar(), fetchImpl);
+  }
+
+  it('reads the selected answers while the round is open', async () => {
+    const page = pageWith(`<div id="kicktipp-content"><form method="post" action="/cape/predict">
+      <table id="tippabgabeFragen"><tbody>
+        <tr><td>1</td><td>Who will be champion?</td><td>${select('tippabgabeFragenForms[111].tipp', '81')}</td></tr>
+        <tr><td>2</td><td>Who will be relegated?</td><td>
+          ${select('tippabgabeFragenForms[222].tipp', '16')}
+          ${select('tippabgabeFragenForms[223].tipp')}
+          ${select('tippabgabeFragenForms[224].tipp')}
+        </td></tr>
+      </tbody></table>
+    </form></div>`);
+
+    const answers = await fetchBonusBets(page, 'cape');
+    expect(answers).toEqual([
+      { question: 'Who will be champion?', answers: ['FC Bayern München'], editable: true },
+      { question: 'Who will be relegated?', answers: ['FC St. Pauli'], editable: true },
+    ]);
+  });
+
+  it('still reports the placed answers after the deadline locks the form', async () => {
+    // Once closed, Kicktipp prints the answer as text with no <select>.
+    const page = pageWith(`<div id="kicktipp-content"><table id="tippabgabeFragen"><tbody>
+      <tr><td>1</td><td>Who will be champion?</td><td>FC Bayern München</td></tr>
+      <tr><td>2</td><td>Who will be relegated?</td><td>FC St. Pauli, 1. FC Heidenheim, Holstein Kiel</td></tr>
+    </tbody></table></div>`);
+
+    const answers = await fetchBonusBets(page, 'cape');
+    expect(answers).toEqual([
+      { question: 'Who will be champion?', answers: ['FC Bayern München'], editable: false },
+      {
+        question: 'Who will be relegated?',
+        answers: ['FC St. Pauli, 1. FC Heidenheim, Holstein Kiel'],
+        editable: false,
+      },
+    ]);
+  });
+
+  it('marks an open but unanswered question as editable with no answers', async () => {
+    const page = pageWith(`<div id="kicktipp-content"><form method="post" action="/cape/predict">
+      <table id="tippabgabeFragen"><tbody>
+        <tr><td>1</td><td>Who will be champion?</td><td>${select('tippabgabeFragenForms[111].tipp')}</td></tr>
+      </tbody></table></form></div>`);
+    const answers = await fetchBonusBets(page, 'cape');
+    expect(answers).toEqual([{ question: 'Who will be champion?', answers: [], editable: true }]);
+  });
+
+  it('returns nothing when the page has no bonus table at all', async () => {
+    const page = pageWith('<div id="kicktipp-content"><p>Nothing here</p></div>');
+    expect(await fetchBonusBets(page, 'cape')).toEqual([]);
   });
 });
 
