@@ -8,7 +8,7 @@
 import { bold, dim, fg, italic } from './ansi.js';
 import { palette, glyph } from './theme.js';
 import { fit, padLeft, truncate, visibleWidth, wrap } from './text.js';
-import { rule, bar, sparkline, badge, field } from './box.js';
+import { bar, sparkline, badge, field } from './box.js';
 import { renderTable } from './table.js';
 import type {
   BetMatch,

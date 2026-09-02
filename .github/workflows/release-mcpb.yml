@@ -1,23 +1,30 @@
-name: Attach Desktop pack
+name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+    paths: [package.json]
+
+permissions:
+  contents: write
 
 jobs:
-  mcpb:
+  release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm test
       - run: npm run pack:mcpb
-      - run: gh release upload "$TAG" kicktipp.mcpb --clobber
+      - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          awk -v version="$version" '$0 ~ "^## \\[" version "\\]" { found=1; next } found && /^## \[/ { exit } found' CHANGELOG.md > release-notes.md
+          gh release create "$tag" kicktipp.mcpb --target "$GITHUB_SHA" --title "$tag" --notes-file release-notes.md

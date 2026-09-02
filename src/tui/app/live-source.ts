@@ -1,10 +1,10 @@
 /**
- * The production DataSource: a thin adapter over the same functions the CLI
+ * Dashboard access to the same functions the CLI
  * calls. It opens one authenticated session lazily (on the first request
  * that needs the network) and reuses it, so moving between screens does not
  * re-login.
  */
-import { launchBrowser, type Page } from '../../browser.js';
+import { getCommunities, getPlayers, launchBrowser, type Page } from '../../browser.js';
 import {
   fetchTodayMatches,
   fetchBets,
@@ -13,8 +13,6 @@ import {
   fetchOverview,
   fetchTable,
   fetchRules,
-  fetchCommunities,
-  fetchPlayers,
   fetchMatchdayBets,
   fetchBonusQuestions,
   fetchBonusBets,
@@ -51,15 +49,14 @@ import { notifierSnapshot, applyNotifierSettings } from '../../notify/backends.j
 import { saveNotifySection } from '../../config.js';
 import { syncSeason, type SyncOptions } from '../../cache/sync.js';
 import { getGuideText } from '../../commands/guide.js';
-import type { AppContext, CacheInfo, DataSource, SuggestOutcome } from './source.js';
+import type { AppContext, CacheInfo, SuggestOutcome } from './source.js';
 
-export class LiveDataSource implements DataSource {
-  readonly demo = false;
+export class LiveDataSource {
   private page: Page | null = null;
 
   private async ensurePage(): Promise<Page> {
     if (!this.page) {
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       this.page = page;
     }
     return this.page;
@@ -84,7 +81,6 @@ export class LiveDataSource implements DataSource {
       profile: getActiveProfile(),
       readOnly: isReadOnly(),
       loggedIn: hasUsableAuth(),
-      demo: false,
     };
   }
 
@@ -125,12 +121,12 @@ export class LiveDataSource implements DataSource {
 
   async communities() {
     const page = await this.ensurePage();
-    return fetchCommunities(page);
+    return getCommunities(page);
   }
 
   async players() {
     const page = await this.ensurePage();
-    return fetchPlayers(page, this.requireCommunity());
+    return getPlayers(page, this.requireCommunity());
   }
 
   async matchdayBets(matchday?: number) {

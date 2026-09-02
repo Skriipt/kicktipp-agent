@@ -73,9 +73,6 @@ export function sessionFile(): string {
     : path.join(CONFIG_DIR, 'session.json');
 }
 
-/** Kept for callers that want the default profile's path specifically. */
-export const SESSION_FILE = path.join(CONFIG_DIR, 'session.json');
-
 export function listProfiles(): string[] {
   const config = readConfig();
   const names = new Set<string>();

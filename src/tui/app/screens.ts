@@ -828,7 +828,7 @@ function accountScreen(app: AppApi): Screen {
         `  ${dim('Player')}      ${ctx.player ?? dim('not set')}`,
         `  ${dim('Profile')}     ${ctx.profile ?? dim('default')}`,
         `  ${dim('Read-only')}   ${ctx.readOnly ? yes : no}`,
-        `  ${dim('Mode')}        ${ctx.demo ? fg(palette.purple, 'demo (sample data)') : fg(palette.primary, 'live')}`,
+        `  ${dim('Mode')}        ${fg(palette.primary, 'live')}`,
         '',
         dim('Connect or reset an account from the CLI:'),
         `  ${fg(palette.teal, 'kicktipp login --web')}     open the browser setup page`,

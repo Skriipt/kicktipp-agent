@@ -13,7 +13,7 @@ import {
 } from '../core.js';
 import { appendAudit } from '../audit/log.js';
 import { inheritPrintedDate, localizePrintedDate } from '../helpers/match-date.js';
-import { runBettingTui } from '../tui/run.js';
+import { runTui } from '../tui/app/launch.js';
 import { t } from '../i18n/index.js';
 
 // ── Match betting helpers ──────────────────────────────────────────
@@ -234,10 +234,10 @@ export function registerBetCommand(program: Command): void {
       // needs a real terminal to read keys from.
       const wantsTui = opts.tui !== false && !opts.bonus && (!bets || bets.length === 0);
       if (wantsTui && (opts.tui === true || (process.stdin.isTTY && process.stdout.isTTY))) {
-        await runBettingTui({ matchday: opts.matchday });
+        await runTui({ matchday: opts.matchday, screen: 'place' });
         return;
       }
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 

@@ -36,7 +36,7 @@ export function registerTableCommand(program: Command): void {
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
       const option: 'home' | 'away' | undefined = opts.home ? 'home' : opts.away ? 'away' : undefined;
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status(t('status.loadingTable'));

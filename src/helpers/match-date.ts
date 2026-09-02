@@ -27,22 +27,12 @@ export function displayTimeZone(): string {
   );
 }
 
-/** @deprecated Use displayTimeZone — kept so older call sites keep compiling. */
-export function assumedTimeZone(): string {
-  return displayTimeZone();
-}
-
 /** Zone the HTML wall clock was printed in, inferred from its format. */
 export function printedTimeZone(dateStr: string): string {
   const trimmed = dateStr.trim();
   if (GERMAN_DATE.test(trimmed)) return 'Europe/Berlin';
   if (US_DATE.test(trimmed)) return 'America/Chicago';
   return displayTimeZone();
-}
-
-/** @deprecated Use printedTimeZone. */
-export function timeZoneForPrintedDate(dateStr: string): string {
-  return printedTimeZone(dateStr);
 }
 
 /**

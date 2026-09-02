@@ -102,7 +102,7 @@ export function registerSuggestCommand(program: Command): void {
         return;
       }
 
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         const store = new CacheStore(community);
@@ -138,8 +138,6 @@ export function registerSuggestCommand(program: Command): void {
 
         // Matches that already carry a bet are left alone unless asked for.
         const toPlace = opts.replace ? suggestions : suggestions.filter((s) => !s.existingBet);
-        const skipped = suggestions.length - toPlace.length;
-
         if (!toPlace.length) {
           console.log('\n' + t('suggest.alreadyBet'));
           return;

@@ -13,7 +13,7 @@ export function registerSyncCommand(program: Command): void {
     .option('--from <n>', t('cmd.sync.optionFrom'), parseInt)
     .option('--to <n>', t('cmd.sync.optionTo'), parseInt)
     .action(async (opts) => {
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status(t('status.syncing'));

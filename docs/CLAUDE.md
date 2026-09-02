@@ -17,7 +17,7 @@ src/
   url.ts                      # Route table and URL builders
   http/
     cookie-jar.ts             # Host-scoped cookie store
-    page.ts                   # fetch-based page shim (navigate, fill, submit)
+    page.ts                   # fetch-based page client (navigate and submit)
   cache/
     paths.ts                  # Platform data directory
     store.ts                  # Versioned JSON snapshot store
@@ -37,9 +37,7 @@ src/
     schedule-artifacts.ts     # cron line, systemd units, ICS calendar
   tui/
     state.ts                  # Betting screen as a pure state machine
-    render.ts                 # Screen lines (pure)
-    screen.ts                 # Raw-mode terminal I/O
-    run.ts                    # Loads a matchday, runs the screen, submits
+    app/                      # Dashboard rendering, screens, and terminal I/O
   analytics/
     season.ts                 # Assembles a season from the cache
     deadline.ts               # Kickoff countdowns and urgency
@@ -53,7 +51,7 @@ src/
     strategies.ts             # safe / ev / contrarian bet slips
   helpers/
     parse-bet-arg.ts          # parseBetArg + matchFixture
-    spinner.ts                # Terminal spinner (ora wrapper)
+    spinner.ts                # Native terminal status output
   commands/
     leaderboard.ts            # leaderboard command (--matchday, --bonus)
     overview.ts               # overview command (--view)
@@ -146,10 +144,10 @@ kicktipp logout
 
 ### HTTP Layer: `src/http/`
 
-- **`page.ts`** — a browserless stand-in for a Playwright page. Follows
+- **`page.ts`** — a fetch-based page client. Follows
   redirects manually (301/302/303 demote to GET, 307/308 keep method and
   body, max 8 hops), serializes forms the way a browser would, and exposes
-  `goto`, `content`, `url`, `$`, `fill`, `selectOption`, `click`,
+  `goto`, `content`, `url`, `setInputValue`, `selectOption`, `click`,
   `submitForm`. State helpers: `isAuthRedirect()`, `isNotFound()`,
   `isAdminRequired()`, `isClosed()`. Takes an injectable `fetch` for tests.
 - **`cookie-jar.ts`** — cookies scoped per host. Cookies are only stored for
@@ -161,12 +159,12 @@ kicktipp logout
 
 ### Session Handling: `src/browser.ts`
 
-- `launchBrowser()` restores `SESSION_FILE` and probes the communities page;
+- `launchBrowser()` restores the profile's session file and probes the communities page;
   falls back to a fresh login if that bounces to `/login` or 404s
 - `login()` — fills `input[name="kennung"]` + `input[name="passwort"]` and
   submits the surrounding form (so hidden fields such as a CSRF token go
   along). Throws on failure rather than exiting the process
-- Session saved to `SESSION_FILE` after a successful login
+- The session is saved after a successful login
 
 ### HTML Parsing (Cheerio)
 

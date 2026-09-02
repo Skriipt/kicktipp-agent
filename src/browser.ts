@@ -24,7 +24,7 @@ export interface LaunchOptions {
  * Open an authenticated Kicktipp session: restore the saved cookies when
  * they still work, otherwise log in and save fresh ones.
  */
-export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: Page }> {
+export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
   const file = opts.sessionFile === undefined ? sessionFile() : opts.sessionFile;
 
   if (file && fs.existsSync(file)) {
@@ -35,7 +35,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
       await page.goto(getCommunitiesUrl());
       if (!page.isAuthRedirect() && !page.isNotFound()) {
         statusClear();
-        return { page };
+        return page;
       }
     } catch {
       // An unreadable or outdated session file is not worth reporting —
@@ -54,7 +54,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<{ page: P
   const page = new Page(new CookieJar(), opts.fetchImpl);
   await login(page, email, password);
   if (file) page.saveSession(file);
-  return { page };
+  return page;
 }
 
 export async function login(page: Page, username: string, password: string): Promise<void> {

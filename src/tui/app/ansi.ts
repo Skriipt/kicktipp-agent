@@ -30,10 +30,6 @@ export function setColorMode(opts: { color?: boolean; truecolor?: boolean }): vo
   if (opts.truecolor !== undefined) truecolor = opts.truecolor;
 }
 
-export function colorIsEnabled(): boolean {
-  return colorEnabled;
-}
-
 // ── Screen control ────────────────────────────────────────────────
 
 export const ESC = '\x1b';

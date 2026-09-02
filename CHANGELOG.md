@@ -2,9 +2,22 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-02
+
 ### Added
 
 - `kicktipp tip-status` and MCP `get_tip_status` report full, partial, or missing tip submissions without revealing score predictions.
+
+### Changed
+
+- `kicktipp bet` now opens the dashboard directly on the existing "Place bets" screen instead of maintaining a second terminal application.
+- CLI progress messages use the Node.js terminal APIs directly.
+
+### Removed
+
+- The generated `kicktipp tui --demo` season and its parallel data backend.
+- The standalone prediction-grid runtime, deprecated time-zone aliases, and leftover Playwright-shaped page helpers.
+- The `ora` dependency and its transitive packages.
 
 ## [1.2.0] - 2026-09-01
 

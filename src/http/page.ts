@@ -18,7 +18,7 @@ const NOT_FOUND_PATTERN = /Seite\s+wurde\s+nicht\s+gefunden|Page\s+not\s+found/i
 const DEFAULT_HEADERS: Record<string, string> = {
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-  'User-Agent': 'kicktipp-agent (+https://github.com/christianheidorn/kicktipp-agent)',
+  'User-Agent': 'kicktipp-agent (+https://github.com/Skriipt/kicktipp-agent)',
 };
 
 function charsetFromContentType(contentType: string | null): string | null {
@@ -54,24 +54,8 @@ async function decodeBody(res: Response): Promise<string> {
   }
 }
 
-/** A handle to one element, mirroring the small slice of Playwright's API we used. */
-export class ElementHandle {
-  constructor(
-    private readonly page: Page,
-    private readonly selector: string,
-  ) {}
-
-  async fill(value: string): Promise<void> {
-    this.page.setInputValue(this.selector, value);
-  }
-
-  async click(): Promise<void> {
-    await this.page.click(this.selector);
-  }
-}
-
 /**
- * A browserless stand-in for a Playwright page: it fetches server-rendered
+ * Fetches server-rendered
  * Kicktipp pages, keeps cookies, follows redirects, and can fill in and
  * submit the forms on the page. Only the surface the CLI and MCP server
  * actually used is implemented.
@@ -166,10 +150,6 @@ export class Page {
     return this.currentUrl;
   }
 
-  status(): number {
-    return this.lastStatus;
-  }
-
   isClosed(): boolean {
     return this.closed;
   }
@@ -199,15 +179,6 @@ export class Page {
 
   // ── Mutating the current page ────────────────────────────────────
 
-  async $(selector: string): Promise<ElementHandle | null> {
-    this.ensureOpen();
-    return this.has(selector) ? new ElementHandle(this, selector) : null;
-  }
-
-  async fill(selector: string, value: string): Promise<void> {
-    this.setInputValue(selector, value);
-  }
-
   setInputValue(selector: string, value: string): void {
     this.ensureOpen();
     const input = this.find(selector);
@@ -231,12 +202,6 @@ export class Page {
       select.find('option').removeAttr('selected');
     }
     option.attr('selected', 'selected');
-  }
-
-  /** Replace the page body, e.g. after building a form by hand. */
-  replaceContent(html: string): void {
-    this.html = html;
-    this.$dom = cheerio.load(html);
   }
 
   // ── Submitting ───────────────────────────────────────────────────

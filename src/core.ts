@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
-import { Page, parseOdds, getCommunities, getPlayers } from './browser.js';
+import { Page, parseOdds, getCommunities } from './browser.js';
 import {
   getBonusPredictUrl,
   getLeaderboardUrl,
@@ -588,14 +588,6 @@ export async function fetchRules(page: Page, community: string, cache: CacheOpti
   });
 }
 
-export async function fetchCommunities(page: Page): Promise<string[]> {
-  return getCommunities(page);
-}
-
-export async function fetchPlayers(page: Page, community: string): Promise<string[]> {
-  return getPlayers(page, community);
-}
-
 // ── Write operations ───────────────────────────────────────────────
 
 export async function placeBets(
@@ -645,13 +637,11 @@ export async function placeBets(
   const placed: PlacedBet[] = [];
   const audited: AuditBet[] = [];
   for (const { entry, h, g } of parsed) {
-    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
-    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
     // Read what was on the form before overwriting it, so the log can undo.
     const previousHome = $(`input[name="${escapeCssValue(entry.heimName)}"]`).attr('value') || '';
     const previousAway = $(`input[name="${escapeCssValue(entry.gastName)}"]`).attr('value') || '';
-    if (heimEl) await heimEl.fill(String(h));
-    if (gastEl) await gastEl.fill(String(g));
+    page.setInputValue(`input[name="${escapeCssValue(entry.heimName)}"]`, String(h));
+    page.setInputValue(`input[name="${escapeCssValue(entry.gastName)}"]`, String(g));
     placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
     audited.push({
       fixture: `${entry.home} vs ${entry.away}`,
@@ -1184,12 +1174,10 @@ export async function placeBetsForMember(
   const placed: PlacedBet[] = [];
   const audited: AuditBet[] = [];
   for (const { entry, h, g } of parsed) {
-    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
-    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
     const previousHome = $(`input[name="${escapeCssValue(entry.heimName)}"]`).attr('value') || '';
     const previousAway = $(`input[name="${escapeCssValue(entry.gastName)}"]`).attr('value') || '';
-    if (heimEl) await heimEl.fill(String(h));
-    if (gastEl) await gastEl.fill(String(g));
+    page.setInputValue(`input[name="${escapeCssValue(entry.heimName)}"]`, String(h));
+    page.setInputValue(`input[name="${escapeCssValue(entry.gastName)}"]`, String(g));
     placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
     audited.push({
       fixture: `${entry.home} vs ${entry.away}`,

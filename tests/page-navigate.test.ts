@@ -15,7 +15,6 @@ describe('Page.goto', () => {
 
     expect(await page.content()).toContain('Regeln');
     expect(page.url()).toBe(`${BASE}/c/rules`);
-    expect(page.status()).toBe(200);
     expect(page.isNotFound()).toBe(false);
   });
 

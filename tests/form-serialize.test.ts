@@ -191,10 +191,8 @@ describe('editing before submit', () => {
     const page = new Page(new CookieJar(), fetchImpl);
     await page.goto(FORM_URL);
 
-    const heim = await page.$('input[name="heimTipp"]');
-    const gast = await page.$('input[name="gastTipp"]');
-    await heim!.fill('2');
-    await gast!.fill('1');
+    page.setInputValue('input[name="heimTipp"]', '2');
+    page.setInputValue('input[name="gastTipp"]', '1');
     await page.click('button[name="submitbutton"]');
 
     const body = fields(calls[calls.length - 1]);
@@ -227,7 +225,7 @@ describe('editing before submit', () => {
     const page = new Page(new CookieJar(), fetchImpl);
     await page.goto(FORM_URL);
 
-    expect(await page.$('input[name="nope"]')).toBeNull();
+    expect(() => page.setInputValue('input[name="nope"]', '1')).toThrow(/not found/i);
     await expect(page.click('button[name="nope"]')).rejects.toThrow(/not found/);
     await expect(page.selectOption('select[name="nope"]', '1')).rejects.toThrow(/not found/);
   });

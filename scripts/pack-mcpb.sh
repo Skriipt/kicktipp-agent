@@ -20,5 +20,9 @@ fs.writeFileSync(process.argv[1], JSON.stringify(manifest, null, 2) + '\n');
 " "$stage/manifest.json"
 
 (cd "$stage" && npm ci --omit=dev --ignore-scripts)
-(cd "$stage" && zip -qr "$root/kicktipp.mcpb" manifest.json package.json dist node_modules)
+if command -v zip >/dev/null; then
+  (cd "$stage" && zip -qr "$root/kicktipp.mcpb" manifest.json package.json dist node_modules)
+else
+  (cd "$stage" && python3 -m zipfile -c "$root/kicktipp.mcpb" manifest.json package.json dist node_modules)
+fi
 echo "Wrote $root/kicktipp.mcpb ($(node -p "require('./package.json').version"))"

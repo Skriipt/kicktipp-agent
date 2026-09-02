@@ -6,7 +6,7 @@
  * past its panel. Cells may arrive pre-styled; widths are measured on the
  * visible text underneath.
  */
-import { bold, dim, fg, paint, type Rgb } from './ansi.js';
+import { bold, dim, fg, paint } from './ansi.js';
 import { palette } from './theme.js';
 import { fit, visibleWidth, type Align } from './text.js';
 

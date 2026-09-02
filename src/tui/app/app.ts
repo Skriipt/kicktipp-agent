@@ -17,7 +17,6 @@ import {
   fg,
   hideCursor,
   home,
-  moveTo,
   paint,
   showCursor,
 } from './ansi.js';
@@ -28,7 +27,7 @@ import { MENU, flatItems } from './menu.js';
 import { decodeKey, type Key } from './keys.js';
 import { createScreen } from './screens.js';
 import type { AppApi, Overlay, Screen, ToastLevel } from './types.js';
-import type { DataSource } from './source.js';
+import type { LiveDataSource } from './live-source.js';
 
 const SIDEBAR_WIDTH = 26;
 const BRAND_ROWS = 1;
@@ -41,7 +40,7 @@ interface Size {
 }
 
 export class App implements AppApi {
-  readonly source: DataSource;
+  readonly source: LiveDataSource;
   matchday: number | null = null;
 
   private size: Size = { rows: 24, cols: 80 };
@@ -68,10 +67,10 @@ export class App implements AppApi {
     this.render();
   };
 
-  constructor(source: DataSource, opts: { matchday?: number | null } = {}) {
+  constructor(source: LiveDataSource, opts: { matchday?: number | null; screen?: string } = {}) {
     this.source = source;
     this.matchday = opts.matchday ?? null;
-    this.screen = createScreen(this, flatItems()[0].id);
+    this.screen = createScreen(this, opts.screen ?? flatItems()[0].id);
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────
@@ -99,8 +98,7 @@ export class App implements AppApi {
     }
   }
 
-  /** Raw mode + flowing stdin. Re-applied after any CLI spinner, because
-   *  ora's stdin-discarder pauses stdin and turns raw mode off when it stops. */
+  /** Raw mode + flowing stdin. */
   private ownInput(): void {
     const input = process.stdin;
     if (input.isTTY) input.setRawMode(true);
@@ -463,7 +461,7 @@ export class App implements AppApi {
   private renderBrand(): string {
     const ctx = this.source.getContext();
     const left = ` ${glyph.star} ${bold('kicktipp')} ${dim('control room')} `;
-    const mode = ctx.demo ? ' DEMO ' : ctx.readOnly ? ' READ-ONLY ' : '';
+    const mode = ctx.readOnly ? ' READ-ONLY ' : '';
     const right = `${mode ? paint(palette.bg, palette.gold, mode) + ' ' : ''}${dim(
       ctx.community ?? 'no community',
     )} `;
@@ -614,8 +612,7 @@ export class App implements AppApi {
               : glyph.dot;
       toastLine = ` ${fg(color, icon)} ${fg(color, truncate(this.toastState.message, cols - 4))}`;
     } else {
-      const ctx = this.source.getContext();
-      toastLine = ` ${dim(`${ctx.demo ? 'demo mode · ' : ''}${this.focus === 'nav' ? 'enter opens a screen, → works in it' : 'esc returns to the menu'}`)}`;
+      toastLine = ` ${dim(this.focus === 'nav' ? 'enter opens a screen, → works in it' : 'esc returns to the menu')}`;
     }
     return [fit(hintLine, cols), fit(toastLine, cols)];
   }

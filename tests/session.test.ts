@@ -72,7 +72,7 @@ afterEach(() => {
 describe('launchBrowser', () => {
   it('logs in and reaches an authenticated page', async () => {
     const { fetchImpl, calls } = mockFetch(kicktipp());
-    const { page } = await launchBrowser({ sessionFile, fetchImpl });
+    const page = await launchBrowser({ sessionFile, fetchImpl });
 
     expect(calls.some((c) => c.method === 'POST' && c.url === LOGIN)).toBe(true);
     await expect(getCommunities(page)).resolves.toContain('mycomm');
@@ -120,7 +120,7 @@ describe('launchBrowser', () => {
     await launchBrowser({ sessionFile, fetchImpl: first.fetchImpl });
 
     const second = mockFetch(kicktipp());
-    const { page } = await launchBrowser({ sessionFile, fetchImpl: second.fetchImpl });
+    const page = await launchBrowser({ sessionFile, fetchImpl: second.fetchImpl });
 
     expect(second.calls.some((c) => c.method === 'POST')).toBe(false);
     await expect(getCommunities(page)).resolves.toContain('mycomm');
@@ -134,7 +134,7 @@ describe('launchBrowser', () => {
     );
 
     const { fetchImpl, calls } = mockFetch(kicktipp());
-    const { page } = await launchBrowser({ sessionFile, fetchImpl });
+    const page = await launchBrowser({ sessionFile, fetchImpl });
 
     expect(calls.some((c) => c.method === 'POST' && c.url === LOGIN)).toBe(true);
     await expect(getCommunities(page)).resolves.toContain('mycomm');
@@ -224,7 +224,7 @@ describe('session-only storage', () => {
 describe('getCommunities', () => {
   it('lists single-segment community links and skips the rest', async () => {
     const { fetchImpl } = mockFetch(kicktipp());
-    const { page } = await launchBrowser({ sessionFile: null, fetchImpl });
+    const page = await launchBrowser({ sessionFile: null, fetchImpl });
 
     // Nested pages, the reserved /service link and external links are not
     // communities; /mycomm and /other are.
@@ -238,7 +238,7 @@ describe('getCommunities', () => {
 
   it('leaves out single-segment links that are not communities', async () => {
     const { fetchImpl } = mockFetch(kicktipp());
-    const { page } = await launchBrowser({ sessionFile: null, fetchImpl });
+    const page = await launchBrowser({ sessionFile: null, fetchImpl });
 
     const found = await getCommunities(page);
     // /service is reserved; /hilfe's label does not match its slug.
@@ -252,14 +252,14 @@ describe('getCommunities', () => {
         ? htmlPage('<div id="kicktipp-content"><a href="/my%20comm/">My Comm</a></div>')
         : kicktipp()(req);
     const { fetchImpl } = mockFetch(handler);
-    const { page } = await launchBrowser({ sessionFile: null, fetchImpl });
+    const page = await launchBrowser({ sessionFile: null, fetchImpl });
 
     await expect(getCommunities(page)).resolves.toEqual(['my comm']);
   });
 
   it('says the session is unauthenticated rather than returning nothing', async () => {
     const { fetchImpl } = mockFetch(kicktipp());
-    const { page } = await launchBrowser({ sessionFile: null, fetchImpl });
+    const page = await launchBrowser({ sessionFile: null, fetchImpl });
     await page.close();
 
     const loggedOut = new Page(

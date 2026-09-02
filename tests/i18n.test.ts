@@ -10,8 +10,6 @@ import {
   t,
 } from '../src/i18n/index.js';
 import { loginPage } from '../src/setup/html.js';
-import { renderScreen } from '../src/tui/render.js';
-import { initialState, type TuiRow } from '../src/tui/state.js';
 
 afterEach(() => setLanguage('en'));
 
@@ -94,34 +92,6 @@ describe('setup HTML', () => {
     expect(html).toContain('kicktipp.de');
     expect(html).toContain('name="site"');
     expect(html).toContain('name="language"');
-  });
-});
-
-describe('TUI render in German', () => {
-  it('keeps the fixture columns and uses German chrome', () => {
-    setLanguage('de');
-    const rows: TuiRow[] = [
-      {
-        home: 'Bayern',
-        away: 'BVB',
-        kickoff: null,
-        saved: null,
-        draft: '',
-        suggestion: '2:1',
-        odds: '1.50',
-        editable: true,
-      },
-    ];
-    const lines = renderScreen(initialState(rows), {
-      title: 'Spieltag 5',
-      deadline: 'in 2h 0m',
-      plain: true,
-    }).join('\n');
-    expect(lines).toContain('Nächster Anpfiff in 2h 0m');
-    expect(lines).toContain('Bayern vs BVB');
-    expect(lines).toContain('noch kein Tipp');
-    expect(lines).toContain('Vorschlag 2:1');
-    expect(lines).toContain('_:_');
   });
 });
 

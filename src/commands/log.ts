@@ -76,7 +76,7 @@ export function registerLogCommand(program: Command): void {
           }
         }
 
-        const { page } = await launchBrowser();
+        const page = await launchBrowser();
         try {
           const args = restorable.map((b) => `${b.fixture}=${b.previous}`);
           const placed = await placeBets(page, community, args, last.matchday ?? undefined, true, 'cli:bet');

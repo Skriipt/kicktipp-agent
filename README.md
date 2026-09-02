@@ -36,7 +36,7 @@ This is the least terminal-heavy path. After Node is installed, you can stay in 
 
 This is a zip Claude Desktop knows how to install. It is the same Node program, with a settings form.
 
-1. Download **[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest [GitHub release](https://github.com/christianheidorn/kicktipp-agent/releases). The file version should match the release tag, for example both `1.1.1`.
+1. Download **[kicktipp.mcpb](https://github.com/Skriipt/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest [GitHub release](https://github.com/Skriipt/kicktipp-agent/releases). The file version should match the release tag, for example both `1.1.1`.
 2. Double-click the file. Claude Desktop should offer to install it. If nothing happens, open Claude Desktop and install the file from there.
 3. Fill in the email and password you use on kicktipp.com or kicktipp.de. You can leave community blank and pick the pool later. Tick read-only if you only want Claude to look, not submit tips.
 4. Fully quit Claude Desktop. Closing the window is not enough on a Mac. Use Claude → Quit, then open it again.
@@ -67,7 +67,7 @@ The long name `kicktipp-agent-mcp` is the server binary. `kicktipp-mcp` is the s
 You keep a folder with the source, compile it, then point Claude at that file. Run these from a terminal. The last line uses `pwd` so you do not have to type the folder path by hand. Run it while you are still inside `kicktipp-agent`.
 
 ```bash
-git clone https://github.com/christianheidorn/kicktipp-agent.git
+git clone https://github.com/Skriipt/kicktipp-agent.git
 cd kicktipp-agent
 npm install
 npm run build
@@ -108,7 +108,7 @@ npx -y -p kicktipp-agent kicktipp login --web
 Clone, install libraries, compile, then `npm link` so the `kicktipp` command uses *this* folder's build:
 
 ```bash
-git clone https://github.com/christianheidorn/kicktipp-agent.git
+git clone https://github.com/Skriipt/kicktipp-agent.git
 cd kicktipp-agent
 npm install
 npm run build
@@ -139,7 +139,7 @@ npm run build
 npm test
 ```
 
-`npm run pack:mcpb` builds the Desktop `.mcpb` file yourself. If you only want to *use* Desktop, download the file from [releases](https://github.com/christianheidorn/kicktipp-agent/releases) instead.
+`npm run pack:mcpb` builds the Desktop `.mcpb` file yourself. If you only want to *use* Desktop, download the file from [releases](https://github.com/Skriipt/kicktipp-agent/releases) instead.
 
 ## CLI
 
@@ -172,7 +172,7 @@ $ kicktipp set-player
 
 | Command | Description |
 |---------|-------------|
-| `tui` | Full-screen dashboard for every feature (`--demo` to explore with sample data) |
+| `tui` | Full-screen dashboard for every feature |
 | `login` | Connect an account (`--web` opens a localhost page) |
 | `logout` | Remove stored credentials and session |
 | `communities` | List all communities you belong to |
@@ -224,14 +224,11 @@ Move through the grouped menu on the left with the arrow keys, press `enter` to 
 
 ```bash
 kicktipp tui            # live, against your account
-kicktipp tui --demo     # explore the whole interface with sample data, no login
 ```
-
-The `--demo` flag fills the dashboard with a generated Bundesliga season so you can try every screen — including the analytics — without connecting an account.
 
 ### The prediction grid (`kicktipp bet`)
 
-On a real terminal, `kicktipp bet` with no arguments opens the prediction grid: a full-screen list of the matchday. Type scores in place, take the odds-based suggestion, submit with `w`. The same grid is reachable as "Place bets" inside `kicktipp tui`.
+On a real terminal, `kicktipp bet` with no arguments opens the dashboard directly on "Place bets". Type scores in place, take the odds-based suggestion, and submit with `w`.
 
 ![The kicktipp TUI: fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
 
@@ -443,9 +440,9 @@ In a new chat, tell the assistant to set up Kicktipp unless you already signed i
 
 ### Claude Desktop, the bundle
 
-A packed `kicktipp.mcpb` is attached to every [GitHub release](https://github.com/christianheidorn/kicktipp-agent/releases). Download it from the latest release:
+A packed `kicktipp.mcpb` is attached to every [GitHub release](https://github.com/Skriipt/kicktipp-agent/releases). Download it from the latest release:
 
-**[kicktipp.mcpb](https://github.com/christianheidorn/kicktipp-agent/releases/latest/download/kicktipp.mcpb)**
+**[kicktipp.mcpb](https://github.com/Skriipt/kicktipp-agent/releases/latest/download/kicktipp.mcpb)**
 
 Double-click that file, or install it from Claude Desktop. Desktop shows a settings form: email, password, optional community slug, read-only. The password goes in the OS keychain and is passed to the local process as env. Quit and reopen Desktop.
 

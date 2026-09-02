@@ -5,7 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { localizeMatchDates } from './helpers/match-date.js';
 import { applyNotifierSettings, notifierSnapshot } from './notify/backends.js';
-import { Page, launchBrowser } from './browser.js';
+import { Page, getCommunities, getPlayers, launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, readDefaultStrategy, readUiLanguage, readUiSite } from './config.js';
 import { VERSION } from './version.js';
 import { resolveLanguage, setLanguage } from './i18n/index.js';
@@ -25,7 +25,7 @@ import { analyseRival } from './analytics/rivals.js';
 import { gapBeforeMatchday } from './analytics/gap.js';
 import { resolveRules } from './rules/resolve.js';
 import { toOddsMatches } from './analytics/odds.js';
-import { STRATEGIES, suggestBets, type StrategyName } from './analytics/strategies.js';
+import { suggestBets, type StrategyName } from './analytics/strategies.js';
 import { fetchTipStatus } from './tip-status.js';
 import {
   AuthError,
@@ -37,8 +37,6 @@ import {
   fetchOverview,
   fetchTable,
   fetchRules,
-  fetchCommunities,
-  fetchPlayers,
   fetchBonusQuestions,
   fetchMatchdayBets,
   fetchMembers,
@@ -78,7 +76,7 @@ async function getPage(): Promise<Page> {
     throw new Error(text);
   }
   try {
-    const { page } = await launchBrowser();
+    const page = await launchBrowser();
     pageInstance = page;
     return page;
   } catch (err) {
@@ -351,7 +349,7 @@ server.registerTool(
   },
   async () => withFreshSession(async () => {
     const page = await getPage();
-    const data = await fetchCommunities(page);
+    const data = await getCommunities(page);
     return jsonResult(data);
   }),
 );
@@ -366,7 +364,7 @@ server.registerTool(
   async () => withFreshSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
-    const data = await fetchPlayers(page, community);
+    const data = await getPlayers(page, community);
     return jsonResult(data);
   }),
 );
@@ -381,7 +379,7 @@ if (!readOnly) {
   },
   async ({ name }) => {
       const page = await getPage();
-      const communities = await fetchCommunities(page);
+      const communities = await getCommunities(page);
       if (!communities.includes(name)) {
         return { content: [{ type: 'text', text: JSON.stringify({ error: `Community "${name}" not found. Available: ${communities.join(', ')}` }, null, 2) }], isError: true };
       }
@@ -402,7 +400,7 @@ if (!readOnly) {
   async ({ name }) => {
       const page = await getPage();
       const community = await resolveCommunity(page);
-      const players = await fetchPlayers(page, community);
+      const players = await getPlayers(page, community);
       if (!players.includes(name)) {
         return { content: [{ type: 'text', text: JSON.stringify({ error: `Player "${name}" not found. Available: ${players.join(', ')}` }, null, 2) }], isError: true };
       }

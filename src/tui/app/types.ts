@@ -5,7 +5,7 @@
  */
 import type { Rgb } from './ansi.js';
 import type { Key } from './keys.js';
-import type { DataSource } from './source.js';
+import type { LiveDataSource } from './live-source.js';
 
 export type ToastLevel = 'info' | 'success' | 'warn' | 'error';
 
@@ -43,7 +43,7 @@ export interface Overlay {
 }
 
 export interface AppApi {
-  readonly source: DataSource;
+  readonly source: LiveDataSource;
   /** Selected matchday, or null for "current". */
   matchday: number | null;
   toast(message: string, level?: ToastLevel): void;

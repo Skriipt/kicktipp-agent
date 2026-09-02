@@ -118,7 +118,7 @@ program
   .option('--web', t('cmd.login.optionWeb'))
   .action(async (opts) => {
     if (!opts.web) {
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         await setCommunityInteractive(page);
       } finally {
@@ -159,7 +159,7 @@ program
   .option('--json', t('opt.json'))
   .action(async (opts) => {
     if (opts.json) setJsonMode(true);
-    const { page } = await launchBrowser();
+    const page = await launchBrowser();
     try {
       const communities = await getCommunities(page);
       if (opts.json) emitJson({ data: communities });
@@ -173,7 +173,7 @@ program
   .command('set-community')
   .description(t('cmd.setCommunity.description'))
   .action(async () => {
-    const { page } = await launchBrowser();
+    const page = await launchBrowser();
     await setCommunityInteractive(page);
     await page.close();
   });
@@ -214,7 +214,7 @@ program
   .option('--json', t('opt.json'))
   .action(async (opts) => {
     if (opts.json) setJsonMode(true);
-    const { page } = await launchBrowser();
+    const page = await launchBrowser();
     try {
       const community = await ensureCommunity(page);
       const players = await getPlayers(page, community);
@@ -229,7 +229,7 @@ program
   .command('set-player')
   .description(t('cmd.setPlayer.description'))
   .action(async () => {
-    const { page } = await launchBrowser();
+    const page = await launchBrowser();
     const community = await ensureCommunity(page);
     await setPlayerInteractive(page, community);
     await page.close();

@@ -1,4 +1,4 @@
-import { multiplierFor, parseScore, scoreBet, tendencyOf, type ScoringRules } from '../rules/scoring.js';
+import { multiplierFor, parseScore, scoreBet, type ScoringRules } from '../rules/scoring.js';
 import { toOddsMatches, mostLikely } from './odds.js';
 import { suggestBets, type StrategyName } from './strategies.js';
 import { typicalScore, formatScore } from './score-map.js';

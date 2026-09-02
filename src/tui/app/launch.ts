@@ -1,16 +1,13 @@
 /**
- * Entry point for the dashboard. Picks a data source (live or demo) and hands
- * control to the app until the user quits.
+ * Entry point for the dashboard.
  */
 import { silenceStatus } from '../../helpers/spinner.js';
 import { App } from './app.js';
 import { LiveDataSource } from './live-source.js';
-import { DemoDataSource } from './demo-source.js';
-import type { DataSource } from './source.js';
 
 export interface LaunchOptions {
-  demo?: boolean;
   matchday?: number | null;
+  screen?: string;
 }
 
 export async function runTui(opts: LaunchOptions = {}): Promise<void> {
@@ -19,8 +16,10 @@ export async function runTui(opts: LaunchOptions = {}): Promise<void> {
       'The dashboard needs an interactive terminal. Run `kicktipp tui` in a real terminal, or use the individual CLI commands.',
     );
   }
-  const source: DataSource = opts.demo ? new DemoDataSource() : new LiveDataSource();
-  const app = new App(source, { matchday: opts.matchday ?? null });
+  const app = new App(new LiveDataSource(), {
+    matchday: opts.matchday ?? null,
+    screen: opts.screen,
+  });
   silenceStatus(true);
   try {
     await app.run();

@@ -79,7 +79,7 @@ export function registerScenarioCommand(program: Command): void {
       if (opts.json) setJsonMode(true);
       const supplied = (results ?? []).map(parseScenarioArg);
 
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         const cache = { store: new CacheStore(community) };

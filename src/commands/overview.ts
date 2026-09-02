@@ -36,7 +36,7 @@ export function registerOverviewCommand(program: Command): void {
     .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status(t('status.loadingOverview'));

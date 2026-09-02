@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseMatchDate,
   humanDelta,
-  assumedTimeZone,
+  displayTimeZone,
   inheritPrintedDate,
   localizePrintedDate,
   formatKickoffTime,
@@ -82,8 +82,8 @@ describe('parseMatchDate', () => {
   });
 
   it('falls back to a usable zone name', () => {
-    expect(typeof assumedTimeZone()).toBe('string');
-    expect(assumedTimeZone().length).toBeGreaterThan(0);
+    expect(typeof displayTimeZone()).toBe('string');
+    expect(displayTimeZone().length).toBeGreaterThan(0);
   });
 
   it('compares calendar days in a named zone', () => {

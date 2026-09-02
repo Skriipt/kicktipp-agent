@@ -89,7 +89,7 @@ export function registerRemindCommand(program: Command): void {
       if (opts.install) return installSystemd(everyMinutes, opts.warnHours);
 
       if (opts.ics) {
-        const { page } = await launchBrowser();
+        const page = await launchBrowser();
         try {
           const community = await ensureCommunity(page);
           status(t('status.loadingKickoffs'));
@@ -127,7 +127,7 @@ export function registerNotifyCommand(program: Command): void {
     .option('--json', t('cmd.notify.optionJson'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status(t('status.checkingDeadlines'));

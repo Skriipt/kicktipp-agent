@@ -23,7 +23,7 @@ export function registerAdminCommand(program: Command): void {
     .option('--json', t('opt.json'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status(t('status.loadingMembers'));
@@ -58,7 +58,7 @@ export function registerAdminCommand(program: Command): void {
     .option('--json', t('opt.json'))
     .action(async (reference: string, opts) => {
       if (opts.json) setJsonMode(true);
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status(t('status.loadingMembers'));
@@ -90,7 +90,7 @@ export function registerAdminCommand(program: Command): void {
     .option('--yes', t('opt.yes'))
     .action(async (reference: string, bets: string[], opts) => {
       if (!opts.dryRun) assertWritable('Placing bets for another member');
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status(t('status.loadingMembers'));

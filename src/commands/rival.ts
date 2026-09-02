@@ -107,7 +107,7 @@ export function registerRivalCommand(program: Command): void {
         return;
       }
 
-      const { page } = await launchBrowser();
+      const page = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         const player = loadPlayer();
