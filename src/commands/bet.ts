@@ -1,128 +1,27 @@
 import { Command } from 'commander';
-import * as cheerio from 'cheerio';
-import { launchBrowser, dismissConsent } from '../browser.js';
-import { getPredictUrl, URL_BASE } from '../url.js';
+import { launchBrowser } from '../browser.js';
 import { ensureCommunity, ask } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
-import {
-  parseBetArg,
-  matchFixture,
-  EditableMatch,
-} from '../helpers/parse-bet-arg.js';
 import { escapeCssValue } from '../helpers/escape-css-value.js';
-
-// ── Bonus question types and helpers ───────────────────────────────
-
-interface BonusSelect {
-  name: string;
-  options: { value: string; text: string }[];
-  selected: string;
-}
-
-interface BonusQuestion {
-  question: string;
-  selects: BonusSelect[];
-}
-
-function parseBonusQuestions(
-  $: cheerio.CheerioAPI,
-  content: cheerio.Cheerio<any>,
-): BonusQuestion[] {
-  const table = content.find('table#tippabgabeFragen');
-  if (!table.length) return [];
-  const tbody = table.find('tbody');
-  if (!tbody.length) return [];
-
-  const questions: BonusQuestion[] = [];
-  tbody.children('tr').each((_, tr) => {
-    const cols = $(tr).children('td');
-    if (cols.length < 3) return;
-    const question = $(cols[1]).text().trim();
-    const selectEls = $(cols[2]).find('select');
-    if (!selectEls.length) return;
-
-    const selects: BonusSelect[] = [];
-    selectEls.each((_, sel) => {
-      const name = $(sel).attr('name')!;
-      const options: { value: string; text: string }[] = [];
-      let selected = '-1';
-      $(sel).find('option').each((_, opt) => {
-        const value = $(opt).attr('value') || '';
-        const text = $(opt).text().trim();
-        if (value !== '-1') options.push({ value, text });
-        if ($(opt).attr('selected') !== undefined) selected = value;
-      });
-      selects.push({ name, options, selected });
-    });
-
-    questions.push({ question, selects });
-  });
-
-  return questions;
-}
-
-function parseBonusBetArg(arg: string): { question: string; answer: string } {
-  if (!arg.includes('=')) {
-    throw new Error(
-      `Invalid bonus bet '${arg}'. Use format: "Question text=Answer"`,
-    );
-  }
-  const eqIdx = arg.lastIndexOf('=');
-  const question = arg.slice(0, eqIdx).trim();
-  const answer = arg.slice(eqIdx + 1).trim();
-  if (!question || !answer) {
-    throw new Error(
-      `Invalid bonus bet '${arg}'. Both question and answer required.`,
-    );
-  }
-  return { question, answer };
-}
-
-function findQuestion(
-  questionText: string,
-  questions: BonusQuestion[],
-): BonusQuestion {
-  const match = questions.find(
-    (q) => q.question.toLowerCase() === questionText.toLowerCase(),
-  );
-  if (!match) {
-    console.error(`No bonus question found matching: "${questionText}"`);
-    console.error('Available questions:');
-    questions.forEach((q) => console.error(`  - ${q.question}`));
-    process.exit(1);
-  }
-  return match;
-}
-
-function findOption(
-  answerText: string,
-  select: BonusSelect,
-  questionText: string,
-): { value: string; text: string } {
-  const match = select.options.find(
-    (o) => o.text.toLowerCase() === answerText.toLowerCase(),
-  );
-  if (!match) {
-    console.error(
-      `No option "${answerText}" found for question "${questionText}"`,
-    );
-    console.error('Available options:');
-    select.options.forEach((o) => console.error(`  - ${o.text}`));
-    process.exit(1);
-  }
-  return match;
-}
+import { assertWritable } from '../read-only.js';
+import {
+  fetchBonusQuestions,
+  loadMatchPredictPage,
+  placeBets,
+  placeBonusBets,
+  type BonusQuestion,
+} from '../core.js';
+import { appendAudit } from '../audit/log.js';
+import { inheritPrintedDate, localizePrintedDate } from '../helpers/match-date.js';
+import { runBettingTui } from '../tui/run.js';
+import { t } from '../i18n/index.js';
 
 // ── Match betting helpers ──────────────────────────────────────────
 
 async function interactiveMatchBets(page: any, community: string, matchday?: number): Promise<void> {
-  status('Loading bets...');
-  await page.goto(getPredictUrl(community, matchday));
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
+  status(t('status.loadingBets'));
+  const $ = await loadMatchPredictPage(page, community, matchday);
   statusClear();
-
-  const $ = cheerio.load(await page.content());
   const content = $('#kicktipp-content');
 
   const titleDiv = content.find('div.pagetitle');
@@ -131,7 +30,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
 
   const tbody = content.find('tbody');
   if (!tbody.length) {
-    console.log('No matches found.');
+    console.log(t('common.noMatches'));
     return;
   }
 
@@ -144,6 +43,7 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
     gastName: string;
   }
   const editable: EditableRow[] = [];
+  let lastDate = '';
 
   tbody.find('tr').each((_, tr) => {
     const cols = $(tr).find('td');
@@ -153,7 +53,8 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
     const heimInput = betTd.find('input[id$="_heimTipp"]');
     const gastInput = betTd.find('input[id$="_gastTipp"]');
     if (!heimInput.length || !gastInput.length) return;
-    const date = $(cols[0]).text().trim();
+    const date = inheritPrintedDate($(cols[0]).text(), lastDate);
+    lastDate = date;
     const home = $(cols[1]).text().trim();
     const away = $(cols[2]).text().trim();
     const currentH = heimInput.attr('value') || '';
@@ -171,181 +72,60 @@ async function interactiveMatchBets(page: any, community: string, matchday?: num
   });
 
   if (!editable.length) {
-    console.log('No editable matches found.');
+    console.log(t('bet.noEditable'));
     return;
   }
 
-  let changed = false;
+  const chosen: string[] = [];
   for (const row of editable) {
-    let prompt = `  ${row.date} ${row.home} vs ${row.away} `;
+    let prompt = `  ${localizePrintedDate(row.date)} ${row.home} vs ${row.away} `;
     if (row.current) prompt += `[${row.current}] `;
-    prompt += '(e.g. 2:1, Enter to skip): ';
+    prompt += t('bet.promptSkip');
     const answer = (await ask(prompt)).trim();
     if (!answer) continue;
     const parts = answer.replace('-', ':').split(':');
     if (parts.length !== 2) {
-      console.log('    Invalid format, skipping.');
+      console.log(t('bet.invalidFormat'));
       continue;
     }
     const h = parseInt(parts[0]);
     const g = parseInt(parts[1]);
     if (isNaN(h) || isNaN(g)) {
-      console.log('    Invalid format, skipping.');
+      console.log(t('bet.invalidFormat'));
       continue;
     }
-    const heimEl = await page.$(`input[name="${escapeCssValue(row.heimName)}"]`);
-    const gastEl = await page.$(`input[name="${escapeCssValue(row.gastName)}"]`);
-    if (heimEl) await heimEl.fill(String(h));
-    if (gastEl) await gastEl.fill(String(g));
-    changed = true;
+    chosen.push(`${row.home} vs ${row.away}=${h}:${g}`);
   }
 
-  if (changed) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
-    console.log('\nBets saved.');
-  } else {
-    console.log('\nNo changes made.');
+  if (!chosen.length) {
+    console.log('\n' + t('common.noChanges'));
+    return;
   }
+
+  // Same submission path as the non-interactive form, so the log records it.
+  await placeBets(page, community, chosen, matchday, true, 'cli:bet');
+  console.log('\n' + t('common.betsSaved'));
 }
 
 async function fixtureBets(page: any, community: string, bets: string[], matchday?: number): Promise<void> {
-  status('Loading bets...');
-  await page.goto(getPredictUrl(community, matchday));
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
+  // Delegates to core.placeBets rather than repeating its fixture matching
+  // and form filling, so this path is validated and audited like every other.
+  status(t('status.loadingBets'));
+  const placed = await placeBets(page, community, bets, matchday, true, 'cli:bet');
   statusClear();
-
-  const $ = cheerio.load(await page.content());
-  const tbody = $('#kicktipp-content tbody');
-  if (!tbody.length) {
-    console.log('No matches found.');
-    return;
+  for (const bet of placed) {
+    console.log(`  ${bet.home} vs ${bet.away} - ${bet.homeGoals}:${bet.awayGoals}`);
   }
-
-  const editable: EditableMatch[] = [];
-  tbody.find('tr').each((_, tr) => {
-    const cols = $(tr).find('td');
-    if (cols.length < 5) return;
-    const betTd = $(cols[3]);
-    if (betTd.hasClass('nichttippbar')) return;
-    const heimInput = betTd.find('input[id$="_heimTipp"]');
-    const gastInput = betTd.find('input[id$="_gastTipp"]');
-    if (!heimInput.length || !gastInput.length) return;
-    editable.push({
-      home: $(cols[1]).text().trim(),
-      away: $(cols[2]).text().trim(),
-      heimName: heimInput.attr('name')!,
-      gastName: gastInput.attr('name')!,
-    });
-  });
-
-  if (!editable.length) {
-    console.log('No editable matches found.');
-    return;
-  }
-
-  const parsed: { entry: EditableMatch; h: number; g: number }[] = [];
-  const seen = new Set<string>();
-  for (const arg of bets) {
-    const { home, away, h, g } = parseBetArg(arg);
-    const key = `${home.toLowerCase()}|${away.toLowerCase()}`;
-    if (seen.has(key)) {
-      console.error(`Duplicate fixture: "${home} vs ${away}"`);
-      process.exit(1);
-    }
-    seen.add(key);
-    const entry = matchFixture(home, away, editable);
-    parsed.push({ entry, h, g });
-  }
-
-  for (const { entry, h, g } of parsed) {
-    console.log(`  ${entry.home} vs ${entry.away} - ${h}:${g}`);
-    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
-    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
-    if (heimEl) await heimEl.fill(String(h));
-    if (gastEl) await gastEl.fill(String(g));
-  }
-
-  await Promise.all([
-    page.waitForNavigation(),
-    page.click('button[name="submitbutton"]'),
-  ]);
-  console.log('\nBets saved.');
+  console.log('\n' + t('common.betsSaved'));
 }
 
 // ── Bonus betting helpers ──────────────────────────────────────────
 
-async function bonusBetsNonInteractive(
-  page: any,
-  questions: BonusQuestion[],
-  bets: string[],
-): Promise<void> {
-  interface ParsedBet {
-    selectName: string;
-    value: string;
-    questionText: string;
-    answerText: string;
-  }
-  const parsed: ParsedBet[] = [];
-
-  const argsByQuestion = new Map<string, string[]>();
-  for (const arg of bets) {
-    const { question, answer } = parseBonusBetArg(arg);
-    const key = question.toLowerCase();
-    if (!argsByQuestion.has(key)) {
-      argsByQuestion.set(key, []);
-    }
-    argsByQuestion.get(key)!.push(answer);
-  }
-
-  for (const [, answers] of argsByQuestion) {
-    const q = findQuestion(answers[0], questions);
-    const firstArg = bets.find((b) => {
-      const { question } = parseBonusBetArg(b);
-      return question.toLowerCase() === q.question.toLowerCase();
-    })!;
-    const { question: qText } = parseBonusBetArg(firstArg);
-
-    if (answers.length > q.selects.length) {
-      console.error(
-        `Too many answers for "${q.question}": got ${answers.length}, max ${q.selects.length}`,
-      );
-      process.exit(1);
-    }
-
-    const usedValues = new Set<string>();
-    for (let i = 0; i < answers.length; i++) {
-      const option = findOption(answers[i], q.selects[i], q.question);
-      if (usedValues.has(option.value)) {
-        console.error(
-          `Duplicate answer "${answers[i]}" for "${q.question}"`,
-        );
-        process.exit(1);
-      }
-      usedValues.add(option.value);
-      parsed.push({
-        selectName: q.selects[i].name,
-        value: option.value,
-        questionText: q.question,
-        answerText: option.text,
-      });
-    }
-  }
-
-  for (const { selectName, value, questionText, answerText } of parsed) {
-    console.log(`  ${questionText} → ${answerText}`);
-    await page.selectOption(`select[name="${escapeCssValue(selectName)}"]`, value);
-  }
-}
-
 async function bonusBetsInteractive(
   page: any,
   questions: BonusQuestion[],
-): Promise<boolean> {
-  let changed = false;
+): Promise<{ question: string; answer: string }[]> {
+  const applied: { question: string; answer: string }[] = [];
   for (const q of questions) {
     console.log(`\n  ${q.question}`);
 
@@ -357,21 +137,21 @@ async function bonusBetsInteractive(
       const currentText = currentOption ? currentOption.text : '---';
 
       if (q.selects.length > 1) {
-        console.log(`    Slot ${si + 1}/${q.selects.length}:`);
+        console.log(t('bet.slot', { n: si + 1, total: q.selects.length }));
       }
       sel.options.forEach((o, i) =>
         console.log(`    [${i + 1}] ${o.text}`),
       );
 
-      let prompt = `    Select`;
+      let prompt = t('bet.select');
       if (currentText !== '---') prompt += ` [${currentText}]`;
-      prompt += ' (Enter to skip): ';
+      prompt += t('bet.selectSkip');
       const answer = (await ask(prompt)).trim();
 
       if (!answer) continue;
       const idx = parseInt(answer) - 1;
       if (isNaN(idx) || idx < 0 || idx >= sel.options.length) {
-        console.log('    Invalid selection, skipping.');
+        console.log(t('bet.invalidSkip'));
         continue;
       }
 
@@ -380,46 +160,59 @@ async function bonusBetsInteractive(
         sel.options[idx].value,
       );
       console.log(`    → ${sel.options[idx].text}`);
-      changed = true;
+      applied.push({ question: q.question, answer: sel.options[idx].text });
     }
   }
-  return changed;
+  return applied;
 }
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
-  status('Loading bonus questions...');
-  await page.goto(`${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
-  statusClear();
-
-  const $ = cheerio.load(await page.content());
-  const content = $('#kicktipp-content');
-  const questions = parseBonusQuestions($, content);
-
-  if (!questions.length) {
-    console.log('No editable bonus questions found.');
+  if (bets && bets.length > 0) {
+    status(t('status.loadingBonus'));
+    const applied = await placeBonusBets(page, community, bets, true, 'cli:bet');
+    statusClear();
+    for (const a of applied) console.log(`  ${a.question} → ${a.answer}`);
+    console.log('\n' + t('common.bonusSaved'));
     return;
   }
 
-  let changed = false;
+  status(t('status.loadingBonus'));
+  const questions = await fetchBonusQuestions(page, community);
+  statusClear();
 
-  if (bets && bets.length > 0) {
-    await bonusBetsNonInteractive(page, questions, bets);
-    changed = true;
-  } else {
-    changed = await bonusBetsInteractive(page, questions);
+  if (!questions.length) {
+    console.log(t('bet.noBonus'));
+    return;
   }
 
-  if (changed) {
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('button[name="submitbutton"]'),
-    ]);
-    console.log('\nBonus bets saved.');
-  } else {
-    console.log('\nNo changes made.');
+  const applied = await bonusBetsInteractive(page, questions);
+  if (!applied.length) {
+    console.log('\n' + t('common.noChanges'));
+    return;
   }
+
+  const record = {
+    at: new Date().toISOString(),
+    source: 'cli:bet' as const,
+    community,
+    matchday: null,
+    kind: 'bonus' as const,
+    dryRun: false,
+    bets: applied.map((a) => ({ fixture: a.question, bet: a.answer, previous: null })),
+  };
+  appendAudit({ ...record, outcome: 'intent' });
+  try {
+    await page.click('button[name="submitbutton"]');
+  } catch (err) {
+    appendAudit({
+      ...record,
+      at: new Date().toISOString(),
+      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
+    });
+    throw err;
+  }
+  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+  console.log('\n' + t('common.bonusSaved'));
 }
 
 // ── Command registration ───────────────────────────────────────────
@@ -427,14 +220,24 @@ async function bonusBets(page: any, community: string, bets: string[]): Promise<
 export function registerBetCommand(program: Command): void {
   program
     .command('bet')
-    .description(
-      'Place bets. Interactive if no args, or pass "Home vs Away=H:G" args. Use --bonus for bonus questions.',
-    )
-    .argument('[bets...]', 'Bets: "Home vs Away=H:G" or with --bonus "Question=Answer"')
-    .option('--matchday <n>', 'Matchday number (1-34)', parseInt)
-    .option('--bonus', 'Place bonus question bets')
+    .description(t('cmd.bet.description'))
+    .argument('[bets...]', t('cmd.bet.argument'))
+    .option('--matchday <n>', t('opt.matchday'), parseInt)
+    .option('--bonus', t('opt.bonusBet'))
+    .option('--tui', t('opt.tui'))
+    .option('--no-tui', t('opt.noTui'))
     .action(async (bets: string[], opts) => {
-      const { browser, page } = await launchBrowser();
+      assertWritable('Placing bets');
+
+      // The full-screen view is for interactive match betting only: with
+      // fixtures given as arguments there is nothing to navigate, and it
+      // needs a real terminal to read keys from.
+      const wantsTui = opts.tui !== false && !opts.bonus && (!bets || bets.length === 0);
+      if (wantsTui && (opts.tui === true || (process.stdin.isTTY && process.stdout.isTTY))) {
+        await runBettingTui({ matchday: opts.matchday });
+        return;
+      }
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
 
@@ -446,7 +249,7 @@ export function registerBetCommand(program: Command): void {
           await interactiveMatchBets(page, community, opts.matchday);
         }
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

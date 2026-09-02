@@ -38,7 +38,7 @@ export function registerTipStatusCommand(program: Command): void {
         return;
       }
 
-      const { browser, page } = await launchBrowser();
+      const { page } = await launchBrowser();
       try {
         const community = await ensureCommunity(page);
         status('Loading tip status...');
@@ -72,7 +72,7 @@ export function registerTipStatusCommand(program: Command): void {
         );
       } finally {
         statusClear();
-        await browser.close();
+        await page.close();
       }
     });
 }

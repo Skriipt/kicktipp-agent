@@ -1,0 +1,86 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "kicktipp",
+  "display_name": "Kicktipp",
+  "version": "1.2.0",
+  "description": "CLI and MCP server for kicktipp.com and kicktipp.de prediction pools.",
+  "author": {
+    "name": "Christian Heidorn",
+    "url": "https://github.com/christianheidorn/kicktipp-agent"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/christianheidorn/kicktipp-agent"
+  },
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/server.js"
+      ],
+      "env": {
+        "KICKTIPP_EMAIL": "${user_config.email}",
+        "KICKTIPP_PASSWORD": "${user_config.password}",
+        "KICKTIPP_COMMUNITY": "${user_config.community}",
+        "KICKTIPP_READ_ONLY": "${user_config.read_only}",
+        "KICKTIPP_LANG": "${user_config.language}",
+        "KICKTIPP_SITE": "${user_config.site}"
+      }
+    }
+  },
+  "user_config": {
+    "email": {
+      "type": "string",
+      "title": "Email",
+      "description": "Your kicktipp.com (or kicktipp.de) login email.",
+      "required": true
+    },
+    "password": {
+      "type": "string",
+      "title": "Password",
+      "description": "Stored in the OS keychain. The assistant never sees it.",
+      "sensitive": true,
+      "required": true
+    },
+    "community": {
+      "type": "string",
+      "title": "Community",
+      "description": "Pool slug, for example capetowntipper26-27. Leave blank to pick it later.",
+      "required": false
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Hide betting and settings tools. The assistant can look, not submit.",
+      "default": false,
+      "required": false
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "UI language for the setup page and CLI chrome. en (default) or de.",
+      "required": false
+    },
+    "site": {
+      "type": "string",
+      "title": "Site",
+      "description": "Kicktipp host: de for kicktipp.de, or com (default) for kicktipp.com.",
+      "required": false
+    }
+  },
+  "tools_generated": true,
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=20"
+    }
+  }
+}

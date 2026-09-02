@@ -1,144 +1,190 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import {
+  getPredictUrl,
+  getBonusPredictUrl,
+  getLeaderboardUrl,
+  getScheduleUrl,
+  getOverviewUrl,
+  getTableUrl,
+  getRulesUrl,
+  getCommunitiesUrl,
+  getAlternateUrls,
+  parseSite,
+  resolveBaseUrl,
+  urlBase,
+  urlLogin,
+} from '../src/url.js';
 
-afterEach(() => {
-  delete process.env.KICKTIPP_BASE_URL;
+// The host is resolved from the environment at import time, so exercising a
+// different host means re-importing the module with the env var stubbed.
+async function withBase(base: string) {
   vi.resetModules();
-});
-
-async function loadUrls(baseUrl?: string) {
-  if (baseUrl) process.env.KICKTIPP_BASE_URL = baseUrl;
-  else delete process.env.KICKTIPP_BASE_URL;
-  vi.resetModules();
+  vi.stubEnv('KICKTIPP_BASE_URL', base);
   return import('../src/url.js');
 }
 
-describe('Kicktipp URL builders', () => {
-  it('uses kicktipp.de and German routes by default', async () => {
-    const {
-      URL_BASE,
-      URL_LOGIN,
-      getCommunitiesUrl,
-      getPredictUrl,
-      getBonusPredictUrl,
-      getLeaderboardUrl,
-      getScheduleUrl,
-      getOverviewUrl,
-      getTableUrl,
-      getRulesUrl,
-    } = await loadUrls();
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
-    expect(URL_BASE).toBe('https://www.kicktipp.de');
-    expect(URL_LOGIN).toBe('https://www.kicktipp.de/info/profil/login');
+describe('default host', () => {
+  it('stays on kicktipp.com with English paths', () => {
+    expect(urlBase()).toBe('https://www.kicktipp.com');
+    expect(urlLogin()).toBe('https://www.kicktipp.com/info/profil/login');
     expect(getCommunitiesUrl()).toBe(
-      'https://www.kicktipp.de/info/profil/meinetipprunden',
+      'https://www.kicktipp.com/info/profil/meinetipprunden',
     );
-    expect(getPredictUrl('my comm')).toBe(
-      'https://www.kicktipp.de/my%20comm/tippabgabe',
+  });
+});
+
+describe('getPredictUrl', () => {
+  it('without matchday', () => {
+    expect(getPredictUrl('mycomm')).toBe('https://www.kicktipp.com/mycomm/predict');
+  });
+
+  it('with matchday', () => {
+    expect(getPredictUrl('mycomm', 5)).toBe(
+      'https://www.kicktipp.com/mycomm/predict?spieltagIndex=5',
     );
+  });
+
+  it('throws on invalid matchday', () => {
+    expect(() => getPredictUrl('mycomm', 42)).toThrow(RangeError);
+    expect(() => getPredictUrl('mycomm', 0)).toThrow(RangeError);
+    expect(() => getPredictUrl('mycomm', 1.5)).toThrow(RangeError);
+  });
+
+  it('encodes the community', () => {
+    expect(getPredictUrl('my comm')).toBe('https://www.kicktipp.com/my%20comm/predict');
+  });
+
+  it('builds the bonus variant', () => {
     expect(getBonusPredictUrl('mycomm')).toBe(
-      'https://www.kicktipp.de/mycomm/tippabgabe?bonus=true',
+      'https://www.kicktipp.com/mycomm/predict?bonus=true',
     );
-    expect(getLeaderboardUrl('mycomm', 5, true)).toBe(
-      'https://www.kicktipp.de/mycomm/tippuebersicht?bonus=true&spieltagIndex=5',
-    );
-    expect(getScheduleUrl('mycomm', 5)).toBe(
-      'https://www.kicktipp.de/mycomm/tippspielplan?spieltagIndex=5',
-    );
-    expect(getOverviewUrl('mycomm', 'spieltagspunkte')).toBe(
-      'https://www.kicktipp.de/mycomm/gesamtuebersicht?ansicht=spieltagspunkte',
-    );
-    expect(getTableUrl('mycomm', 'home')).toBe(
-      'https://www.kicktipp.de/mycomm/tabellen?option=heim',
-    );
-    expect(getRulesUrl('mycomm')).toBe(
-      'https://www.kicktipp.de/mycomm/spielregeln',
+  });
+});
+
+describe('other page URLs', () => {
+  it('leaderboard with bonus and matchday', () => {
+    expect(getLeaderboardUrl('c')).toBe('https://www.kicktipp.com/c/leaderboard');
+    expect(getLeaderboardUrl('c', 3, true)).toBe(
+      'https://www.kicktipp.com/c/leaderboard?bonus=true&spieltagIndex=3',
     );
   });
 
-  it('uses kicktipp.com and English routes when configured', async () => {
-    const {
-      URL_BASE,
-      URL_LOGIN,
-      getCommunitiesUrl,
-      getPredictUrl,
-      getLeaderboardUrl,
-      getScheduleUrl,
-      getOverviewUrl,
-      getTableUrl,
-      getRulesUrl,
-    } = await loadUrls('https://www.kicktipp.com/');
+  it('schedule, overview, table, rules', () => {
+    expect(getScheduleUrl('c', 2)).toBe(
+      'https://www.kicktipp.com/c/schedule?spieltagIndex=2',
+    );
+    expect(getOverviewUrl('c', 'spieltagspunkte')).toBe(
+      'https://www.kicktipp.com/c/overview?ansicht=spieltagspunkte',
+    );
+    expect(getTableUrl('c')).toBe('https://www.kicktipp.com/c/tables');
+    expect(getTableUrl('c', 'home')).toBe('https://www.kicktipp.com/c/tables?option=heim');
+    expect(getTableUrl('c', 'away')).toBe('https://www.kicktipp.com/c/tables?option=gast');
+    expect(getRulesUrl('c')).toBe('https://www.kicktipp.com/c/rules');
+  });
+});
 
-    expect(URL_BASE).toBe('https://www.kicktipp.com');
-    expect(URL_LOGIN).toBe('https://www.kicktipp.com/info/profile/login');
-    expect(getCommunitiesUrl()).toBe(
-      'https://www.kicktipp.com/info/profile/prediction-games',
+describe('KICKTIPP_BASE_URL override', () => {
+  it('switches kicktipp.de to German paths', async () => {
+    const url = await withBase('https://www.kicktipp.de');
+    expect(url.urlBase()).toBe('https://www.kicktipp.de');
+    expect(url.getPredictUrl('c', 4)).toBe(
+      'https://www.kicktipp.de/c/tippabgabe?spieltagIndex=4',
     );
-    expect(getPredictUrl('mycomm')).toBe(
-      'https://www.kicktipp.com/mycomm/predict',
-    );
-    expect(getLeaderboardUrl('mycomm')).toBe(
-      'https://www.kicktipp.com/mycomm/leaderboard',
-    );
-    expect(getScheduleUrl('mycomm')).toBe(
-      'https://www.kicktipp.com/mycomm/schedule',
-    );
-    expect(getOverviewUrl('mycomm', 'platzierungen')).toBe(
-      'https://www.kicktipp.com/mycomm/overview?ansicht=platzierungen',
-    );
-    expect(getTableUrl('mycomm', 'away')).toBe(
-      'https://www.kicktipp.com/mycomm/tables?option=gast',
-    );
-    expect(getRulesUrl('mycomm')).toBe(
-      'https://www.kicktipp.com/mycomm/rules',
-    );
+    expect(url.getLeaderboardUrl('c')).toBe('https://www.kicktipp.de/c/tippuebersicht');
+    expect(url.getScheduleUrl('c')).toBe('https://www.kicktipp.de/c/tippspielplan');
+    expect(url.getTableUrl('c')).toBe('https://www.kicktipp.de/c/tabellen');
+    expect(url.getRulesUrl('c')).toBe('https://www.kicktipp.de/c/spielregeln');
   });
 
-  it('normalizes older direct routes to the selected host language', async () => {
-    const { normalizeKicktippUrl } = await loadUrls();
+  it('normalizes a base with a path or trailing slash', async () => {
+    const url = await withBase('https://www.kicktipp.de/some/path/');
+    expect(url.urlBase()).toBe('https://www.kicktipp.de');
+  });
+});
 
+describe('parseSite', () => {
+  it('accepts de, com, and full URLs', () => {
+    expect(parseSite('de')).toBe('https://www.kicktipp.de');
+    expect(parseSite('COM')).toBe('https://www.kicktipp.com');
+    expect(parseSite('https://www.kicktipp.de/foo')).toBe('https://www.kicktipp.de');
+    expect(parseSite('')).toBeUndefined();
+  });
+
+  it('rejects unknown values', () => {
+    expect(() => parseSite('fr')).toThrow(/Unknown site 'fr'/);
+  });
+});
+
+describe('resolveBaseUrl', () => {
+  it('prefers the flag, then the full URL env, then KICKTIPP_SITE, then config', () => {
     expect(
-      normalizeKicktippUrl(
-        'https://www.kicktipp.de/mycomm/schedule?spieltagIndex=5',
-      ),
-    ).toBe(
-      'https://www.kicktipp.de/mycomm/tippspielplan?spieltagIndex=5',
-    );
+      resolveBaseUrl({
+        argv: ['kicktipp', '--site', 'de'],
+        env: { KICKTIPP_BASE_URL: 'https://www.kicktipp.com', KICKTIPP_SITE: 'com' },
+        configSite: 'com',
+      }),
+    ).toBe('https://www.kicktipp.de');
     expect(
-      normalizeKicktippUrl(
-        'https://www.kicktipp.de/mycomm/predict?bonus=true',
-      ),
-    ).toBe(
-      'https://www.kicktipp.de/mycomm/tippabgabe?bonus=true',
+      resolveBaseUrl({
+        argv: ['kicktipp'],
+        env: { KICKTIPP_BASE_URL: 'https://www.kicktipp.de' },
+        configSite: 'com',
+      }),
+    ).toBe('https://www.kicktipp.de');
+    expect(
+      resolveBaseUrl({
+        argv: ['kicktipp'],
+        env: { KICKTIPP_SITE: 'de' },
+        configSite: 'com',
+      }),
+    ).toBe('https://www.kicktipp.de');
+    expect(resolveBaseUrl({ argv: ['kicktipp'], env: {}, configSite: 'de' })).toBe(
+      'https://www.kicktipp.de',
     );
-  });
-
-  it('normalizes German routes back to English on kicktipp.com', async () => {
-    const { normalizeKicktippUrl } = await loadUrls(
+    expect(resolveBaseUrl({ argv: ['kicktipp'], env: {}, configSite: null })).toBe(
       'https://www.kicktipp.com',
     );
+  });
+});
 
-    expect(
-      normalizeKicktippUrl(
-        'https://www.kicktipp.com/mycomm/tippuebersicht?spieltagIndex=2',
-      ),
-    ).toBe(
-      'https://www.kicktipp.com/mycomm/leaderboard?spieltagIndex=2',
-    );
+describe('getAlternateUrls', () => {
+  it('offers the German page on the German host', () => {
+    const alts = getAlternateUrls('https://www.kicktipp.com/c/predict');
+    expect(alts).toContain('https://www.kicktipp.de/c/tippabgabe');
+    expect(alts).toContain('https://www.kicktipp.com/c/tippabgabe');
+    expect(alts).toContain('https://www.kicktipp.de/c/predict');
   });
 
-  it('leaves non-Kicktipp URLs unchanged', async () => {
-    const { normalizeKicktippUrl } = await loadUrls();
-    expect(normalizeKicktippUrl('https://example.com/schedule')).toBe(
-      'https://example.com/schedule',
-    );
+  it('never includes the input URL', () => {
+    const input = 'https://www.kicktipp.com/c/predict';
+    expect(getAlternateUrls(input)).not.toContain(input);
   });
 
-  it('rejects invalid matchdays for every matchday URL', async () => {
-    const { getPredictUrl, getLeaderboardUrl, getScheduleUrl } =
-      await loadUrls();
+  it('preserves the query string', () => {
+    const alts = getAlternateUrls('https://www.kicktipp.com/c/leaderboard?spieltagIndex=7');
+    expect(alts).toContain('https://www.kicktipp.de/c/tippuebersicht?spieltagIndex=7');
+    expect(alts.every((u) => u.includes('spieltagIndex=7'))).toBe(true);
+  });
 
-    expect(() => getPredictUrl('mycomm', 0)).toThrow();
-    expect(() => getLeaderboardUrl('mycomm', 35)).toThrow();
-    expect(() => getScheduleUrl('mycomm', 42)).toThrow();
+  it('covers the profile routes', () => {
+    const alts = getAlternateUrls('https://www.kicktipp.com/info/profil/meinetipprunden');
+    expect(alts).toContain('https://www.kicktipp.com/info/profile/prediction-games');
+    expect(alts).toContain('https://www.kicktipp.de/info/profil/meinetipprunden');
+  });
+
+  it('keeps an unknown path unchanged apart from the host', () => {
+    const alts = getAlternateUrls('https://www.kicktipp.com/c/unknown-page');
+    expect(alts).toEqual(['https://www.kicktipp.de/c/unknown-page']);
+  });
+
+  it('does not double-encode an encoded community', () => {
+    const alts = getAlternateUrls('https://www.kicktipp.com/my%20comm/predict');
+    expect(alts).toContain('https://www.kicktipp.de/my%20comm/tippabgabe');
+    expect(alts.every((u) => !u.includes('%2520'))).toBe(true);
   });
 });

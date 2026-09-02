@@ -1,6 +1,7 @@
 import { Command } from 'commander';
+import { t } from '../i18n/index.js';
 
-function getGuideText(): string {
+export function getGuideText(): string {
   return `# kicktipp CLI — Agent Guide
 
 kicktipp is a CLI for Kicktipp, a football prediction game.
@@ -15,8 +16,16 @@ prompts for Kicktipp credentials (stored in ~/.config/kicktipp-agent/).
 
   kicktipp set-community          # interactive picker (prompts for number)
   kicktipp set-player             # interactive — identifies you in leaderboards
+  kicktipp set-notify             # interactive — desktop, webhook, or command
+  kicktipp set-lang de            # keep German UI chrome (or en)
+  kicktipp set-site de            # start on kicktipp.de (or com)
 
 These are interactive commands that require stdin. Run them once during setup.
+Non-interactive forms (safe for agents):
+
+  kicktipp set-notify desktop
+  kicktipp set-notify webhook https://ntfy.sh/your-topic
+  kicktipp set-notify command /path/to/hook
 
 ## Non-interactive commands (safe for automation)
 
@@ -62,7 +71,8 @@ These are interactive commands that require stdin. Run them once during setup.
   kicktipp bet --bonus "Question text=Answer"
 
   Question and answer must match exactly (case-insensitive) as shown on the
-  bonus page. Multiple answers for the same question (multi-select):
+  bonus page. Multiple answers for the same question (ranking / relegation):
+  repeat the question once per dropdown in a single command, in slot order.
 
   kicktipp bet --bonus "Who will be champion?=FC Bayern München" "Who will be champion?=Borussia Dortmund"
 
@@ -72,6 +82,7 @@ These are interactive commands that require stdin. Run them once during setup.
   kicktipp bet --bonus            # prompts per bonus question with numbered options
   kicktipp set-community          # pick community from numbered list
   kicktipp set-player             # pick player from numbered list
+  kicktipp set-notify             # pick a notifier backend
 
 ## Common workflows
 
@@ -114,7 +125,7 @@ Exit code 0 on success, 1 on error.
 export function registerGuideCommand(program: Command): void {
   program
     .command('guide')
-    .description('Print a detailed usage guide (useful for LLM agents)')
+    .description(t('cmd.guide.description'))
     .action(() => {
       console.log(getGuideText());
     });

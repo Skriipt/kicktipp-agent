@@ -1,6 +1,5 @@
-import { Page } from 'playwright';
+import type { Page } from './http/page.js';
 import * as cheerio from 'cheerio';
-import { dismissConsent } from './browser.js';
 import { getLeaderboardUrl } from './url.js';
 
 export type TipStatusKind = 'complete' | 'partial' | 'missing';
@@ -118,7 +117,5 @@ export async function fetchTipStatus(
   matchday?: number,
 ): Promise<TipStatusData> {
   await page.goto(getLeaderboardUrl(community, matchday));
-  await page.waitForLoadState('domcontentloaded');
-  await dismissConsent(page);
   return parseTipStatusHtml(await page.content());
 }
