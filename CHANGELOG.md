@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-03
+
+### Changed
+
+- Match, bonus, and Spielleiter submissions now share one audited submit lifecycle.
+- Personal and Spielleiter match bets now share the same parsing, duplicate detection, and form-filling path.
+- Offline cache reads and CLI community selection use one implementation each.
+- Builds clear stale compiler output before creating packages.
+- Locked transitive dependencies were refreshed to patched releases within the existing version ranges.
+
+### Removed
+
+- Unused terminal rendering helpers and an unnecessary dashboard type module.
+- The stale `.env.example`, whose removal was already documented in 1.1.0.
+
 ## [1.2.1] - 2026-09-02
 
 ### Added

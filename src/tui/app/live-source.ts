@@ -41,15 +41,35 @@ import { analyseRival } from '../../analytics/rivals.js';
 import { projectStandings, type HypotheticalResult } from '../../analytics/scenarios.js';
 import { gapBeforeMatchday } from '../../analytics/gap.js';
 import { toOddsMatches } from '../../analytics/odds.js';
-import { suggestBets, type StrategyName } from '../../analytics/strategies.js';
+import {
+  suggestBets,
+  type StrategyName,
+  type SuggestedBet,
+} from '../../analytics/strategies.js';
 import { buildDeadlineReport } from '../../analytics/deadline.js';
 import { resolveRules, resolveRulesFromCache } from '../../rules/resolve.js';
+import type { ResolvedRules } from '../../rules/scoring.js';
 import { readAudit } from '../../audit/log.js';
 import { notifierSnapshot, applyNotifierSettings } from '../../notify/backends.js';
 import { saveNotifySection } from '../../config.js';
 import { syncSeason, type SyncOptions } from '../../cache/sync.js';
 import { getGuideText } from '../../commands/guide.js';
-import type { AppContext, CacheInfo, SuggestOutcome } from './source.js';
+
+export interface CacheInfo {
+  community: string;
+  dir: string;
+  sizeBytes: number;
+  lastSync: string | null;
+  knownMatchdays: number | null;
+  matchdays: number[];
+}
+
+export interface SuggestOutcome {
+  strategy: StrategyName;
+  matchday: number | null;
+  rules: ResolvedRules;
+  suggestions: SuggestedBet[];
+}
 
 export class LiveDataSource {
   private page: Page | null = null;
@@ -74,7 +94,7 @@ export class LiveDataSource {
     return new CacheStore(this.requireCommunity());
   }
 
-  getContext(): AppContext {
+  getContext() {
     return {
       community: loadCommunity(),
       player: loadPlayer(),

@@ -1,21 +1,12 @@
 import { Command } from 'commander';
-import { loadCommunity } from '../config.js';
 import { CacheStore } from '../cache/store.js';
 import { t } from '../i18n/index.js';
+import { requireCommunity } from '../shared.js';
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function requireCommunity(): string {
-  const community = loadCommunity();
-  if (!community) {
-    console.error(t('common.noCommunity'));
-    process.exit(1);
-  }
-  return community;
 }
 
 export function registerCacheCommand(program: Command): void {

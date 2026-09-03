@@ -1,11 +1,12 @@
 import { Command } from 'commander';
-import { loadCommunity, loadPlayer } from '../config.js';
+import { loadPlayer } from '../config.js';
 import { CacheStore } from '../cache/store.js';
 import { loadSeason } from '../analytics/season.js';
 import { replaySeason, REPLAY_STRATEGIES, type ReplayResult } from '../analytics/replay.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
 import { emitJson, setJsonMode } from '../helpers/output.js';
 import { t } from '../i18n/index.js';
+import { requireCommunity } from '../shared.js';
 
 function render(result: ReplayResult, baseline: ReplayResult | null): string {
   const lines = [
@@ -57,11 +58,7 @@ export function registerWhatifCommand(program: Command): void {
     .action((strategy: string, opts) => {
       if (opts.json) setJsonMode(true);
 
-      const community = loadCommunity();
-      if (!community) {
-        console.error(t('common.noCommunity'));
-        process.exit(1);
-      }
+      const community = requireCommunity();
       const ownPlayer = loadPlayer();
       const player = opts.player ?? ownPlayer;
       if (!player) {

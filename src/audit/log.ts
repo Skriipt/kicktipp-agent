@@ -57,6 +57,27 @@ export function appendAudit(record: AuditRecord): void {
   }
 }
 
+type PendingAuditRecord = Omit<AuditRecord, 'outcome'>;
+
+/** Record intent, failure, and success around one real submission. */
+export async function submitAudited(
+  record: PendingAuditRecord,
+  submit: () => Promise<void>,
+): Promise<void> {
+  appendAudit({ ...record, outcome: 'intent' });
+  try {
+    await submit();
+  } catch (err) {
+    appendAudit({
+      ...record,
+      at: new Date().toISOString(),
+      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
+    });
+    throw err;
+  }
+  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+}
+
 export function readAudit(community: string): AuditRecord[] {
   const file = auditFile(community);
   if (!fs.existsSync(file)) return [];

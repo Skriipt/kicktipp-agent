@@ -5,9 +5,9 @@
  * the layouts be asserted on in tests (colour off, so the text is bare). A
  * formatter returns the inner lines of the content pane; the app frames them.
  */
-import { bold, dim, fg, italic } from './ansi.js';
+import { bold, dim, fg } from './ansi.js';
 import { palette, glyph } from './theme.js';
-import { fit, padLeft, truncate, visibleWidth, wrap } from './text.js';
+import { fit, truncate, wrap } from './text.js';
 import { bar, sparkline, badge, field } from './box.js';
 import { renderTable } from './table.js';
 import type {
@@ -27,9 +27,10 @@ import type { ReplayResult } from '../../analytics/replay.js';
 import type { RivalAnalysis } from '../../analytics/rivals.js';
 import type { ScenarioProjection } from '../../analytics/scenarios.js';
 import type { AuditRecord } from '../../audit/log.js';
-import type { CacheInfo, SuggestOutcome } from './source.js';
+import type { CacheInfo, SuggestOutcome } from './live-source.js';
 
-const fixture = (home: string, away: string): string => `${home} ${dim('vs')} ${away}`;
+export const fixtureLabel = (home: string, away: string): string =>
+  `${home} ${dim('vs')} ${away}`;
 
 /** A section heading with a leading accent tick. */
 export function heading(text: string): string {
@@ -62,7 +63,7 @@ export function todayView(
   if (!data.matches.length) return empty('No matches scheduled for today.');
   const rows = data.matches.map((m) => [
     fg(palette.accent, m.time),
-    fixture(m.home, m.away),
+    fixtureLabel(m.home, m.away),
     m.needsBet ? badge('NEEDS BET', palette.bg, palette.amber) : fg(palette.primary, m.bet),
   ]);
   return renderTable({
@@ -82,7 +83,7 @@ export function betsView(data: { title: string; matches: BetMatch[] }, width: nu
   if (!data.matches.length) return empty('No matches on this matchday.');
   const rows = data.matches.map((m) => [
     dim(m.date),
-    fixture(m.home, m.away),
+    fixtureLabel(m.home, m.away),
     betCell(m.bet),
     dim(`${m.odds.home}/${m.odds.draw}/${m.odds.away}`),
   ]);
@@ -106,7 +107,7 @@ export function scheduleView(
   width: number,
 ): string[] {
   if (!data.matches.length) return empty('No fixtures found.');
-  const rows = data.matches.map((m) => [dim(m.date), fixture(m.home, m.away), resultCell(m.result)]);
+  const rows = data.matches.map((m) => [dim(m.date), fixtureLabel(m.home, m.away), resultCell(m.result)]);
   return renderTable({
     width,
     zebra: true,
@@ -304,7 +305,7 @@ export function deadlineView(report: DeadlineReport, width: number): string[] {
     else if (m.needsBet) state = fg(palette.amber, 'no bet');
     else state = fg(palette.primary, `bet ${m.bet}`);
     const when = m.kickoff ? relativeFrom(report.now, m.kickoff) : dim('—');
-    return [fixture(m.home, m.away), when, state];
+    return [fixtureLabel(m.home, m.away), when, state];
   });
   out.push(
     ...renderTable({
@@ -341,7 +342,7 @@ export function suggestView(outcome: SuggestOutcome, width: number): string[] {
   );
   const total = outcome.suggestions.reduce((s, b) => s + b.expectedPoints, 0);
   const rows = outcome.suggestions.map((b) => [
-    fixture(b.home, b.away),
+    fixtureLabel(b.home, b.away),
     b.pinned ? fg(palette.gold, `${b.bet} ${glyph.star}`) : fg(palette.primary, b.bet),
     dim(b.expectedPoints.toFixed(2)),
     b.existingBet ? dim(b.existingBet) : dim('—'),
@@ -460,7 +461,7 @@ export function rivalView(a: RivalAnalysis, width: number): string[] {
     '',
   );
   const rows = a.perMatch.map((m) => [
-    fixture(m.home, m.away),
+    fixtureLabel(m.home, m.away),
     m.myBet ? m.myBet : dim('—'),
     m.rivalBet ? m.rivalBet : dim('?'),
     swingCell(m.bestForMe, m.worstForMe, m.settled),
@@ -717,5 +718,3 @@ export function contextStrip(parts: { label: string; value: string }[]): string 
     .map((p) => `${dim(p.label)} ${fg(palette.text, p.value)}`)
     .join(dim(`  ${glyph.v}  `));
 }
-
-export { fixture as fixtureLabel, italic as italicText, padLeft as padLeftText, visibleWidth as vw };

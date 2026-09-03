@@ -11,7 +11,7 @@ import {
   placeBonusBets,
   type BonusQuestion,
 } from '../core.js';
-import { appendAudit } from '../audit/log.js';
+import { submitAudited } from '../audit/log.js';
 import { inheritPrintedDate, localizePrintedDate } from '../helpers/match-date.js';
 import { runTui } from '../tui/app/launch.js';
 import { t } from '../i18n/index.js';
@@ -200,18 +200,7 @@ async function bonusBets(page: any, community: string, bets: string[]): Promise<
     dryRun: false,
     bets: applied.map((a) => ({ fixture: a.question, bet: a.answer, previous: null })),
   };
-  appendAudit({ ...record, outcome: 'intent' });
-  try {
-    await page.click('button[name="submitbutton"]');
-  } catch (err) {
-    appendAudit({
-      ...record,
-      at: new Date().toISOString(),
-      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
-    });
-    throw err;
-  }
-  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
   console.log('\n' + t('common.bonusSaved'));
 }
 

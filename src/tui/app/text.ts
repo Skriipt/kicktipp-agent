@@ -47,8 +47,6 @@ export function fit(text: string, width: number, align: Align = 'left'): string 
 }
 
 export const padRight = (text: string, width: number): string => fit(text, width, 'left');
-export const padLeft = (text: string, width: number): string => fit(text, width, 'right');
-export const center = (text: string, width: number): string => fit(text, width, 'center');
 
 /** Greedy word wrap to a maximum visible width. Long words are hard-split. */
 export function wrap(text: string, width: number): string[] {

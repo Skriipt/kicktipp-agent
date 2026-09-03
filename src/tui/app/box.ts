@@ -43,15 +43,6 @@ function topBorder(inner: number, color: Rgb, title?: string, badge?: string): s
   return `${b(glyph.tl)}${fit(middle, inner)}${b(glyph.tr)}`;
 }
 
-/** A horizontal rule with an optional inline label. */
-export function rule(width: number, label?: string, color: Rgb = palette.faint): string {
-  if (!label) return fg(color, repeat(glyph.h, width));
-  const tag = ` ${label} `;
-  const rest = Math.max(0, width - visibleWidth(tag));
-  const left = Math.floor(rest / 2);
-  return fg(color, repeat(glyph.h, left)) + dim(tag) + fg(color, repeat(glyph.h, rest - left));
-}
-
 /** A filled progress/percentage bar of a given width. The empty portion uses
  *  a lighter glyph so the level reads even when colour is unavailable. */
 export function bar(fraction: number, width: number, color: Rgb = palette.primary): string {
@@ -79,12 +70,6 @@ export function sparkline(values: (number | null)[], color: Rgb = palette.primar
 /** A small rounded pill, for statuses and tags. */
 export function badge(text: string, fgColor: Rgb, bgColor: Rgb): string {
   return paint(fgColor, bgColor, ` ${text} `);
-}
-
-/** Center a block of lines within a width by left-padding each line. */
-export function indentBlock(lines: string[], left: number): string[] {
-  const pad = ' '.repeat(Math.max(0, left));
-  return lines.map((line) => pad + line);
 }
 
 /** A two-column key/value row, key dimmed and padded to `keyWidth`. The value

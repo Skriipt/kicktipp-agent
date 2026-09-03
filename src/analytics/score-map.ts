@@ -49,7 +49,7 @@ export function scorelineDistribution(p: Probabilities): { score: Score; probabi
  * that outcome, sharpened when the favourite is heavy.
  */
 export function typicalScore(outcome: 'home' | 'draw' | 'away', strength: number): Score {
-  if (outcome === 'draw') return strength > 0.4 ? { home: 1, away: 1 } : { home: 1, away: 1 };
+  if (outcome === 'draw') return { home: 1, away: 1 };
   if (outcome === 'home') {
     if (strength >= 0.7) return { home: 2, away: 0 };
     if (strength >= 0.5) return { home: 2, away: 1 };

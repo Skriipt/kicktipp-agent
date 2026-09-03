@@ -1,15 +1,15 @@
 import { Command } from 'commander';
 import { launchBrowser } from '../browser.js';
-import { ensureCommunity, ask } from '../shared.js';
+import { ensureCommunity, ask, requireCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { CacheStore } from '../cache/store.js';
 import { fetchBets, placeBets } from '../core.js';
 import { resolveRules } from '../rules/resolve.js';
 import { toOddsMatches } from '../analytics/odds.js';
 import { STRATEGIES, suggestBets, type PinnedBet, type StrategyName, type SuggestedBet } from '../analytics/strategies.js';
-import { offlineMatchday, requireCached } from '../cache/offline.js';
+import { offlineMatchday, requireCached } from '../cache/cached-fetch.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
-import { loadCommunity, readDefaultStrategy } from '../config.js';
+import { readDefaultStrategy } from '../config.js';
 import { t } from '../i18n/index.js';
 import { assertWritable } from '../read-only.js';
 
@@ -87,11 +87,7 @@ export function registerSuggestCommand(program: Command): void {
           console.error(t('suggest.offlinePlace'));
           process.exit(1);
         }
-        const community = loadCommunity();
-        if (!community) {
-          console.error(t('common.noCommunity'));
-          process.exit(1);
-        }
+        const community = requireCommunity();
         const store = new CacheStore(community);
         const matchday = offlineMatchday(store, opts.matchday);
         const { matches } = requireCached(store, 'bets', matchday);

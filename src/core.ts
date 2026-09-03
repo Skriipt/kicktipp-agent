@@ -28,7 +28,7 @@ import {
   isSameCalendarDay,
   parseMatchDate,
 } from './helpers/match-date.js';
-import { appendAudit, type AuditBet, type BetSource } from './audit/log.js';
+import { appendAudit, submitAudited, type AuditBet, type BetSource } from './audit/log.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
 
@@ -590,6 +590,40 @@ export async function fetchRules(page: Page, community: string, cache: CacheOpti
 
 // ── Write operations ───────────────────────────────────────────────
 
+function fillMatchBets(
+  page: Page,
+  $: cheerio.CheerioAPI,
+  bets: string[],
+  editable: EditableMatch[],
+): { placed: PlacedBet[]; audited: AuditBet[] } {
+  const seen = new Set<string>();
+  const parsed = bets.map((arg) => {
+    const { home, away, h, g } = parseBetArg(arg);
+    const key = `${home.toLowerCase()}|${away.toLowerCase()}`;
+    if (seen.has(key)) throw new Error(`Duplicate fixture: "${home} vs ${away}"`);
+    seen.add(key);
+    return { entry: matchFixture(home, away, editable), h, g };
+  });
+
+  const placed: PlacedBet[] = [];
+  const audited: AuditBet[] = [];
+  for (const { entry, h, g } of parsed) {
+    const homeSelector = `input[name="${escapeCssValue(entry.heimName)}"]`;
+    const awaySelector = `input[name="${escapeCssValue(entry.gastName)}"]`;
+    const previousHome = $(homeSelector).attr('value') || '';
+    const previousAway = $(awaySelector).attr('value') || '';
+    page.setInputValue(homeSelector, String(h));
+    page.setInputValue(awaySelector, String(g));
+    placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
+    audited.push({
+      fixture: `${entry.home} vs ${entry.away}`,
+      bet: `${h}:${g}`,
+      previous: previousHome && previousAway ? `${previousHome}:${previousAway}` : null,
+    });
+  }
+  return { placed, audited };
+}
+
 export async function placeBets(
   page: Page,
   community: string,
@@ -623,32 +657,7 @@ export async function placeBets(
 
   if (!editable.length) throw new Error('No editable matches found.');
 
-  const parsed: { entry: EditableMatch; h: number; g: number }[] = [];
-  const seen = new Set<string>();
-  for (const arg of bets) {
-    const { home, away, h, g } = parseBetArg(arg);
-    const key = `${home.toLowerCase()}|${away.toLowerCase()}`;
-    if (seen.has(key)) throw new Error(`Duplicate fixture: "${home} vs ${away}"`);
-    seen.add(key);
-    const entry = matchFixture(home, away, editable);
-    parsed.push({ entry, h, g });
-  }
-
-  const placed: PlacedBet[] = [];
-  const audited: AuditBet[] = [];
-  for (const { entry, h, g } of parsed) {
-    // Read what was on the form before overwriting it, so the log can undo.
-    const previousHome = $(`input[name="${escapeCssValue(entry.heimName)}"]`).attr('value') || '';
-    const previousAway = $(`input[name="${escapeCssValue(entry.gastName)}"]`).attr('value') || '';
-    page.setInputValue(`input[name="${escapeCssValue(entry.heimName)}"]`, String(h));
-    page.setInputValue(`input[name="${escapeCssValue(entry.gastName)}"]`, String(g));
-    placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
-    audited.push({
-      fixture: `${entry.home} vs ${entry.away}`,
-      bet: `${h}:${g}`,
-      previous: previousHome && previousAway ? `${previousHome}:${previousAway}` : null,
-    });
-  }
+  const { placed, audited } = fillMatchBets(page, $, bets, editable);
 
   const record = {
     at: new Date().toISOString(),
@@ -665,20 +674,7 @@ export async function placeBets(
     return placed;
   }
 
-  // Written before and after: if the process dies mid-submit, the intent
-  // record still shows what was about to happen.
-  appendAudit({ ...record, outcome: 'intent' });
-  try {
-    await page.click('button[name="submitbutton"]');
-  } catch (err) {
-    appendAudit({
-      ...record,
-      at: new Date().toISOString(),
-      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
-    });
-    throw err;
-  }
-  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
 
   return placed;
 }
@@ -877,18 +873,7 @@ export async function placeBonusBets(
     return placed;
   }
 
-  appendAudit({ ...record, outcome: 'intent' });
-  try {
-    await page.click('button[name="submitbutton"]');
-  } catch (err) {
-    appendAudit({
-      ...record,
-      at: new Date().toISOString(),
-      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
-    });
-    throw err;
-  }
-  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
 
   return placed;
 }
@@ -1161,30 +1146,7 @@ export async function placeBetsForMember(
     throw new Error(`No editable matches on the Tipps-nachtragen page for ${member.name}.`);
   }
 
-  const parsed: { entry: EditableMatch; h: number; g: number }[] = [];
-  const seen = new Set<string>();
-  for (const arg of bets) {
-    const { home, away, h, g } = parseBetArg(arg);
-    const key = `${home.toLowerCase()}|${away.toLowerCase()}`;
-    if (seen.has(key)) throw new Error(`Duplicate fixture: "${home} vs ${away}"`);
-    seen.add(key);
-    parsed.push({ entry: matchFixture(home, away, editable), h, g });
-  }
-
-  const placed: PlacedBet[] = [];
-  const audited: AuditBet[] = [];
-  for (const { entry, h, g } of parsed) {
-    const previousHome = $(`input[name="${escapeCssValue(entry.heimName)}"]`).attr('value') || '';
-    const previousAway = $(`input[name="${escapeCssValue(entry.gastName)}"]`).attr('value') || '';
-    page.setInputValue(`input[name="${escapeCssValue(entry.heimName)}"]`, String(h));
-    page.setInputValue(`input[name="${escapeCssValue(entry.gastName)}"]`, String(g));
-    placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
-    audited.push({
-      fixture: `${entry.home} vs ${entry.away}`,
-      bet: `${h}:${g}`,
-      previous: previousHome && previousAway ? `${previousHome}:${previousAway}` : null,
-    });
-  }
+  const { placed, audited } = fillMatchBets(page, $, bets, editable);
 
   // The submission must carry the member's id, or Kicktipp would apply these
   // bets to the admin's own entry. Rather than trust the page, check that the
@@ -1217,18 +1179,7 @@ export async function placeBetsForMember(
     return placed;
   }
 
-  appendAudit({ ...record, outcome: 'intent' });
-  try {
-    await page.click('button[name="submitbutton"]');
-  } catch (err) {
-    appendAudit({
-      ...record,
-      at: new Date().toISOString(),
-      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
-    });
-    throw err;
-  }
-  appendAudit({ ...record, at: new Date().toISOString(), outcome: 'submitted' });
+  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
 
   return placed;
 }

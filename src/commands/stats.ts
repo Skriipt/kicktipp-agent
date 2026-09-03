@@ -1,10 +1,11 @@
 import { Command } from 'commander';
-import { loadCommunity, loadPlayer } from '../config.js';
+import { loadPlayer } from '../config.js';
 import { CacheStore } from '../cache/store.js';
 import { loadSeason } from '../analytics/season.js';
 import { computeSeasonStats, type SeasonStats } from '../analytics/season-stats.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
 import { t } from '../i18n/index.js';
+import { requireCommunity } from '../shared.js';
 
 const BAR = '█';
 
@@ -127,11 +128,7 @@ export function registerStatsCommand(program: Command): void {
     .option('--offline', t('opt.offlineStats'))
     .option('--json', t('opt.json'))
     .action((opts) => {
-      const community = loadCommunity();
-      if (!community) {
-        console.error(t('common.noCommunity'));
-        process.exit(1);
-      }
+      const community = requireCommunity();
 
       const player = opts.player ?? loadPlayer();
       if (!player) {

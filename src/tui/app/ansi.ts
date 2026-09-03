@@ -41,11 +41,6 @@ export const hideCursor = `${CSI}?25l`;
 export const showCursor = `${CSI}?25h`;
 export const clearScreen = `${CSI}2J`;
 export const home = `${CSI}H`;
-export const clearLine = `${CSI}2K`;
-
-export function moveTo(row: number, col: number): string {
-  return `${CSI}${row};${col}H`;
-}
 
 // ── Text attributes ───────────────────────────────────────────────
 
@@ -58,8 +53,6 @@ function wrap(open: string, text: string): string {
 
 export const bold = (t: string): string => wrap(`${CSI}1m`, t);
 export const dim = (t: string): string => wrap(`${CSI}2m`, t);
-export const italic = (t: string): string => wrap(`${CSI}3m`, t);
-export const underline = (t: string): string => wrap(`${CSI}4m`, t);
 export const invert = (t: string): string => wrap(`${CSI}7m`, t);
 
 // ── Colour ────────────────────────────────────────────────────────
@@ -88,10 +81,6 @@ function bgCode(rgb: Rgb): string {
 
 export function fg(rgb: Rgb, text: string): string {
   return wrap(fgCode(rgb), text);
-}
-
-export function bg(rgb: Rgb, text: string): string {
-  return wrap(bgCode(rgb), text);
 }
 
 /** Foreground + background in a single wrap, so nesting stays clean. */

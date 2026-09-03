@@ -1,21 +1,11 @@
 import { Command } from 'commander';
 import { launchBrowser } from '../browser.js';
-import { loadCommunity } from '../config.js';
-import { ask } from '../shared.js';
+import { ask, requireCommunity } from '../shared.js';
 import { emitJson, setJsonMode } from '../helpers/output.js';
 import { readAudit, lastSubmission, auditFile, type AuditRecord } from '../audit/log.js';
 import { placeBets } from '../core.js';
 import { assertWritable } from '../read-only.js';
 import { t } from '../i18n/index.js';
-
-function requireCommunity(): string {
-  const community = loadCommunity();
-  if (!community) {
-    console.error(t('common.noCommunity'));
-    process.exit(1);
-  }
-  return community;
-}
 
 function render(records: AuditRecord[], community: string): string {
   if (!records.length) {

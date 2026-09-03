@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { launchBrowser } from '../browser.js';
-import { ensureCommunity } from '../shared.js';
-import { loadCommunity, loadPlayer } from '../config.js';
+import { ensureCommunity, requireCommunity } from '../shared.js';
+import { loadPlayer } from '../config.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import { CacheStore } from '../cache/store.js';
 import { fetchLeaderboard, fetchMatchdayBets } from '../core.js';
@@ -9,7 +9,7 @@ import { resolveRules } from '../rules/resolve.js';
 import { analyseRival, type RivalAnalysis } from '../analytics/rivals.js';
 import { gapBeforeMatchday } from '../analytics/gap.js';
 import { t } from '../i18n/index.js';
-import { offlineMatchday, requireCached } from '../cache/offline.js';
+import { offlineMatchday, requireCached } from '../cache/cached-fetch.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
 
 function sign(value: number): string {
@@ -70,11 +70,7 @@ export function registerRivalCommand(program: Command): void {
     .option('--json', t('opt.json'))
     .action(async (name: string, opts) => {
       if (opts.offline) {
-        const community = loadCommunity();
-        if (!community) {
-          console.error(t('common.noCommunity'));
-          process.exit(1);
-        }
+        const community = requireCommunity();
         const player = loadPlayer();
         if (!player) {
           console.error(t('common.noPlayer'));

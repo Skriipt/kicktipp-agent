@@ -1,6 +1,6 @@
 {
   "name": "kicktipp-agent",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "CLI and MCP server for kicktipp.com and kicktipp.de",
   "type": "module",
   "license": "MIT",
@@ -27,7 +27,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "pack:mcpb": "bash scripts/pack-mcpb.sh",

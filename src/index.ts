@@ -4,7 +4,6 @@ import { Command } from 'commander';
 import { VERSION } from './version.js';
 import { spawn } from 'child_process';
 import {
-  saveCommunity,
   savePlayer,
   logout,
   listProfiles,
@@ -18,7 +17,7 @@ import {
 } from './config.js';
 import { startSetupListener } from './setup/listener.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
-import { ask, ensureCommunity } from './shared.js';
+import { ask, ensureCommunity, selectCommunity } from './shared.js';
 import { statusClear } from './helpers/spinner.js';
 import { emitError, emitJson, setJsonMode } from './helpers/output.js';
 import { registerLeaderboardCommand } from './commands/leaderboard.js';
@@ -50,18 +49,6 @@ setLanguage(resolveLanguage({ configLanguage: readUiLanguage() }));
 setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 
 const program = new Command();
-
-async function setCommunityInteractive(page: any): Promise<void> {
-  const all = await getCommunities(page);
-  if (!all.length) { console.error(t('common.noCommunities')); process.exit(1); }
-  console.log(t('common.availableCommunities'));
-  all.forEach((c, i) => console.log(`  [${i + 1}] ${c}`));
-  const choice = await ask(t('common.selectCommunity', { n: all.length }));
-  const idx = parseInt(choice) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= all.length) { console.error(t('common.invalidSelection')); process.exit(1); }
-  saveCommunity(all[idx]);
-  console.log(t('common.savedCommunity', { name: all[idx] }));
-}
 
 async function setPlayerInteractive(page: any, community: string): Promise<void> {
   const players = await getPlayers(page, community);
@@ -120,7 +107,7 @@ program
     if (!opts.web) {
       const page = await launchBrowser();
       try {
-        await setCommunityInteractive(page);
+        await selectCommunity(page);
       } finally {
         await page.close();
       }
@@ -174,7 +161,7 @@ program
   .description(t('cmd.setCommunity.description'))
   .action(async () => {
     const page = await launchBrowser();
-    await setCommunityInteractive(page);
+    await selectCommunity(page);
     await page.close();
   });
 
