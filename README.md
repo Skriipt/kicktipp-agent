@@ -1,248 +1,138 @@
+<div align="center">
+
 # kicktipp-agent
 
-A helper for [Kicktipp](https://www.kicktipp.com) on **kicktipp.com** and **kicktipp.de**. You can check the table, place tips in a TUI (terminal UI), or ask Claude to do it in a chat.
+Use [Kicktipp](https://www.kicktipp.com/) from a terminal or an MCP-compatible assistant.
 
-Kicktipp has no public API, so this talks to the website from your own computer. Your password never leaves the machine. Do not type it into a chat.
+[![npm](https://img.shields.io/npm/v/kicktipp-agent?style=flat-square)](https://www.npmjs.com/package/kicktipp-agent)
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Release](https://img.shields.io/github/actions/workflow/status/Skriipt/kicktipp-agent/release-mcpb.yml?style=flat-square&label=release)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/release-mcpb.yml)
 
-## Start here
+[Quick start](#quick-start) · [CLI](#cli) · [MCP server](#mcp-server) · [Privacy and safety](#privacy-and-safety) · [Development](#development)
 
-You only need one of the four sections below. Read the headings, pick the one that matches how you work, ignore the others.
+</div>
 
-| If you… | Go to |
-|---------|--------|
-| Chat with Claude as a desktop app | [Claude Desktop](#claude-desktop) |
-| Use Claude in the terminal (Claude Code), or another MCP client | [Claude Code](#claude-code) |
-| Want `kicktipp` commands in the terminal yourself | [The `kicktipp` command](#the-kicktipp-command) |
-| Are editing this project's source | [Working on the code](#working-on-the-code) |
+`kicktipp-agent` is a local Node.js client for `kicktipp.com` and `kicktipp.de`. It reads the Kicktipp website over HTTP, parses the returned HTML, and exposes the result through three interfaces:
 
-Every path needs [Node.js](https://nodejs.org/) 20 or newer. Open the site, click the big **LTS** button, run the installer, and leave the defaults. When it is done, open Terminal (macOS) or Command Prompt (Windows) and type:
+- a command-line interface for scripts and direct use
+- a full-screen terminal UI for browsing and placing tips
+- a local [Model Context Protocol](https://modelcontextprotocol.io/) server for Claude and other MCP clients
+
+It can show fixtures, tips, rankings, rules, deadlines, and season statistics. It can also place tips, create reminders, compare rivals, and calculate suggestions from the odds published by Kicktipp.
+
+> [!IMPORTANT]
+> This is an unofficial client. Kicktipp does not provide a public API, so a website change can break a parser. Check the proposed tips before submitting them.
+
+## Quick start
+
+Install [Node.js](https://nodejs.org/) 20 or newer, then choose the setup that matches how you want to use the project.
+
+### Terminal
+
+Install the CLI, connect your account through the local setup page, and open the dashboard:
 
 ```bash
-node -v
+npm install --global kicktipp-agent
+kicktipp login --web
+kicktipp tui
 ```
 
-You want a reply like `v20.19.0` or `v22.something`. If the computer says the command was not found, Node is not installed, or you need to close the terminal and open a new one so it picks up the installer.
+The setup page runs on `127.0.0.1`. Enter your Kicktipp credentials there, select a community, then return to the terminal.
 
-Two ways to get the program itself:
+Useful first commands:
 
-- **npm** downloads the published package named `kicktipp-agent`. You do not keep a copy of this GitHub repo. This is the usual choice if you just want it to work.
-- **This repo** means `git clone` of the source, then `npm install` and `npm run build` on your machine. Use this if you want the code in a folder you can open, or you are working from git rather than the registry.
+```bash
+kicktipp today
+kicktipp deadline
+kicktipp leaderboard
+kicktipp bet
+```
 
 ### Claude Desktop
 
-This is the least terminal-heavy path. After Node is installed, you can stay in the Claude app.
+1. Download [`kicktipp.mcpb`](https://github.com/Skriipt/kicktipp-agent/releases/latest/download/kicktipp.mcpb) from the [latest release](https://github.com/Skriipt/kicktipp-agent/releases/latest).
+2. Open the file with Claude Desktop and complete the settings form.
+3. Fully quit and reopen Claude Desktop.
+4. Start a new chat and ask, "What is my Kicktipp status?"
 
-#### Install the Desktop file
-
-This is a zip Claude Desktop knows how to install. It is the same Node program, with a settings form.
-
-1. Download **[kicktipp.mcpb](https://github.com/Skriipt/kicktipp-agent/releases/latest/download/kicktipp.mcpb)** from the latest [GitHub release](https://github.com/Skriipt/kicktipp-agent/releases). The file version should match the release tag, for example both `1.1.1`.
-2. Double-click the file. Claude Desktop should offer to install it. If nothing happens, open Claude Desktop and install the file from there.
-3. Fill in the email and password you use on kicktipp.com or kicktipp.de. You can leave community blank and pick the pool later. Tick read-only if you only want Claude to look, not submit tips.
-4. Fully quit Claude Desktop. Closing the window is not enough on a Mac. Use Claude → Quit, then open it again.
-5. Start a **new** chat. Ask something like "What's my Kicktipp status?"
-
-If Claude says it cannot find `node`, Node is missing from your PATH. Install LTS from nodejs.org, quit Desktop fully, try again.
-
-#### Or use a clone of this repo
-
-Same program, no `.mcpb` file. You clone the repo, build it, then tell Desktop to run `dist/server.js`. That needs a JSON edit. Step-by-step is under [Connecting Claude](#connecting-claude). Do not add the bundle *and* that JSON at the same time, or you will start two copies.
+The bundle runs the MCP server on your computer. It is not a hosted service.
 
 ### Claude Code
 
-Claude does not log into Kicktipp itself. It starts a small program on your computer. You attach that program once, then in a chat you tell it to set up your account. It will give you a link to `http://127.0.0.1:…` on your own machine. Open that in a normal browser, sign in, pick your pool. The password goes into that page, never into the chat.
-
-#### From npm
-
-This command downloads the `kicktipp-agent` package when needed and starts the MCP server. You do not have to clone anything.
+Register the published MCP server:
 
 ```bash
 claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
 ```
 
-The long name `kicktipp-agent-mcp` is the server binary. `kicktipp-mcp` is the same binary under a shorter name.
+Start a new chat and ask Claude to set up your Kicktipp account. It will return a private localhost URL. Open that page to sign in and select a community. Do not paste your password into the chat.
 
-#### From this repo
+### Other MCP clients
 
-You keep a folder with the source, compile it, then point Claude at that file. Run these from a terminal. The last line uses `pwd` so you do not have to type the folder path by hand. Run it while you are still inside `kicktipp-agent`.
-
-```bash
-git clone https://github.com/Skriipt/kicktipp-agent.git
-cd kicktipp-agent
-npm install
-npm run build
-claude mcp add kicktipp -- node "$(pwd)/dist/server.js"
-```
-
-`npm install` fetches libraries. `npm run build` compiles TypeScript into `dist/`. On Windows, `$(pwd)` may not work. Use the full path to `dist\server.js` instead.
-
-#### After either option
-
-Open a **new** chat and say **Set up my Kicktipp account.** Open the local link, sign in, pick the community. After that, you can ask for status, the table, or to help with tips.
-
-Editing Claude Desktop's config by hand is this same server. Details are in [Connecting Claude](#connecting-claude).
-
-### The `kicktipp` command
-
-This is for using Kicktipp from the terminal without an assistant. After it is installed you run `kicktipp login --web` once, then commands like `kicktipp today` and `kicktipp bet`.
-
-#### From npm
-
-This puts `kicktipp` on your PATH so it works in any terminal window:
+Configure the client to run this local command over standard input and output:
 
 ```bash
-npm install -g kicktipp-agent
-kicktipp login --web
+npx -y -p kicktipp-agent kicktipp-agent-mcp
 ```
 
-If you would rather not install globally, this runs the same login without `-g`:
+The aliases `kicktipp-mcp` and `kicktipp-agent-mcp` start the same server.
 
-```bash
-npx -y -p kicktipp-agent kicktipp login --web
+## How it works
+
+```text
+CLI, TUI, or MCP client
+          |
+          v
+  kicktipp-agent on your computer
+          |
+          +-- HTTPS requests --> kicktipp.com or kicktipp.de
+          +-- local config  --> credentials, profile, preferences
+          +-- local data    --> session, cache, and submission log
 ```
 
-`-p kicktipp-agent` tells npx which package to download. The last `kicktipp` is the command inside that package.
+The project does not launch a headless browser. Its small page abstraction uses `fetch`, a cookie jar, and Cheerio. All three interfaces call the same parsing, scoring, cache, and submission code.
 
-#### From this repo
-
-Clone, install libraries, compile, then `npm link` so the `kicktipp` command uses *this* folder's build:
-
-```bash
-git clone https://github.com/Skriipt/kicktipp-agent.git
-cd kicktipp-agent
-npm install
-npm run build
-npm link
-kicktipp login --web
-```
-
-#### After either option
-
-`login --web` prints a `http://127.0.0.1:…/setup?token=…` link. On macOS and Linux it should open in your browser by itself. On Windows, copy that line into a browser if a window does not appear.
-
-Sign in with your Kicktipp email and password, then pick your pool. After that:
-
-```bash
-kicktipp today
-kicktipp bet
-```
-
-`today` lists today's matches. `bet` opens the TUI, a full-screen tip sheet, if you are in a real terminal.
-
-### Working on the code
-
-From a clone:
-
-```bash
-npm install
-npm run build
-npm test
-```
-
-`npm run pack:mcpb` builds the Desktop `.mcpb` file yourself. If you only want to *use* Desktop, download the file from [releases](https://github.com/Skriipt/kicktipp-agent/releases) instead.
+Both Kicktipp hosts are supported. The default is `.com`; use `kicktipp set-site de` to prefer `.de`. If a page is missing on the selected host, the client can try the equivalent German or English route on the other host.
 
 ## CLI
 
-The CLI and the localhost setup page default to English, and they start on kicktipp.com. To keep German chrome and the German site:
+Run `kicktipp --help` or `kicktipp <command> --help` for the complete option list.
 
-```bash
-kicktipp set-lang de
-kicktipp set-site de
-```
+### Everyday commands
 
-That writes `[ui]` in `~/.config/kicktipp-agent/config.ini`. `--lang de` and `--site de` are one-shot overrides for a single run. Team names still come from whichever Kicktipp host you use.
+| Command | What it does |
+| --- | --- |
+| `kicktipp tui` | Open the full-screen dashboard |
+| `kicktipp today` | Show today's fixtures and missing tips |
+| `kicktipp bet` | Open the interactive prediction grid |
+| `kicktipp bets` | Show your tips for a matchday |
+| `kicktipp tip-status` | Show complete, partial, and missing submissions without exposing hidden scores |
+| `kicktipp deadline` | Show time to kickoff and tips still due |
+| `kicktipp leaderboard` | Show the matchday ranking |
+| `kicktipp overview` | Show the season overview |
+| `kicktipp schedule` | Show fixtures and results |
+| `kicktipp table` | Show the football league table |
+| `kicktipp rules` | Show the community's scoring rules |
 
-### First-time setup
+Most matchday commands accept `--matchday <number>`. Global `--community`, `--profile`, `--lang`, and `--site` flags override saved settings for one run.
 
-```bash
-kicktipp login --web
-```
+### Prediction grid
 
-That prints a `http://127.0.0.1:…/setup?token=…` link and opens it on macOS and Linux. On Windows, paste the link into a browser. Email and password go into that page, not into the terminal. After a successful Kicktipp login you pick a community. Credentials land in `~/.config/kicktipp-agent/config.ini` with mode 600.
+On a real terminal, `kicktipp bet` opens the dashboard directly on the place-bets screen.
 
-`kicktipp login` without `--web` still prompts in the terminal, same as `set-community` on a first run.
+![Prediction grid with fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
 
-Optionally set your player name so the leaderboard highlights your position:
+| Key | Action |
+| --- | --- |
+| Arrow keys | Move between score fields |
+| Digits | Enter a score |
+| `s` | Apply the suggestion to the current fixture |
+| `a` | Fill every empty fixture from suggestions |
+| `u` | Clear the current fixture |
+| `w` | Submit |
+| `q` | Quit without submitting |
 
-```console
-$ kicktipp set-player
-```
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `tui` | Full-screen dashboard for every feature |
-| `login` | Connect an account (`--web` opens a localhost page) |
-| `logout` | Remove stored credentials and session |
-| `communities` | List all communities you belong to |
-| `set-community` | Select a default community |
-| `set-lang` | Set the UI language permanently (`en` or `de`) |
-| `set-site` | Set the Kicktipp host permanently (`de` or `com`) |
-| `players` | List players in the saved community |
-| `set-player` | Select which player you are |
-| `set-notify` | Configure the `notify` backend (desktop, webhook, or command) |
-| `leaderboard` | Show the matchday leaderboard |
-| `tip-status` | Show who has fully, partially, or not yet tipped |
-| `overview` | Show the season overview |
-| `schedule` | Show the match schedule |
-| `table` | Show the league table |
-| `bets` | Show your bets for a matchday |
-| `bet` | Place bets. Opens the TUI on a real terminal, or by fixture / bonus |
-| `today` | Show today's matches and which still need bets |
-| `rules` | Show the game rules |
-| `guide` | Print a detailed usage guide (useful for LLM agents) |
-| `sync` | Download this season into the local cache |
-| `cache status` / `cache clear` | Inspect or delete the cache |
-| `stats` | Season analytics for you or another player |
-| `rival` | What it would take to overtake another player |
-| `suggest` | Bet slip suggested from the published odds |
-| `scenario` | Project the leaderboard under hypothetical results |
-| `whatif` | Replay the season under a different strategy |
-| `deadline` | Time to kickoff and what still needs a bet |
-| `remind` / `notify` | Reminder artifacts and notifications |
-| `log` | What this agent submitted, and undo |
-| `profiles` | List configured profiles |
-| `admin` | Spielleiter tools (members, bets for a member) |
-
-### Checking tip status
-
-```bash
-kicktipp tip-status
-kicktipp tip-status --matchday 5
-```
-
-This read-only command reports whether each player has submitted all, some, or
-none of the tips for a matchday. It uses Kicktipp's submission markers and
-does not reveal hidden score predictions.
-
-### The dashboard (`kicktipp tui`)
-
-`kicktipp tui` opens a full-screen dashboard that covers everything the CLI does from one keyboard-driven interface: today's matches, your bets, the interactive place-bets grid, odds-based suggestions, the leaderboard, season overview, league table, schedule, deadlines, stats, rival watch, scenarios, what-if replays, sync/cache, rules, the audit log, community and player selection, notification settings, and the Spielleiter admin tools.
-
-Move through the grouped menu on the left with the arrow keys, press `enter` to open a screen, and `esc` to come back. `[` and `]` step through matchdays, `?` shows the shortcuts, and each screen lists its own keys along the bottom.
-
-```bash
-kicktipp tui            # live, against your account
-```
-
-### The prediction grid (`kicktipp bet`)
-
-On a real terminal, `kicktipp bet` with no arguments opens the dashboard directly on "Place bets". Type scores in place, take the odds-based suggestion, and submit with `w`.
-
-![The kicktipp TUI: fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
-
-Keys:
-
-- arrows move
-- digits type a score
-- `s` take the suggestion on the current row
-- `a` fill every empty row from suggestions
-- `u` clear the current row
-- `w` submit
-- `q` quit without submitting
-
-`kicktipp bet --no-tui` is the old one-match-at-a-time prompts. Bonus questions still use that path (`kicktipp bet --bonus`). You can also pass fixtures on the command line:
+You can also place tips without the TUI:
 
 ```bash
 kicktipp bet "FC Bayern München vs Borussia Dortmund=2:1"
@@ -250,137 +140,38 @@ kicktipp bet "RB Leipzig vs Bayer 04 Leverkusen=0:0" --matchday 5
 kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 ```
 
-### Options
+Use the fixture names returned by `kicktipp bets`. `kicktipp bet --no-tui` keeps the older prompt-based flow.
 
-- `--matchday <n>` — Target a specific matchday (1-34)
-- `--bonus` — Bonus question rankings (with `leaderboard`) or bonus bets (with `bet`)
-- `--view <value>` — Overview type (with `overview`)
-- `--home` / `--away` — Home/away filter (with `table`)
+### Analytics and suggestions
 
-### Analytics
-
-Once a season is cached locally, the agent can answer questions Kicktipp
-itself does not:
+Sync the season once before using cached analytics:
 
 ```bash
-kicktipp sync                      # update the local cache (current matchday and holes)
-kicktipp stats                     # your form, hit types, biases, consistency
-kicktipp stats --player Papa       # or somebody else's
-kicktipp rival Papa                # what has to happen for you to overtake them
-kicktipp suggest --strategy ev     # a bet slip built from the published odds
+kicktipp sync
+kicktipp stats
+kicktipp stats --player Papa
+kicktipp rival Papa
+kicktipp suggest --strategy ev
 ```
 
-`sync` walks the season once, pacing its requests, and skips matchdays it has
-already stored, so later runs only fetch what is new. Everything downstream of
-it reads the cache: `stats` needs no network at all, and `rival`/`suggest`
-accept `--offline` to work the same way.
+`sync` stores matchdays locally and fills only gaps on later runs. `stats` reads the cache without a network request. `rival` and `suggest` also support `--offline`.
 
-**stats** reports points per matchday against the league average, rank history,
-how your hits break down (exact result / goal difference / tendency / miss),
-how your predictions compare with what actually happened, and how consistent
-you are. It always states how many matchdays the numbers rest on.
+Suggestions use the odds already published by Kicktipp. They do not use an external prediction service.
 
-**rival** shows the points gap, how much each remaining match can still swing
-it, and what would have to happen for you to pass someone. Kicktipp hides other
-players' bets until the deadline passes, so before kickoff the answer is given
-as best/worst bounds and labelled as such.
+| Strategy | Behavior |
+| --- | --- |
+| `safe` | Selects the most likely outcome |
+| `ev` | Maximizes expected points under the community's scoring rules |
+| `contrarian` | Fades a narrow favorite and accepts more variance |
 
-**suggest** converts the odds Kicktipp already prints into probabilities and
-proposes a full slip, explaining every pick. Three strategies: `safe` backs the
-likeliest outcome, `ev` maximises expected points under your community's own
-scoring rules, and `contrarian` fades the favourite in close matches (high
-variance on purpose). It prints and stops — submitting needs `--place`, which
-asks first, and matches that already have a bet are left alone unless you pass
-`--replace`.
-
-This is odds arithmetic, not prediction magic: the numbers come from the
-bookmaker's own prices, and no external data source or API key is involved.
-
-The cache lives in your platform's data directory (`~/.local/share/kicktipp-agent`
-on Linux) and can be inspected with `kicktipp cache status` or removed with
-`kicktipp cache clear`.
-
-
-### Deadlines and reminders
-
-```bash
-kicktipp deadline                  # countdown and what still needs a bet
-kicktipp deadline --check          # exits 2 when something is due soon
-kicktipp remind --print cron       # a crontab line built on that exit code
-kicktipp remind --print systemd    # or user units; --install writes them
-kicktipp remind --ics season.ics   # a calendar with an alarm per kickoff
-kicktipp notify                    # notify now, if anything is urgent
-```
-
-The predict page in a browser shows kickoff times in *your* timezone.
-Kicktipp's HTML does not: `.com` prints US Central (`8/28/26 1:30 PM`) and
-`.de` prints Berlin (`28.08.26 20:30`) — the same instant, rewritten by
-JavaScript on the page. The CLI reads the HTML, then shows the time in this
-machine's zone (or `KICKTIPP_TZ` if you set one). Later rows that share a
-kickoff have a blank date cell; that value is carried forward from the row
-above.
-
-A match is urgent when it still needs a bet and kickoff is within **6 hours**
-(`--warn-hours`, or `KICKTIPP_WARN_HOURS`). Kicktipp closes betting at each
-match's own kickoff, not at a matchday-wide deadline.
-
-Notifications go through one backend, configured with `kicktipp set-notify`
-(or the MCP `set_notify` tool). That writes `[notify]` in
-`~/.config/kicktipp-agent/config.ini`:
-
-```bash
-kicktipp set-notify                  # picker
-kicktipp set-notify desktop
-kicktipp set-notify webhook https://ntfy.sh/your-topic
-kicktipp set-notify command /usr/local/bin/my-hook
-```
-
-`desktop` is macOS Notification Center (or `notify-send` on Linux). `webhook`
-POSTs JSON to the URL. `command` runs that program with the summary as an
-argument and the deadline report on stdin. `KICKTIPP_NOTIFY_KIND` and
-`KICKTIPP_NOTIFY_TARGET` override the file if set. There is no default
-webhook endpoint — a URL only ever goes where you named it.
-
-### Scenarios, replays and the bet log
-
-```bash
-kicktipp scenario "Bayern vs BVB=2:1"     # project the table
-kicktipp scenario --target 1              # what would put you first
-kicktipp whatif "2:1"                     # replay the season on a fixed bet
-kicktipp whatif suggest:ev
-kicktipp log                              # what the agent submitted
-kicktipp log --undo                       # put the previous bets back
-```
-
-Every submission — CLI, TUI, suggestion or MCP — is appended to a local
-JSONL log with the bet it replaced, which is what makes `--undo` possible and
-what lets you audit an assistant after the fact.
-
-### Multiple pools and accounts
-
-```bash
-kicktipp -c other-pool schedule     # one-off, without changing the default
-kicktipp -p work stats              # a separate account and session
-kicktipp profiles
-```
-
-A profile is a `[profile.<name>]` section with its own account, community and
-player. Configs without profiles keep working exactly as before.
-
-### Spielleiter tools
-
-If you run a community, `kicktipp admin members`, `admin bets <member>` and
-`admin bet <member> "Home vs Away=H:G"` fill in bets for members who have no
-login of their own. Placing for someone else asks you to type their name back
-first, and refuses outright if the page would not carry their id.
+`suggest` only prints a slip by default. Add `--place` to submit it. Existing tips remain untouched unless you also use `--replace`.
 
 ### Scoring rules
 
-Features that count points read your community's rules page to learn what an
-exact result, a goal difference and a tendency are worth, and whether any
-matchday counts double. If that page cannot be parsed, Kicktipp's 4/3/2
-defaults are assumed and every affected output says so. You can also set the
-values explicitly:
+Point calculations read the active community's rules, including exact-result,
+goal-difference, tendency, and doubled-matchday values. If the rules page
+cannot be parsed, the client labels the fallback and uses Kicktipp's 4/3/2
+defaults. You can override those values in `config.ini`:
 
 ```ini
 [scoring]
@@ -389,167 +180,203 @@ diff = 3
 tendency = 2
 ```
 
-To find out whether the values are actually right:
+Verify the model against a finished matchday:
 
 ```bash
-kicktipp rules --verify        # recompute a finished matchday and compare
+kicktipp rules --verify
 ```
 
-This recomputes every player's score for a finished matchday and checks it
-against the numbers Kicktipp itself reported — the only real proof the model
-matches the community. It exits 1 on a mismatch.
+The command recomputes each player's score and compares it with Kicktipp's
+reported result. It exits with status `1` when the totals differ.
 
-## Connecting Claude
-
-Claude does not talk to Kicktipp itself. It starts a small program on your computer. That program logs into kicktipp.com or kicktipp.de. The assistant sees pool data. It never sees your password.
-
-If you only wanted it working, [Start here](#start-here) is enough. The rest of this section is the detail.
-
-The `.mcpb` file is that program, zipped, with a recipe for Claude Desktop. It is not a remote server. Each GitHub release includes one, tagged with the same version as `package.json`.
-
-Pick **one** Desktop path. Running the bundle and a manual config at the same time starts two copies.
-
-### After you connect the assistant
-
-Wiring Claude to this server is not the same as signing into Kicktipp. Unless you already ran `kicktipp login` or filled in the Desktop bundle's email and password, open a new chat and tell the assistant to set up your Kicktipp account. It should call `connect_account` and give you a `http://127.0.0.1:…/setup?token=…` link. Open that, sign in, pick a community. Do not paste the password into the chat.
-
-`get_status` returns the same link when nothing is saved yet. So does any tool that needs a login.
+### Scenarios and audit log
 
 ```bash
-kicktipp login --web
+kicktipp scenario "Bayern vs Dortmund=2:1"
+kicktipp scenario --target 1
+kicktipp whatif "2:1"
+kicktipp whatif suggest:ev
+kicktipp log
+kicktipp log --undo
 ```
 
-is the CLI equivalent, if you prefer to sign in before connecting any assistant.
+Every submission made through the CLI, TUI, or MCP server writes an entry to a local JSONL log. The record includes the previous value, which allows `log --undo` to restore the most recent successful submission.
 
-### Claude Desktop, by hand
-
-Settings → Developer → Edit config opens `~/Library/Application Support/Claude/claude_desktop_config.json` on a Mac. Add this under `mcpServers`, then fully quit and reopen Desktop:
-
-```json
-"kicktipp": {
-  "command": "node",
-  "args": [
-    "/absolute/path/to/kicktipp-agent/dist/server.js"
-  ]
-}
-```
-
-No `env` block. The program reads `config.ini`. Build first (`npm run build`). After a `git pull` that changes the server, build again or Desktop keeps using the old `dist`.
-
-In a new chat, tell the assistant to set up Kicktipp unless you already signed in. Then ask for status.
-
-### Claude Desktop, the bundle
-
-A packed `kicktipp.mcpb` is attached to every [GitHub release](https://github.com/Skriipt/kicktipp-agent/releases). Download it from the latest release:
-
-**[kicktipp.mcpb](https://github.com/Skriipt/kicktipp-agent/releases/latest/download/kicktipp.mcpb)**
-
-Double-click that file, or install it from Claude Desktop. Desktop shows a settings form: email, password, optional community slug, read-only. The password goes in the OS keychain and is passed to the local process as env. Quit and reopen Desktop.
-
-If you already signed in another way, the manual config above is simpler than filling that form.
-
-Packing it yourself from a checkout is optional. The release asset is the one to download:
+### Deadlines and notifications
 
 ```bash
-npm run pack:mcpb
+kicktipp deadline --check
+kicktipp remind --print cron
+kicktipp remind --print systemd
+kicktipp remind --ics season.ics
+kicktipp set-notify desktop
+kicktipp notify
 ```
 
-That writes `kicktipp.mcpb` in the repo root, with the version from `package.json`.
+`deadline --check` exits with status `2` when a missing tip is due within the warning window. The default is six hours. Change it with `--warn-hours` or `KICKTIPP_WARN_HOURS`.
 
-Turn the extension off if you also added the JSON snippet, so only one server runs.
+Notification backends:
 
-### Claude Code
+- `desktop` uses macOS Notification Center or `notify-send` on Linux
+- `webhook` sends JSON to the URL you configure
+- `command` passes the summary and report to a local executable
 
-**npm**
+The project has no built-in webhook destination.
+
+### Accounts, communities, and profiles
 
 ```bash
-claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
+kicktipp communities
+kicktipp set-community
+kicktipp players
+kicktipp set-player
+kicktipp profiles
+kicktipp -c another-pool schedule
+kicktipp -p work stats
 ```
 
-**This repo**, after `npm install` and `npm run build`. Replace the path.
+A profile keeps a separate account, community, player, and session. Existing installations without profiles continue to use the default sections in `config.ini`.
+
+### Remaining commands
+
+| Command | What it does |
+| --- | --- |
+| `login`, `logout` | Connect or remove a stored account and session |
+| `set-lang`, `set-site` | Save the interface language or preferred Kicktipp host |
+| `set-notify` | Configure one notification backend |
+| `cache status`, `cache clear` | Inspect or delete derived cache data |
+| `guide` | Print detailed instructions intended for an assistant |
+| `admin members` | List community members for a Spielleiter |
+| `admin bets <member>` | Inspect a member's tips |
+| `admin bet <member> ...` | Place tips for a member after an explicit name confirmation |
+
+## MCP server
+
+The MCP server exposes focused tools instead of a shell. An assistant can read live Kicktipp data, run local analytics, and, when allowed, submit tips.
+
+Read tools include:
+
+- `get_status`, `get_today_matches`, `get_bets`, `get_schedule`
+- `get_leaderboard`, `get_tip_status`, `get_overview`, `get_table`, `get_rules`
+- `get_communities`, `get_players`, `get_bonus_questions`
+- `get_deadline`, `get_stats`, `get_rival_analysis`, `suggest_bets`
+- `get_standings_scenarios`, `whatif`, `get_bet_log`
+- `list_members`, `get_bets_for_member`
+
+Local setup tools include:
+
+- `connect_account`, `set_community`, `set_player`, `set_notify`
+
+`sync_history` updates the local season cache.
+
+When read-only mode is disabled, the server also exposes:
+
+- `place_bets`, `place_bonus_bets`, `place_bets_for_member`
+
+After `sync_history`, MCP clients can also read cached JSON through these
+resource templates without making a request to Kicktipp:
+
+- `kicktipp://{community}/rules`
+- `kicktipp://{community}/leaderboard/{matchday}`
+- `kicktipp://{community}/schedule/{matchday}`
+
+The server returns a localhost setup link when authentication or community selection is missing. MCP clients never need the raw password in their conversation history.
+
+### Read-only mode
+
+Enable read-only mode in the setup page or start a process with:
+
+```bash
+KICKTIPP_READ_ONLY=1 kicktipp-agent-mcp
+```
+
+On PowerShell:
+
+```powershell
+$env:KICKTIPP_READ_ONLY = '1'
+kicktipp-agent-mcp
+```
+
+Read-only mode applies at three levels. The MCP server does not register write tools, CLI write commands stop before submission, and the core submission functions reject writes too.
+
+## Configuration
+
+Settings and sessions live under `~/.config/kicktipp-agent/` on every supported platform. Derived data uses the platform data directory:
+
+| Platform | Data directory |
+| --- | --- |
+| Linux | `$XDG_DATA_HOME/kicktipp-agent` or `~/.local/share/kicktipp-agent` |
+| macOS | `~/Library/Application Support/kicktipp-agent` |
+| Windows | `%APPDATA%\kicktipp-agent` |
+
+The cache is safe to delete and rebuild with `kicktipp sync`. Submission logs live in the `audit` subdirectory.
+
+Environment variables override saved configuration for the current process:
+
+| Variable | Purpose |
+| --- | --- |
+| `KICKTIPP_EMAIL`, `KICKTIPP_PASSWORD` | Provide credentials without writing them to `config.ini` |
+| `KICKTIPP_COMMUNITY`, `KICKTIPP_PLAYER` | Select a community and player |
+| `KICKTIPP_PROFILE` | Select a saved profile |
+| `KICKTIPP_LANG` | Set interface language to `en` or `de` |
+| `KICKTIPP_SITE` | Prefer `com` or `de` |
+| `KICKTIPP_BASE_URL` | Override the Kicktipp base URL |
+| `KICKTIPP_READ_ONLY` | Block all submission paths |
+| `KICKTIPP_DATA_DIR` | Override the cache and audit directory |
+| `KICKTIPP_TZ` | Override the timezone used for fixture times |
+| `KICKTIPP_WARN_HOURS` | Change the deadline warning window |
+| `KICKTIPP_SUGGEST_STRATEGY` | Set the default suggestion strategy |
+| `KICKTIPP_NOTIFY_KIND`, `KICKTIPP_NOTIFY_TARGET` | Override notification settings |
+
+## Privacy and safety
+
+- During login, the process sends credentials to the configured base URL, normally `kicktipp.com` or `kicktipp.de`. Treat any `KICKTIPP_BASE_URL` override as trusted. Do not put credentials in prompts, repository files, logs, or screenshots.
+- Password storage uses AES-256-GCM with a key derived from the local hostname and operating-system user. The encrypted value is tied to that machine and user account. It is not a substitute for an operating-system keychain.
+- Session-only storage keeps the login cookie instead of the password. When the session expires, you must reconnect through the setup page.
+- The setup listener binds to `127.0.0.1`, uses a random token in the URL, and stops after setup or a short timeout.
+- Read-only mode removes MCP write tools and blocks writes again inside the CLI and core logic.
+- Submissions are logged locally with their origin and previous values. A log failure is reported, but it does not cancel a submission you already requested.
+- Kicktipp hides other players' score predictions until the relevant deadline. `tip-status` reports submission state without revealing those hidden scores.
+
+## Troubleshooting
+
+**`node` or `npx` is not found.** Install Node.js 20 or newer, then open a new terminal so the updated `PATH` takes effect.
+
+**The setup page did not open.** Copy the printed `http://127.0.0.1:.../setup?token=...` URL into a browser on the same computer.
+
+**An assistant still shows no Kicktipp tools.** Restart the MCP client and open a new chat. Make sure you configured either the Desktop bundle or a manual server entry, not both.
+
+**A session-only login expired.** Run `kicktipp login --web` or ask the assistant to reconnect the account.
+
+**A source checkout behaves like the old version after `git pull`.** Run `npm run build` again. MCP clients execute `dist/server.js`, not the TypeScript source.
+
+**A page can no longer be parsed.** Retry against the other host with `--site de` or `--site com`. If the problem remains, [open an issue](https://github.com/Skriipt/kicktipp-agent/issues) with the command and sanitized error output. Never include credentials or private pool data.
+
+## Development
+
+Clone and verify the project:
+
+```bash
+git clone https://github.com/Skriipt/kicktipp-agent.git
+cd kicktipp-agent
+npm install
+npm run build
+npm test
+```
+
+Run a source checkout through the CLI:
+
+```bash
+node dist/index.js --help
+node dist/index.js login --web
+```
+
+Register the local build with Claude Code:
 
 ```bash
 claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
 ```
 
-Start a new chat. If Kicktipp is not signed in yet, tell the assistant to set up your account. Otherwise ask for Kicktipp status.
+Build the Claude Desktop bundle with `npm run pack:mcpb`. The script compiles the project, installs production dependencies in a staging directory, and writes `kicktipp.mcpb` to the repository root.
 
-### Session-only storage
-
-The setup page has a checkbox to keep the login cookie and drop the password (`store = session` under `[auth]`). A leaked config then has no Kicktipp password, and you can revoke the cookie on the Kicktipp site. When Kicktipp expires the session, this tool cannot log in again by itself. Tools return a fresh setup link instead. Opt-in, not the default.
-
-### Environment variables
-
-An `env` block in the client config still works and wins over the file. Use it only when a client cannot use the setup page or Desktop's settings form. The password then sits in that client's config:
-
-```json
-{
-  "mcpServers": {
-    "kicktipp": {
-      "command": "node",
-      "args": ["/absolute/path/to/kicktipp-agent/dist/server.js"],
-      "env": {
-        "KICKTIPP_EMAIL": "you@example.com",
-        "KICKTIPP_PASSWORD": "yourpassword"
-      }
-    }
-  }
-}
-```
-
-### Available tools
-
-| Tool | Description |
-|------|-------------|
-| `get_status` | Check if credentials and community are configured |
-| `connect_account` | Open the localhost setup page (for "set up kicktipp" / reconnect) |
-| `get_today_matches` | Today's matches with bet status |
-| `get_bets` | Matches and current bets for a matchday |
-| `get_schedule` | Match schedule with results |
-| `get_leaderboard` | Player rankings for a matchday |
-| `get_tip_status` | Full, partial, or missing tip submissions by player |
-| `get_overview` | Season overview across all matchdays |
-| `get_table` | League table (actual football standings) |
-| `get_rules` | Game rules and scoring system |
-| `get_communities` | List communities the user belongs to |
-| `get_players` | List players in the community |
-| `get_bonus_questions` | Bonus questions with options |
-| `set_community` | Set the active community |
-| `set_player` | Set which player you are |
-| `place_bets` | Place match bets by fixture name |
-| `place_bonus_bets` | Place bonus question answers |
-| `sync_history` | Fill the local cache so the analytics tools have data |
-| `get_stats` | Season analytics for a player |
-| `get_rival_analysis` | Gap, swing and overtake conditions vs. another player |
-| `suggest_bets` | Suggested bet slip from the odds (read-only, never submits) |
-| `get_deadline` | Countdown and which matches still need a bet |
-| `get_standings_scenarios` | Project the table under hypothetical results |
-| `whatif` | Replay the season under a different strategy |
-| `get_bet_log` | What this agent submitted, from the record |
-| `list_members` / `get_bets_for_member` / `place_bets_for_member` | Spielleiter tools |
-
-### Read-only mode
-
-For a connection that provably cannot bet, check read-only on the setup page, set `read_only = true` under `[server]`, or set `KICKTIPP_READ_ONLY=1` in an `env` block. Betting and settings tools are then never registered, so they do not appear in the tool list at all, and the submitting functions refuse independently. This is the recommended way to try the MCP server for the first time.
-
-### kicktipp.com and kicktipp.de
-
-Both sites work. The default is `https://www.kicktipp.com`. If a page is missing there, the same page is tried on kicktipp.de (and the other way around), including German and English URL spellings. You usually do not have to pick.
-
-To start on the German site on purpose, run `kicktipp set-site de` (or pick kicktipp.de on the setup page). `KICKTIPP_SITE=de` and `KICKTIPP_BASE_URL=https://www.kicktipp.de` still override for a single process.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
-
-## Development
-
-```bash
-npm test          # run tests
-npm run build     # compile TypeScript
-npm run pack:mcpb # zip dist + production deps into kicktipp.mcpb
-```
-
-## Credits
-
-Originally forked from [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot) by Stefan. The project has since been fully rewritten in TypeScript with a new CLI interface, MCP server, and Cheerio-based parsing.
+The project was originally forked from [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot) and has since been rewritten in TypeScript.
