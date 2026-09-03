@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { localizeMatchDates } from './helpers/match-date.js';
 import { applyNotifierSettings, notifierSnapshot } from './notify/backends.js';
@@ -124,7 +124,7 @@ function jsonResult(data: unknown) {
   };
 }
 
-const OUTPUT_SCHEMA = { data: z.unknown() };
+const OUTPUT_SCHEMA = z.object({ data: z.unknown() });
 
 
 const readOnly = isReadOnly();
@@ -138,7 +138,7 @@ server.registerTool(
   'get_status',
   {
     description: 'Check current configuration. Call this first for a status snapshot. If the user wants to connect or set up Kicktipp, call connect_account instead. If setup_url is set, ask the user to open that localhost page. Most tools require a community.',
-    inputSchema: {},
+    inputSchema: z.object({}),
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => {
@@ -174,12 +174,12 @@ server.registerTool(
   {
     description:
       'Connect or reconnect a Kicktipp account. Call this when the user asks to set up kicktipp-agent, log in, or reconnect. Returns a localhost URL they must open in a browser. Never ask them to paste a password into chat.',
-    inputSchema: {
+    inputSchema: z.object({
       reconnect: z
         .boolean()
         .optional()
         .describe('If true, start a fresh setup even when an account is already connected.'),
-    },
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ reconnect }) => {
@@ -210,7 +210,7 @@ server.registerTool(
   'get_today_matches',
   {
     description: "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
-    inputSchema: {},
+    inputSchema: z.object({}),
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => withFreshSession(async () => {
@@ -225,7 +225,7 @@ server.registerTool(
   'get_bets',
   {
     description: 'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
-    inputSchema: { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
+    inputSchema: z.object({ matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday }) => withFreshSession(async () => {
@@ -240,7 +240,7 @@ server.registerTool(
   'get_schedule',
   {
     description: 'Get the match schedule with results for a matchday.',
-    inputSchema: { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
+    inputSchema: z.object({ matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday }) => withFreshSession(async () => {
@@ -255,10 +255,10 @@ server.registerTool(
   'get_leaderboard',
   {
     description: 'Get player rankings for a matchday. Includes matches/results and ranking table with points.',
-    inputSchema: {
-    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
-    bonus: z.boolean().optional().describe('Show bonus question rankings instead of match rankings.'),
-  },
+    inputSchema: z.object({
+      matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
+      bonus: z.boolean().optional().describe('Show bonus question rankings instead of match rankings.'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday, bonus }) => withFreshSession(async () => {
@@ -276,7 +276,7 @@ server.registerTool(
   {
     description:
       'Show which players have submitted all, some, or none of their tips for a matchday. This is read-only and does not reveal the score predictions.',
-    inputSchema: {
+    inputSchema: z.object({
       matchday: z
         .number()
         .int()
@@ -284,7 +284,7 @@ server.registerTool(
         .max(34)
         .optional()
         .describe('Matchday number (1-34). Omit for the current matchday.'),
-    },
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday }) =>
@@ -299,7 +299,7 @@ server.registerTool(
   'get_overview',
   {
     description: 'Get the season overview showing all players and their points across matchdays.',
-    inputSchema: { view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') },
+    inputSchema: z.object({ view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ view }) => withFreshSession(async () => {
@@ -314,7 +314,7 @@ server.registerTool(
   'get_table',
   {
     description: 'Get the league table (standings of the actual football teams, not the prediction game).',
-    inputSchema: { option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') },
+    inputSchema: z.object({ option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ option }) => withFreshSession(async () => {
@@ -329,7 +329,7 @@ server.registerTool(
   'get_rules',
   {
     description: 'Get the game rules and scoring system.',
-    inputSchema: {},
+    inputSchema: z.object({}),
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => withFreshSession(async () => {
@@ -344,7 +344,7 @@ server.registerTool(
   'get_communities',
   {
     description: 'List all kicktipp communities the user belongs to.',
-    inputSchema: {},
+    inputSchema: z.object({}),
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => withFreshSession(async () => {
@@ -358,7 +358,7 @@ server.registerTool(
   'get_players',
   {
     description: 'List all players in the saved community.',
-    inputSchema: {},
+    inputSchema: z.object({}),
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => withFreshSession(async () => {
@@ -374,7 +374,7 @@ if (!readOnly) {
   'set_community',
   {
     description: 'Set the active community. Use get_communities first to see available options, then pass the exact name.',
-    inputSchema: { name: z.string().describe('Exact community name as returned by get_communities.') },
+    inputSchema: z.object({ name: z.string().describe('Exact community name as returned by get_communities.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ name }) => {
@@ -394,7 +394,7 @@ if (!readOnly) {
   'set_player',
   {
     description: 'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
-    inputSchema: { name: z.string().describe('Exact player name as returned by get_players.') },
+    inputSchema: z.object({ name: z.string().describe('Exact player name as returned by get_players.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ name }) => {
@@ -416,13 +416,13 @@ if (!readOnly) {
     {
       description:
         'Configure the local notifier used by reminders (kicktipp notify). Does not contact Kicktipp. kind is desktop (macOS/Linux notification), webhook (POST JSON to target URL), or command (run target). webhook and command require target. Environment variables KICKTIPP_NOTIFY_KIND / KICKTIPP_NOTIFY_TARGET override the saved file if set.',
-      inputSchema: {
+      inputSchema: z.object({
         kind: z.enum(['desktop', 'webhook', 'command']).describe('desktop, webhook, or command.'),
         target: z
           .string()
           .optional()
           .describe('Required for webhook (http(s) URL) and command (executable path). Omit for desktop.'),
-      },
+      }),
       outputSchema: OUTPUT_SCHEMA,
     },
     async ({ kind, target }) => {
@@ -453,7 +453,7 @@ server.registerTool(
   'get_bonus_questions',
   {
     description: 'Get available bonus questions with their options and current selections.',
-    inputSchema: {},
+    inputSchema: z.object({}),
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => withFreshSession(async () => {
@@ -468,10 +468,10 @@ server.registerTool(
   'whatif',
   {
     description: "Replay the cached season as if the player had followed a different strategy, and compare with what they actually scored. Strategies: a fixed scoreline such as '2:1', one of " + REPLAY_STRATEGIES.join(', ') + ", or suggest:safe|ev|contrarian. Needs a synced cache. Treat final_rank as an estimate — other players are compared on recorded totals that include bonus points the replay does not model.",
-    inputSchema: {
-    strategy: z.string().describe('A scoreline like "2:1", a named strategy, or "suggest:ev".'),
-    player: z.string().optional().describe('Player to replay (default: the configured player).'),
-  },
+    inputSchema: z.object({
+      strategy: z.string().describe('A scoreline like "2:1", a named strategy, or "suggest:ev".'),
+      player: z.string().optional().describe('Player to replay (default: the configured player).'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ strategy, player }) => {
@@ -502,19 +502,19 @@ server.registerTool(
   'get_standings_scenarios',
   {
     description: "Project the whole leaderboard under hypothetical results, or search for what has to happen for a player to reach a target rank. This answers questions like 'what do I need this weekend to take first?' in one call. Matches left unspecified come back as a rank range rather than a number, and the projection is exact only when every open match is given. Check the note field: before the deadline Kicktipp hides everyone's bets and nothing can be projected.",
-    inputSchema: {
-    results: z
-      .array(z.object({
-        home: z.string().describe('Home team, exactly as get_bets names it.'),
-        away: z.string().describe('Away team.'),
-        result: z.string().describe('Hypothetical result as "H:G", e.g. "2:1".'),
-      }))
-      .optional()
-      .describe('Hypothetical results. Omit for the full open-ended range.'),
-    matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
-    target_rank: z.number().int().min(1).optional().describe('Search for combinations reaching this rank instead of projecting.'),
-    player: z.string().optional().describe('Player for target_rank (default: the configured player).'),
-  },
+    inputSchema: z.object({
+      results: z
+        .array(z.object({
+          home: z.string().describe('Home team, exactly as get_bets names it.'),
+          away: z.string().describe('Away team.'),
+          result: z.string().describe('Hypothetical result as "H:G", e.g. "2:1".'),
+        }))
+        .optional()
+        .describe('Hypothetical results. Omit for the full open-ended range.'),
+      matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
+      target_rank: z.number().int().min(1).optional().describe('Search for combinations reaching this rank instead of projecting.'),
+      player: z.string().optional().describe('Player for target_rank (default: the configured player).'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ results, matchday, target_rank, player }) => withFreshSession(async () => {
@@ -541,10 +541,10 @@ server.registerTool(
   'get_bet_log',
   {
     description: 'Show what this agent has actually submitted to Kicktipp, with timestamps and which entry point did it. Use this to answer "what have you placed?" from the record rather than from memory. Records marked dry-run or intent never reached Kicktipp.',
-    inputSchema: {
-    matchday: z.number().int().min(1).max(34).optional().describe('Only this matchday.'),
-    include_all: z.boolean().optional().describe('Include dry runs, intents and failures (default: submitted only).'),
-  },
+    inputSchema: z.object({
+      matchday: z.number().int().min(1).max(34).optional().describe('Only this matchday.'),
+      include_all: z.boolean().optional().describe('Include dry runs, intents and failures (default: submitted only).'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday, include_all }) => {
@@ -561,10 +561,10 @@ server.registerTool(
   'get_deadline',
   {
     description: "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Kickoff instants are parsed from Kicktipp's HTML (Central Time on .com, Berlin on .de) and shown in the time_zone field, which is this machine unless KICKTIPP_TZ is set.",
-    inputSchema: {
-    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
-    warn_hours: z.number().positive().optional().describe('Urgency window in hours (default 6).'),
-  },
+    inputSchema: z.object({
+      matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
+      warn_hours: z.number().positive().optional().describe('Urgency window in hours (default 6).'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ matchday, warn_hours }) => withFreshSession(async () => {
@@ -583,7 +583,7 @@ server.registerTool(
   {
     description:
       'ADMIN ONLY: list the community members with their tipperIds, and whether each is a dummy member with no login. Requires the logged-in user to be a Spielleiter. Use this to find the id or exact name before any of the other admin tools.',
-    inputSchema: {},
+    inputSchema: z.object({}),
     outputSchema: OUTPUT_SCHEMA,
   },
   async () => withFreshSession(async () => {
@@ -598,10 +598,10 @@ server.registerTool(
   {
     description:
       "ADMIN ONLY: read another member's bets for a matchday through Tipps nachtragen. Requires Spielleiter rights.",
-    inputSchema: {
+    inputSchema: z.object({
       member: z.string().describe('Member name or tipperId, as listed by list_members.'),
       matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
-    },
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ member, matchday }) => withFreshSession(async () => {
@@ -616,10 +616,10 @@ server.registerTool(
   'get_stats',
   {
     description: 'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
-    inputSchema: {
-    player: z.string().optional().describe('Player name. Defaults to the configured player.'),
-    compare: z.string().optional().describe('Optional second player to compute alongside.'),
-  },
+    inputSchema: z.object({
+      player: z.string().optional().describe('Player name. Defaults to the configured player.'),
+      compare: z.string().optional().describe('Optional second player to compute alongside.'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ player, compare }) => {
@@ -652,10 +652,10 @@ server.registerTool(
   'sync_history',
   {
     description: 'Update the local season cache so get_stats has data to work with. Stops at the current matchday, skips finished and still-upcoming ones, and paces requests politely. The first run backfills holes; later runs usually cost one matchday. Pass to=34 to walk the rest of the season.',
-    inputSchema: {
-    from: z.number().int().min(1).max(34).optional().describe('First matchday (default 1).'),
-    to: z.number().int().min(1).max(34).optional().describe('Last matchday (default: Kicktipp current matchday, not 34).'),
-  },
+    inputSchema: z.object({
+      from: z.number().int().min(1).max(34).optional().describe('First matchday (default 1).'),
+      to: z.number().int().min(1).max(34).optional().describe('Last matchday (default: Kicktipp current matchday, not 34).'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ from, to }) => {
@@ -670,10 +670,10 @@ server.registerTool(
   'get_rival_analysis',
   {
     description: "Compare the user with another player for one matchday: the points gap, how much each remaining match can still swing it, and what has to happen to overtake them. Check the 'mode' field before answering - 'exact' means both bet sets are known, 'bounds' means the rival's bets are still hidden and the figures are best/worst limits, not predictions. Also report rules.source, since the point values may be assumed defaults rather than this community's real ones.",
-    inputSchema: {
-    rival: z.string().describe('Player to compare against, as named by get_players.'),
-    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
-  },
+    inputSchema: z.object({
+      rival: z.string().describe('Player to compare against, as named by get_players.'),
+      matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ rival, matchday }) => withFreshSession(async () => {
@@ -703,21 +703,21 @@ server.registerTool(
   'suggest_bets',
   {
     description: "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
-    inputSchema: {
-    strategy: z
-      .enum(['safe', 'ev', 'contrarian', 'auto'])
-      .optional()
-      .describe('Defaults to the configured strategy, or safe.'),
-    pin: z
-      .array(z.object({
-        home: z.string(),
-        away: z.string(),
-        bet: z.string().describe('Scoreline as "H:G".'),
-      }))
-      .optional()
-      .describe('Picks the user has fixed; the strategy fills in the rest and leaves these alone.'),
-    matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
-  },
+    inputSchema: z.object({
+      strategy: z
+        .enum(['safe', 'ev', 'contrarian', 'auto'])
+        .optional()
+        .describe('Defaults to the configured strategy, or safe.'),
+      pin: z
+        .array(z.object({
+          home: z.string(),
+          away: z.string(),
+          bet: z.string().describe('Scoreline as "H:G".'),
+        }))
+        .optional()
+        .describe('Picks the user has fixed; the strategy fills in the rest and leaves these alone.'),
+      matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ strategy, matchday, pin }) => withFreshSession(async () => {
@@ -748,7 +748,7 @@ if (!readOnly) {
     {
       description:
         "ADMIN ONLY and DESTRUCTIVE: submit bets on somebody else's account through Tipps nachtragen. Requires Spielleiter rights. This acts on another person's entry, so confirm with the user first and pass that person's exact name as confirm_member; a mismatch is refused and nothing is submitted. Use dry_run to preview. Format each bet as \"Home vs Away=H:G\".",
-      inputSchema: {
+      inputSchema: z.object({
         member: z.string().describe('Member name or tipperId, as listed by list_members.'),
         confirm_member: z
           .string()
@@ -756,7 +756,7 @@ if (!readOnly) {
         bets: z.array(z.string()).min(1).describe('Bets as "Home vs Away=H:G".'),
         matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
         dry_run: z.boolean().optional().describe('Validate and report without submitting.'),
-      },
+      }),
       outputSchema: OUTPUT_SCHEMA,
     },
     async ({ member, confirm_member, bets, matchday, dry_run }) => {
@@ -791,11 +791,11 @@ if (!readOnly) {
   'place_bets',
   {
     description: 'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
-    inputSchema: {
+    inputSchema: z.object({
       bets: z.array(z.string()).min(1).describe('Bets in format "Home vs Away=H:G", e.g. ["FC Bayern München vs Borussia Dortmund=2:1"]'),
       matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
       dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
-    },
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ bets, matchday, dry_run }) => {
@@ -812,10 +812,10 @@ if (!readOnly) {
   'place_bonus_bets',
   {
     description: 'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer". Ranking questions have several dropdowns (selects.length > 1): pass one array entry per slot in the SAME call, in order, repeating the question text. Example: ["Who will be relegated?=FC St. Pauli", "Who will be relegated?=1. FC Heidenheim", "Who will be relegated?=Holstein Kiel"]. A shorter list fills remaining empty slots instead of overwriting the first dropdown. A successful dry run still returns success=true with dry_run=true; nothing is submitted.',
-    inputSchema: {
+    inputSchema: z.object({
       bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer". Repeat the question once per ranking dropdown in a single call.'),
       dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
-    },
+    }),
     outputSchema: OUTPUT_SCHEMA,
   },
   async ({ bets, dry_run }) => {

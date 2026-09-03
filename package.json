@@ -34,10 +34,11 @@
     "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/server": "^2.0.0",
     "cheerio": "^1.0.0",
     "commander": "^13.0.0",
-    "ini": "^5.0.0"
+    "ini": "^5.0.0",
+    "zod": "^4.2.0"
   },
   "engines": {
     "node": ">=20"
