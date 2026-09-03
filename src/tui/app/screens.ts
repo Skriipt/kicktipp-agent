@@ -19,6 +19,7 @@ import type { Member } from '../../core.js';
 import { OVERVIEW_VIEW_OPTIONS } from '../../core.js';
 import { STRATEGIES, type StrategyName } from '../../analytics/strategies.js';
 import { REPLAY_STRATEGIES } from '../../analytics/replay.js';
+import { isOwnMatchSubmission } from '../../audit/log.js';
 import {
   initialState,
   handleKey as handleBetKey,
@@ -259,7 +260,7 @@ export function createScreen(app: AppApi, id: string): Screen {
         footer: [{ key: 'u', label: 'undo last submission' }],
         onKey: (records, key) => {
           if (key.type === 'char' && key.value === 'u') {
-            const last = [...(records ?? [])].reverse().find((r) => r.outcome === 'submitted' && r.kind === 'match');
+            const last = [...(records ?? [])].reverse().find(isOwnMatchSubmission);
             if (!last) {
               app.toast('No match submission to undo.', 'warn');
               return true;

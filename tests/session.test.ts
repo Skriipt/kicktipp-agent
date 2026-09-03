@@ -101,7 +101,9 @@ describe('launchBrowser', () => {
     await launchBrowser({ sessionFile, fetchImpl });
 
     expect(fs.existsSync(sessionFile)).toBe(true);
-    expect(fs.statSync(sessionFile).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(sessionFile).mode & 0o777).toBe(0o600);
+    }
     const stored = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
     expect(stored.cookies).toContainEqual(
       expect.objectContaining({ name: 'sid', value: 'valid' }),

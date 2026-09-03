@@ -57,12 +57,14 @@ describe('the audit file', () => {
     expect(readAudit('c')).toHaveLength(2);
   });
 
-  it('is written owner-only', () => {
+  it('is written owner-only where POSIX modes are available', () => {
     appendAudit({
       at: '', source: 'cli:bet', community: 'c', matchday: null,
       kind: 'match', dryRun: false, bets: [], outcome: 'submitted',
     });
-    expect(fs.statSync(auditFile('c')).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(auditFile('c')).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('skips a corrupt line rather than failing the read', () => {
@@ -158,5 +160,40 @@ describe('lastSubmission', () => {
     expect(lastSubmission('c')?.bets[0].bet).toBe('2:0');
     expect(lastSubmission('c', 1)?.bets[0].bet).toBe('1:0');
     expect(lastSubmission('c', 9)).toBeNull();
+  });
+
+  it('skips bonus and Spielleiter submissions when choosing what to undo', () => {
+    const base = {
+      community: 'c',
+      dryRun: false,
+      outcome: 'submitted' as const,
+    };
+    appendAudit({
+      ...base,
+      at: '2026-08-21T12:00:00.000Z',
+      source: 'cli:bet',
+      matchday: 3,
+      kind: 'match',
+      bets: [{ fixture: 'A vs B', bet: '2:1', previous: '1:1' }],
+    });
+    appendAudit({
+      ...base,
+      at: '2026-08-21T12:01:00.000Z',
+      source: 'mcp:place_bonus_bets',
+      matchday: null,
+      kind: 'bonus',
+      bets: [{ fixture: 'Champion', bet: 'Bayern', previous: null }],
+    });
+    appendAudit({
+      ...base,
+      at: '2026-08-21T12:02:00.000Z',
+      source: 'mcp:place_bets_for_member',
+      matchday: 3,
+      kind: 'match',
+      bets: [{ fixture: 'A vs B', bet: '3:0', previous: '0:0' }],
+      onBehalfOf: 'Oma',
+    });
+
+    expect(lastSubmission('c')).toMatchObject({ source: 'cli:bet', kind: 'match' });
   });
 });

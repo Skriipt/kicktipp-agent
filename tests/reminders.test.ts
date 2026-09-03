@@ -119,8 +119,9 @@ describe('notify', () => {
   });
 
   it('runs a command backend with the summary as an argument', async () => {
-    // `true` ignores its arguments and exits 0 on every POSIX system.
-    await expect(notify({ kind: 'command', target: 'true' }, 'summary', {})).resolves.toBeUndefined();
+    await expect(
+      notify({ kind: 'command', target: process.execPath }, '--version', {}),
+    ).resolves.toBeUndefined();
   });
 
   it('reports a command that does not exist', async () => {

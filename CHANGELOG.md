@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-09-03
+
+### Fixed
+
+- CLI and TUI undo now skip bonus tips and Spielleiter submissions made for another member, preventing them from being restored through the signed-in user's regular bet form.
+- Tests no longer assume POSIX file modes or commands, and MCP subprocess tests map their temporary home correctly on Windows.
+
+### Documentation
+
+- Clarified the undo boundary, Windows reminder and notification support, and the local setup access retained in MCP read-only mode.
+
 ## [1.2.2] - 2026-09-03
 
 ### Changed

@@ -120,14 +120,20 @@ kicktipp suggest --strategy ev
 kicktipp remind --ics season.ics
 ```
 
+`remind --install` and `--uninstall` manage systemd user units on Linux, while
+`--print cron` targets Unix-like crontabs. On Windows, use Task Scheduler or an
+`.ics` calendar. Desktop notifications support macOS and Linux; Windows users
+should configure the webhook or command backend.
+
 `sync` fills the local season cache. Suggestions use Kicktipp's published odds
 with `safe`, `ev`, or `contrarian` strategies. They print a slip but never
 submit unless you add `--place`. Existing tips remain unchanged unless you also
 add `--replace`.
 
-Every submission from the CLI, TUI, or MCP server is written to a local JSONL
-log with its previous value. Inspect it with `kicktipp log`; restore the latest
-successful submission with `kicktipp log --undo`.
+Submission activity from the CLI, TUI, and MCP server is written to a local
+JSONL audit log. `kicktipp log --undo` restores replaced values only from the
+latest successful regular match submission for the signed-in account. It skips
+bonus tips and Spielleiter submissions made for another member.
 
 Profiles keep separate accounts, communities, players, and sessions:
 
@@ -144,7 +150,8 @@ deadlines, statistics, suggestions, and Spielleiter actions. MCP clients read
 their names and schemas directly from the server.
 
 If setup is incomplete, `connect_account` returns a private localhost URL.
-Write tools are available only when read-only mode is disabled.
+Kicktipp-mutating and local settings tools are available only when read-only
+mode is disabled.
 
 Enable read-only mode in the setup page or when starting the server:
 
@@ -152,9 +159,10 @@ Enable read-only mode in the setup page or when starting the server:
 KICKTIPP_READ_ONLY=1 node /absolute/path/to/kicktipp-agent/dist/server.js
 ```
 
-Read-only mode removes MCP write tools. CLI commands and core submission
-functions also reject writes, so the restriction does not depend on the MCP
-client behaving correctly.
+Read-only mode removes those MCP tools. `connect_account` remains available and
+may save credentials and configuration locally, but it cannot submit tips or
+change data on Kicktipp. CLI commands and core submission functions also reject
+writes, so the restriction does not depend on the MCP client behaving correctly.
 
 ## Configuration
 

@@ -66,10 +66,12 @@ describe('CacheStore', () => {
     expect(store.read('schedule', 3)).toBeNull();
   });
 
-  it('writes files owner-only', () => {
+  it('writes files owner-only where POSIX modes are available', () => {
     store.write('schedule', SCHEDULE, 3);
-    const mode = fs.statSync(path.join(store.dir, 'matchday-03', 'schedule.json')).mode;
-    expect(mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      const mode = fs.statSync(path.join(store.dir, 'matchday-03', 'schedule.json')).mode;
+      expect(mode & 0o777).toBe(0o600);
+    }
   });
 
   it('leaves no temp file behind', () => {

@@ -11,8 +11,10 @@ import path from 'path';
  */
 function callServer(requests: object[], env: Record<string, string> = {}): Promise<any[]> {
   return new Promise((resolve, reject) => {
+    const childEnv = { ...process.env, ...env };
+    if (env.HOME && env.USERPROFILE === undefined) childEnv.USERPROFILE = env.HOME;
     const child = spawn('node', ['dist/server.js'], {
-      env: { ...process.env, ...env },
+      env: childEnv,
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     let out = '';

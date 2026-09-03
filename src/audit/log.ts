@@ -95,17 +95,22 @@ export function readAudit(community: string): AuditRecord[] {
     .filter((r): r is AuditRecord => r !== null);
 }
 
+/** Only these records can be restored through the signed-in user's bet form. */
+export function isOwnMatchSubmission(record: AuditRecord): boolean {
+  return record.outcome === 'submitted' && record.kind === 'match' && !record.onBehalfOf;
+}
+
 /**
- * The most recent successful submission, which is what `log --undo`
- * reverses. Intent and failure records are skipped: nothing reached
- * Kicktipp for those.
+ * The most recent successful match submission for the signed-in user,
+ * which is what `log --undo` reverses. Bonus and Spielleiter submissions
+ * need different forms and therefore cannot be restored through this path.
  */
 export function lastSubmission(
   community: string,
   matchday?: number,
 ): AuditRecord | null {
   const records = readAudit(community).filter(
-    (r) => r.outcome === 'submitted' && (matchday === undefined || r.matchday === matchday),
+    (r) => isOwnMatchSubmission(r) && (matchday === undefined || r.matchday === matchday),
   );
   return records.length ? records[records.length - 1] : null;
 }
