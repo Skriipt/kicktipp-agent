@@ -6,12 +6,16 @@
  * reported as unsupported rather than scored wrongly.
  */
 export interface ScoringRules {
-  /** Right score, e.g. predicted 2:1 and it finished 2:1. */
+  /** Right score after a win, e.g. predicted 2:1 and it finished 2:1. */
   exact: number;
   /** Right goal difference on a non-draw, e.g. predicted 2:1, finished 3:2. */
   goalDiff: number;
-  /** Right winner (or a draw predicted and drawn), nothing more. */
+  /** Right winner, nothing more. */
   tendency: number;
+  /** Exact draw; falls back to `exact` for older configs and parsed rules. */
+  drawExact?: number;
+  /** Inexact draw; falls back to `tendency` for older configs and parsed rules. */
+  drawTendency?: number;
   /**
    * Per-matchday point multipliers, for communities that double the final
    * matchday and the like. Applied when a matchday total is aggregated, not
@@ -35,10 +39,16 @@ export interface ResolvedRules {
   confidence: RulesConfidence;
   /** Present when the rules page held something this model cannot express. */
   warning?: string;
+  /** Prevent analytics from proceeding with a recognized but unsupported scheme. */
+  unsupported?: boolean;
 }
 
 /** Kicktipp's out-of-the-box scheme, used when nothing better is known. */
 export const DEFAULT_RULES: ScoringRules = { exact: 4, goalDiff: 3, tendency: 2 };
+
+export function formatScoringRules(rules: ScoringRules): string {
+  return `win: tendency ${rules.tendency}, difference ${rules.goalDiff}, exact ${rules.exact}; draw: tendency ${rules.drawTendency ?? rules.tendency}, exact ${rules.drawExact ?? rules.exact}`;
+}
 
 /** The multiplier a matchday's points are scaled by, default 1. */
 export function multiplierFor(matchday: number | null | undefined, rules: ScoringRules): number {
@@ -100,5 +110,10 @@ export function scoreBet(
   const b = typeof bet === 'string' || bet == null ? parseScore(bet as string) : bet;
   const r = typeof result === 'string' || result == null ? parseScore(result as string) : result;
   if (!b || !r) return 0;
-  return pointsFor(classify(b, r), rules);
+  const kind = classify(b, r);
+  if (tendencyOf(r) === 'draw') {
+    if (kind === 'exact') return rules.drawExact ?? rules.exact;
+    if (kind === 'tendency') return rules.drawTendency ?? rules.tendency;
+  }
+  return pointsFor(kind, rules);
 }

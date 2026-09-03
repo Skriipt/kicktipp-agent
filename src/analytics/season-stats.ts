@@ -1,5 +1,5 @@
 import type { ScoringRules } from '../rules/scoring.js';
-import { classify, parseScore, tendencyOf, type HitKind } from '../rules/scoring.js';
+import { classify, parseScore, scoreBet, tendencyOf, type HitKind } from '../rules/scoring.js';
 import { toNumber, type CachedMatchday, type CachedSeason } from './season.js';
 
 export interface FormPoint {
@@ -197,9 +197,7 @@ function buildBreakdown(
     const r = parseScore(result)!;
     const kind = classify(b, r);
     counts[kind]++;
-    if (kind === 'exact') points += rules.exact;
-    else if (kind === 'goalDiff') points += rules.goalDiff;
-    else if (kind === 'tendency') points += rules.tendency;
+    points += scoreBet(b, r, rules);
   }
 
   return { ...counts, scored: pairs.length, points };

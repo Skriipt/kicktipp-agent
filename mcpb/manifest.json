@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "kicktipp",
   "display_name": "Kicktipp",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "CLI and MCP server for kicktipp.com and kicktipp.de prediction pools.",
   "author": {
     "name": "Christian Heidorn",

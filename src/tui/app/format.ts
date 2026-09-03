@@ -27,6 +27,7 @@ import type { ReplayResult } from '../../analytics/replay.js';
 import type { RivalAnalysis } from '../../analytics/rivals.js';
 import type { ScenarioProjection } from '../../analytics/scenarios.js';
 import type { AuditRecord } from '../../audit/log.js';
+import { formatScoringRules, type ScoringRules } from '../../rules/scoring.js';
 import type { CacheInfo, SuggestOutcome } from './live-source.js';
 
 export const fixtureLabel = (home: string, away: string): string =>
@@ -336,7 +337,7 @@ export function suggestView(outcome: SuggestOutcome, width: number): string[] {
   const out: string[] = [];
   out.push(
     `${dim('Strategy')} ${badge(outcome.strategy.toUpperCase(), palette.bg, palette.primary)}  ${dim(
-      `rules ${outcome.rules.values.exact}/${outcome.rules.values.goalDiff}/${outcome.rules.values.tendency} (${outcome.rules.confidence})`,
+      `rules ${formatScoringRules(outcome.rules.values)} (${outcome.rules.confidence})`,
     )}`,
     '',
   );
@@ -438,8 +439,8 @@ function outcomeSplit(o: { home: number; draw: number; away: number }): string {
   return `${pct(o.home)} home · ${pct(o.draw)} draw · ${pct(o.away)} away`;
 }
 
-function ruleTag(rules: { exact: number; goalDiff: number; tendency: number }): string {
-  return `${rules.exact}/${rules.goalDiff}/${rules.tendency}`;
+function ruleTag(rules: ScoringRules): string {
+  return formatScoringRules(rules);
 }
 
 // ── Rival ─────────────────────────────────────────────────────────

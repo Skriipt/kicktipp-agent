@@ -68,6 +68,17 @@ describe('matchSwing with the rival hidden', () => {
     expect(swing.worstForMe).toBe(-RULES.exact);
     expect(swing.byOutcome).toBeUndefined();
   });
+
+  it('uses the draw exact value for the hidden rival bound', () => {
+    const swing = matchSwing(
+      OPEN,
+      null,
+      null,
+      { ...RULES, drawExact: 6 },
+      false,
+    );
+    expect(swing.worstForMe).toBe(-6);
+  });
 });
 
 function grid(overrides: Partial<MatchdayBets> = {}): MatchdayBets {

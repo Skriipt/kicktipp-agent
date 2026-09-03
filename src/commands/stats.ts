@@ -4,6 +4,7 @@ import { CacheStore } from '../cache/store.js';
 import { loadSeason } from '../analytics/season.js';
 import { computeSeasonStats, type SeasonStats } from '../analytics/season-stats.js';
 import { resolveRulesFromCache } from '../rules/resolve.js';
+import { formatScoringRules } from '../rules/scoring.js';
 import { t } from '../i18n/index.js';
 import { requireCommunity } from '../shared.js';
 
@@ -113,8 +114,7 @@ function render(stats: SeasonStats, rulesNote: string | undefined): string {
   }
 
   lines.push(
-    `Scoring: ${stats.rulesUsed.exact}/${stats.rulesUsed.goalDiff}/${stats.rulesUsed.tendency} ` +
-      '(exact/difference/tendency)' + (rulesNote ? ` — ${rulesNote}` : ''),
+    `Scoring: ${formatScoringRules(stats.rulesUsed)}` + (rulesNote ? ` — ${rulesNote}` : ''),
   );
   return lines.join('\n');
 }

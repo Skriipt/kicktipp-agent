@@ -120,7 +120,8 @@ export function projectStandings(
         return;
       }
       // Unknown match: at best this bet is exactly right, at worst it misses.
-      if (parseScore(bet)) best += rules.exact;
+      const parsedBet = parseScore(bet);
+      if (parsedBet) best += scoreBet(parsedBet, parsedBet, rules);
     });
 
     const start = before.get(entry.player) ?? 0;

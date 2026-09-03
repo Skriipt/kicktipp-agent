@@ -6,6 +6,17 @@ import type { CacheOptions } from '../cache/cached-fetch.js';
 import { parseScoringRules } from './parse-rules.js';
 import { DEFAULT_RULES, type ResolvedRules } from './scoring.js';
 
+function requireParsedRules(sections: Awaited<ReturnType<typeof fetchRules>>): ResolvedRules {
+  const parsed = parseScoringRules(sections);
+  if (!parsed || parsed.confidence === 'assumed' || parsed.unsupported) {
+    throw new Error(
+      parsed?.warning ??
+        "This community's scoring table is not supported. Set all point values under [scoring] in config.ini.",
+    );
+  }
+  return parsed;
+}
+
 /**
  * Work out how this community scores, in order: an explicit config override,
  * the community's own rules page, then Kicktipp's defaults. The result
@@ -20,20 +31,19 @@ export async function resolveRules(
   const override = readScoringOverride();
   if (override) return { values: override, source: 'config', confidence: 'parsed' };
 
+  let sections: Awaited<ReturnType<typeof fetchRules>>;
   try {
-    const sections = await fetchRules(page, community, cache);
-    const parsed = parseScoringRules(sections);
-    if (parsed) return parsed;
+    sections = await fetchRules(page, community, cache);
   } catch {
     // An unreadable rules page is not worth failing the command over.
+    return {
+      values: DEFAULT_RULES,
+      source: 'default',
+      confidence: 'assumed',
+      warning: "Could not read this community's scoring table; assuming Kicktipp's defaults (4/3/2).",
+    };
   }
-
-  return {
-    values: DEFAULT_RULES,
-    source: 'default',
-    confidence: 'assumed',
-    warning: "Could not read this community's scoring table; assuming Kicktipp's defaults (4/3/2).",
-  };
+  return requireParsedRules(sections);
 }
 
 /**
@@ -46,17 +56,12 @@ export function resolveRulesFromCache(store: CacheStore | null): ResolvedRules {
   if (override) return { values: override, source: 'config', confidence: 'parsed' };
 
   const cached = store?.read('rules');
-  if (cached) {
-    const parsed = parseScoringRules(cached.data);
-    if (parsed) return parsed;
-  }
+  if (cached) return requireParsedRules(cached.data);
 
   return {
     values: DEFAULT_RULES,
     source: 'default',
     confidence: 'assumed',
-    warning: store?.read('rules')
-      ? "Could not read this community's scoring table; assuming Kicktipp's defaults (4/3/2)."
-      : "No cached rules page; assuming Kicktipp's default scoring (4/3/2). Run `kicktipp sync` to read the real rules.",
+    warning: "No cached rules page; assuming Kicktipp's default scoring (4/3/2). Run `kicktipp sync` to read the real rules.",
   };
 }

@@ -130,6 +130,9 @@ with `safe`, `ev`, or `contrarian` strategies. They print a slip but never
 submit unless you add `--place`. Existing tips remain unchanged unless you also
 add `--replace`.
 
+Analytics read the community's win/draw point matrix from its rules page.
+Incomplete or unsupported scoring schemes are rejected instead of guessed.
+
 Submission activity from the CLI, TUI, and MCP server is written to a local
 JSONL audit log. `kicktipp log --undo` restores replaced values only from the
 latest successful regular match submission for the signed-in account. It skips

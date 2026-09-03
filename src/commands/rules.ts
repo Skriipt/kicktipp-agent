@@ -7,6 +7,7 @@ import { fetchRules, fetchLeaderboard, fetchMatchdayBets, type RulesSection } fr
 import { CacheStore } from '../cache/store.js';
 import { resolveRules } from '../rules/resolve.js';
 import { verifyRules } from '../rules/verify.js';
+import { formatScoringRules, type ScoringRules } from '../rules/scoring.js';
 import { t } from '../i18n/index.js';
 
 function render(sections: RulesSection[]): string {
@@ -40,12 +41,11 @@ function render(sections: RulesSection[]): string {
 }
 
 function renderVerification(
-  values: { exact: number; goalDiff: number; tendency: number },
+  values: ScoringRules,
   result: ReturnType<typeof verifyRules>,
 ): string {
   const lines = [
-    `Checking ${values.exact}/${values.goalDiff}/${values.tendency} ` +
-      `(exact/difference/tendency) against matchday ${result.matchday ?? 'current'}`,
+    `Checking ${formatScoringRules(values)} against matchday ${result.matchday ?? 'current'}`,
     '',
   ];
 

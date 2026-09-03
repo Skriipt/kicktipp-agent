@@ -107,6 +107,15 @@ describe('expectedPoints', () => {
     const generous = expectedPoints({ home: 2, away: 0 }, p, { exact: 20, goalDiff: 3, tendency: 2 });
     expect(generous).toBeGreaterThan(modest);
   });
+
+  it('uses the separate draw values', () => {
+    const points = expectedPoints(
+      { home: 1, away: 1 },
+      { home: 0, draw: 1, away: 0 },
+      { exact: 5, goalDiff: 3, tendency: 1, drawExact: 5, drawTendency: 2 },
+    );
+    expect(points).toBeCloseTo(3.32);
+  });
 });
 
 describe('strategies', () => {

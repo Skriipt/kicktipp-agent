@@ -1,4 +1,4 @@
-import { classify, parseScore, type ScoringRules, type Score, pointsFor } from '../rules/scoring.js';
+import { parseScore, scoreBet, type ScoringRules, type Score } from '../rules/scoring.js';
 import { mostLikely, type OddsMatch, type Probabilities } from './odds.js';
 import { formatScore, scorelineDistribution, typicalScore } from './score-map.js';
 
@@ -39,7 +39,7 @@ export function expectedPoints(
   rules: ScoringRules,
 ): number {
   return scorelineDistribution(probabilities).reduce(
-    (sum, { score, probability }) => sum + probability * pointsFor(classify(bet, score), rules),
+    (sum, { score, probability }) => sum + probability * scoreBet(bet, score, rules),
     0,
   );
 }

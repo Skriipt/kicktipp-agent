@@ -6,13 +6,13 @@ import { DEFAULT_RULES, type ResolvedRules, type ScoringRules } from './scoring.
  * English. Matching is done on a normalized (lowercased, punctuation-free)
  * form so spacing and articles do not matter.
  */
-/** The three numeric tiers; multipliers are parsed separately. */
-type PointKey = 'exact' | 'goalDiff' | 'tendency';
+/** Numeric scoring fields; multipliers are parsed separately. */
+type PointKey = 'exact' | 'goalDiff' | 'tendency' | 'drawExact' | 'drawTendency';
 
-const LABELS: { key: PointKey; patterns: RegExp[] }[] = [
+const LABELS: { key: 'exact' | 'goalDiff' | 'tendency'; patterns: RegExp[] }[] = [
   {
     key: 'exact',
-    patterns: [/richtiges?ergebnis/, /exactresult/, /correctresult/],
+    patterns: [/richtiges?ergebnis/, /ergebnis$/, /exactresult/, /correctresult/, /result$/],
   },
   {
     key: 'goalDiff',
@@ -43,14 +43,38 @@ function firstNumber(cells: string[]): number | null {
  * Read the point values out of a community's rules page.
  *
  * Returns null when the page holds no recognizable scoring table, so the
- * caller can fall back to the defaults and say so.
+ * caller can reject it or apply an explicit fallback.
  */
 export function parseScoringRules(sections: RulesSection[]): ResolvedRules | null {
   const found: Partial<Record<PointKey, number>> = {};
   let unsupported: string | undefined;
+  let matrix = false;
 
   for (const section of sections) {
     if (section.type !== 'table' || !section.rows) continue;
+
+    const win = section.rows.find((row) => /^(sieg|win)$/.test(normalize(row[0] ?? '')));
+    const draw = section.rows.find((row) => /^(unentschieden|draw)$/.test(normalize(row[0] ?? '')));
+    if (win && draw) {
+      const headers = section.headers ?? [];
+      const rowOffset = win.length === headers.length + 1 ? 1 : 0;
+      for (const { key, patterns } of LABELS) {
+        const column = headers.findIndex((header) =>
+          patterns.some((pattern) => pattern.test(normalize(header))),
+        );
+        if (column < 0) continue;
+        matrix = true;
+        const winValue = firstNumber([win[column + rowOffset] ?? '']);
+        if (winValue !== null && found[key] === undefined) found[key] = winValue;
+        const drawValue = firstNumber([draw[column + rowOffset] ?? '']);
+        if (drawValue !== null && key === 'exact' && found.drawExact === undefined) {
+          found.drawExact = drawValue;
+        }
+        if (drawValue !== null && key === 'tendency' && found.drawTendency === undefined) {
+          found.drawTendency = drawValue;
+        }
+      }
+    }
 
     for (const row of section.rows) {
       if (!row.length) continue;
@@ -77,12 +101,16 @@ export function parseScoringRules(sections: RulesSection[]): ResolvedRules | nul
   }
 
   // A partially recognized table is filled in from the defaults, and says so.
-  const missing = (['exact', 'goalDiff', 'tendency'] as const).filter((k) => found[k] === undefined);
+  const expected: PointKey[] = ['exact', 'goalDiff', 'tendency'];
+  if (matrix) expected.push('drawExact', 'drawTendency');
+  const missing = expected.filter((key) => found[key] === undefined);
   const values: ScoringRules = {
     exact: found.exact ?? DEFAULT_RULES.exact,
     goalDiff: found.goalDiff ?? DEFAULT_RULES.goalDiff,
     tendency: found.tendency ?? DEFAULT_RULES.tendency,
   };
+  if (found.drawExact !== undefined) values.drawExact = found.drawExact;
+  if (found.drawTendency !== undefined) values.drawTendency = found.drawTendency;
 
   const warnings = [
     missing.length ? `Assumed defaults for: ${missing.join(', ')}.` : '',
@@ -95,8 +123,9 @@ export function parseScoringRules(sections: RulesSection[]): ResolvedRules | nul
   return {
     values,
     source: 'parsed',
-    confidence: 'parsed',
+    confidence: missing.length ? 'assumed' : 'parsed',
     warning: warnings.length ? warnings.join(' ') : undefined,
+    unsupported: !!unsupported,
   };
 }
 

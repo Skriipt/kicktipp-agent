@@ -56,3 +56,18 @@ describe('saveAuth', () => {
     expect(ini).not.toMatch(/^password\s*=/m);
   });
 });
+
+describe('readScoringOverride', () => {
+  it('accepts separate draw values', async () => {
+    const config = await loadConfig(
+      '[scoring]\nexact = 5\ndiff = 3\ntendency = 1\ndraw_exact = 5\ndraw_tendency = 2\n',
+    );
+    expect(config.readScoringOverride()).toEqual({
+      exact: 5,
+      goalDiff: 3,
+      tendency: 1,
+      drawExact: 5,
+      drawTendency: 2,
+    });
+  });
+});

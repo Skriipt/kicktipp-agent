@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-09-03
+
+### Fixed
+
+- Analytics now parse Kicktipp's win/draw scoring matrix and apply separate tendency and exact-result points for draws across statistics, rival analysis, scenarios, replays, and expected-value suggestions.
+- Retrieved scoring tables that are incomplete or unsupported now stop analytics instead of silently using assumed point values.
+
+### Changed
+
+- Scoring summaries show the win and draw values explicitly, and manual `[scoring]` overrides accept `draw_exact` and `draw_tendency`.
+
 ## [1.2.3] - 2026-09-03
 
 ### Fixed

@@ -1,8 +1,7 @@
 import type { MatchdayBets, ScheduleMatch } from '../core.js';
 import {
-  classify,
   parseScore,
-  pointsFor,
+  scoreBet,
   type ScoringRules,
   type Score,
 } from '../rules/scoring.js';
@@ -69,7 +68,7 @@ function outcomeOf(score: Score): Outcome {
 }
 
 function pointsAgainst(bet: Score | null, result: Score, rules: ScoringRules): number {
-  return bet ? pointsFor(classify(bet, result), rules) : 0;
+  return bet ? scoreBet(bet, result, rules) : 0;
 }
 
 /**
@@ -112,7 +111,7 @@ export function matchSwing(
   for (const sample of OUTCOME_SAMPLES) {
     const myPoints = pointsAgainst(mine, sample, rules);
     // Without the rival's bet, bound their score by what any bet could earn.
-    const rivalPoints = rivalKnown ? pointsAgainst(theirs, sample, rules) : rules.exact;
+    const rivalPoints = rivalKnown ? pointsAgainst(theirs, sample, rules) : scoreBet(sample, sample, rules);
     const rivalFloor = rivalKnown ? rivalPoints : 0;
 
     const outcome = outcomeOf(sample);

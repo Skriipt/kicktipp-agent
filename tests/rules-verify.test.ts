@@ -44,6 +44,17 @@ describe('verifyRules', () => {
     expect(result.players.every((p) => p.agrees)).toBe(true);
   });
 
+  it('verifies separate draw points', () => {
+    const result = verifyRules(grid(), leaderboard({ Me: '7', Papa: '3' }), {
+      exact: 5,
+      goalDiff: 3,
+      tendency: 1,
+      drawExact: 5,
+      drawTendency: 2,
+    });
+    expect(result.verified).toBe(true);
+  });
+
   it('catches point values that do not reproduce them', () => {
     // With 3/2/1 the computed scores no longer match Kicktipp's numbers.
     const result = verifyRules(grid(), leaderboard({ Me: '6', Papa: '3' }), {

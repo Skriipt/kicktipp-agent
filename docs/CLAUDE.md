@@ -237,10 +237,10 @@ Everything below the HTTP layer is pure and testable without a network.
   overview views) are deliberately not cached so they cannot overwrite the
   canonical copy.
 - **Rules (`src/rules/`)** — the community's point values, resolved from a
-  config override, then the parsed rules page, then Kicktipp's 4/3/2 defaults.
-  `ResolvedRules.source` records which, and every consumer surfaces it.
-  Only the standard three-tier scheme is modelled; odds-based or multiplier
-  scoring is detected and flagged rather than scored wrongly.
+  config override and then the parsed rules page. Kicktipp's 4/3/2 defaults
+  are used only when the page is unavailable. `ResolvedRules.source` records
+  which, and every consumer surfaces it. The standard tiers support separate
+  win and draw values; odds-based scoring is flagged rather than scored wrongly.
 - **Analytics (`src/analytics/`)** — pure functions over cached data. Stats
   degrade per metric and report `completeness`. Another player's hit breakdown
   comes from the per-player bet grid, never from the account owner's own bets

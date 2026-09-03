@@ -67,6 +67,11 @@ describe('projectStandings with open matches', () => {
     expect(me.rankBest).toBeLessThanOrEqual(me.rankWorst);
   });
 
+  it('uses the draw exact value in the best-case range', () => {
+    const split = projectStandings(grid(), LEADERBOARD, { ...RULES, drawExact: 6 }, []);
+    expect(split.players.find((p) => p.player === 'Me')!.matchdayBest).toBe(10);
+  });
+
   it('tightens as matches get pinned', () => {
     const partial = projectStandings(grid(), LEADERBOARD, RULES, [
       { home: 'Bayern', away: 'BVB', result: '2:1' },

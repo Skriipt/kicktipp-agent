@@ -88,6 +88,36 @@ function table(rows: string[][]): RulesSection[] {
 }
 
 describe('parseScoringRules', () => {
+  it('reads Kicktipp\'s result matrix and scores draws separately', () => {
+    const parsed = parseScoringRules([{
+      type: 'table',
+      headers: ['', 'Tendenz', 'Tordifferenz', 'Ergebnis'],
+      rows: [
+        ['Sieg', '1', '3', '5'],
+        ['Unentschieden', '2', '-', '5'],
+      ],
+    }]);
+
+    expect(parsed?.values).toEqual({
+      exact: 5,
+      goalDiff: 3,
+      tendency: 1,
+      drawExact: 5,
+      drawTendency: 2,
+    });
+    expect(scoreBet('2:0', '1:0', parsed!.values)).toBe(1);
+    expect(scoreBet('1:1', '2:2', parsed!.values)).toBe(2);
+    expect(scoreBet('1:1', '1:1', parsed!.values)).toBe(5);
+    expect(scoreBet('1:1', '1:1', { ...parsed!.values, drawExact: 6 })).toBe(6);
+
+    const withoutCornerHeader = parseScoringRules([{
+      type: 'table',
+      headers: ['Tendenz', 'Tordifferenz', 'Ergebnis'],
+      rows: [['Sieg', '1', '3', '5'], ['Unentschieden', '2', '-', '5']],
+    }]);
+    expect(withoutCornerHeader?.values).toEqual(parsed?.values);
+  });
+
   it('reads a German rules table', () => {
     const parsed = parseScoringRules(table([
       ['Richtiges Ergebnis', '4'],
@@ -112,6 +142,7 @@ describe('parseScoringRules', () => {
     const parsed = parseScoringRules(table([['Richtiges Ergebnis', '6']]));
     expect(parsed?.values.exact).toBe(6);
     expect(parsed?.values.tendency).toBe(DEFAULT_RULES.tendency);
+    expect(parsed?.confidence).toBe('assumed');
     expect(parsed?.warning).toMatch(/Assumed defaults/);
   });
 
@@ -122,6 +153,7 @@ describe('parseScoringRules', () => {
       ['Richtige Tendenz', '2'],
       ['Quotenbonus', 'je nach Quote'],
     ]));
+    expect(parsed?.unsupported).toBe(true);
     expect(parsed?.warning).toMatch(/does not cover/);
   });
 

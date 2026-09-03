@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import * as ini from 'ini';
 import readline from 'readline';
 import { t } from './i18n/index.js';
+import type { ScoringRules } from './rules/scoring.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
@@ -307,15 +308,27 @@ export function saveNotifySection(notify: { kind: string; target?: string }): vo
  *   exact = 4
  *   diff = 3
  *   tendency = 2
+ *   draw_exact = 4
+ *   draw_tendency = 2
  */
-export function readScoringOverride(): { exact: number; goalDiff: number; tendency: number } | null {
+export function readScoringOverride(): ScoringRules | null {
   const scoring = readConfig().scoring;
   if (!scoring) return null;
   const exact = Number(scoring.exact);
   const goalDiff = Number(scoring.diff ?? scoring.goalDiff);
   const tendency = Number(scoring.tendency);
   if (![exact, goalDiff, tendency].every(Number.isFinite)) return null;
-  return { exact, goalDiff, tendency };
+  const rules: ScoringRules = { exact, goalDiff, tendency };
+  for (const [property, value] of [
+    ['drawExact', scoring.draw_exact ?? scoring.drawExact],
+    ['drawTendency', scoring.draw_tendency ?? scoring.drawTendency],
+  ] as const) {
+    if (value === undefined) continue;
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    rules[property] = number;
+  }
+  return rules;
 }
 
 /** Default suggestion strategy, from [suggest] strategy or the environment. */
