@@ -4,7 +4,7 @@
 
 Use [Kicktipp](https://www.kicktipp.com/) from a terminal or an MCP-compatible assistant.
 
-[![npm](https://img.shields.io/npm/v/kicktipp-agent?style=flat-square)](https://www.npmjs.com/package/kicktipp-agent)
+[![GitHub release](https://img.shields.io/github/v/release/Skriipt/kicktipp-agent?style=flat-square)](https://github.com/Skriipt/kicktipp-agent/releases/latest)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Release](https://img.shields.io/github/actions/workflow/status/Skriipt/kicktipp-agent/release-mcpb.yml?style=flat-square&label=release)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/release-mcpb.yml)
 
@@ -27,12 +27,22 @@ It can show fixtures, tips, rankings, rules, deadlines, and season statistics. I
 
 Install [Node.js](https://nodejs.org/) 20 or newer, then choose the setup that matches how you want to use the project.
 
+> [!NOTE]
+> This fork is not published on npm. The unscoped `kicktipp-agent` package on
+> npm belongs to the upstream project. Install this fork from its source or use
+> the Claude Desktop bundle from GitHub Releases.
+
 ### Terminal
 
-Install the CLI, connect your account through the local setup page, and open the dashboard:
+Clone and build this fork, link its CLI, then open the dashboard:
 
 ```bash
-npm install --global kicktipp-agent
+git clone https://github.com/Skriipt/kicktipp-agent.git
+cd kicktipp-agent
+npm install
+npm run build
+npm link
+
 kicktipp login --web
 kicktipp tui
 ```
@@ -59,23 +69,24 @@ The bundle runs the MCP server on your computer. It is not a hosted service.
 
 ### Claude Code
 
-Register the published MCP server:
+Clone and build the repository as shown under [Terminal](#terminal), then
+register the compiled MCP server. Replace the example with the absolute path to
+your checkout:
 
 ```bash
-claude mcp add kicktipp -- npx -y -p kicktipp-agent kicktipp-agent-mcp
+claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
 ```
 
 Start a new chat and ask Claude to set up your Kicktipp account. It will return a private localhost URL. Open that page to sign in and select a community. Do not paste your password into the chat.
 
 ### Other MCP clients
 
-Configure the client to run this local command over standard input and output:
+Build a local checkout, then configure the client to run this command over
+standard input and output:
 
 ```bash
-npx -y -p kicktipp-agent kicktipp-agent-mcp
+node /absolute/path/to/kicktipp-agent/dist/server.js
 ```
-
-The aliases `kicktipp-mcp` and `kicktipp-agent-mcp` start the same server.
 
 ## How it works
 
@@ -287,14 +298,14 @@ The server returns a localhost setup link when authentication or community selec
 Enable read-only mode in the setup page or start a process with:
 
 ```bash
-KICKTIPP_READ_ONLY=1 kicktipp-agent-mcp
+KICKTIPP_READ_ONLY=1 node /absolute/path/to/kicktipp-agent/dist/server.js
 ```
 
 On PowerShell:
 
 ```powershell
 $env:KICKTIPP_READ_ONLY = '1'
-kicktipp-agent-mcp
+node C:\absolute\path\to\kicktipp-agent\dist\server.js
 ```
 
 Read-only mode applies at three levels. The MCP server does not register write tools, CLI write commands stop before submission, and the core submission functions reject writes too.
@@ -340,7 +351,7 @@ Environment variables override saved configuration for the current process:
 
 ## Troubleshooting
 
-**`node` or `npx` is not found.** Install Node.js 20 or newer, then open a new terminal so the updated `PATH` takes effect.
+**`node` or `npm` is not found.** Install Node.js 20 or newer, then open a new terminal so the updated `PATH` takes effect.
 
 **The setup page did not open.** Copy the printed `http://127.0.0.1:.../setup?token=...` URL into a browser on the same computer.
 
