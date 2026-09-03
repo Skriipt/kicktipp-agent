@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-03
+
 ### Changed
 
 - Migrated the MCP server from the monolithic TypeScript SDK v1 package to the stable v2 server package and Standard Schema registration API.
