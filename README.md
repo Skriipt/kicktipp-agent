@@ -390,4 +390,12 @@ claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
 
 Build the Claude Desktop bundle with `npm run pack:mcpb`. The script compiles the project, installs production dependencies in a staging directory, and writes `kicktipp.mcpb` to the repository root.
 
-The project was originally forked from [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot) and has since been rewritten in TypeScript.
+## Credits
+
+This repository is a fork of Christian Heidorn's
+[kicktipp-agent](https://github.com/christianheidorn/kicktipp-agent). Thanks to
+Christian for the upstream project and the work this version builds on.
+
+The upstream project began as a fork of
+[schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot) and was
+later rewritten in TypeScript.
