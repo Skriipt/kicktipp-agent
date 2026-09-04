@@ -74,6 +74,98 @@ describe('the MCP server as a client sees it', () => {
       expect(tool, `${tool.name} output`).toHaveProperty('outputSchema');
       expect(tool.description?.length ?? 0).toBeGreaterThan(20);
     }
+    expect(tools.map((tool: { name: string }) => tool.name).filter((name: string) =>
+      name.startsWith('get_service_') || name === 'list_notification_targets'))
+      .toEqual(['get_service_status', 'get_service_health', 'list_notification_targets']);
+  });
+
+  it('exposes exactly three summary-only local Service reads without private content', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-service-'));
+    const configDir = path.join(root, 'config');
+    const dataDir = path.join(root, 'data');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true });
+    const jobId = '9e90818e-a71f-472c-b4ad-c82f67f5195c';
+    const groupId = 'a'.repeat(64);
+    const notificationId = 'b'.repeat(64);
+    const participant = 'Private Participant MCP Canary';
+    const message = 'Private notification MCP canary';
+    const secretReference = 'MCP_PRIVATE_WEBHOOK';
+    fs.writeFileSync(path.join(configDir, 'service.json'), JSON.stringify({
+      schemaVersion: 1,
+      job: {
+        id: jobId,
+        name: 'community-reminder',
+        enabled: true,
+        profileId: 'service-profile',
+        communityId: 'family',
+        language: 'en',
+        displayTimezone: 'Europe/Berlin',
+        policy: {
+          matchSelection: 'next-deadline-group',
+          completion: 'all-games-in-group',
+          excludeParticipantIds: [],
+          stages: [{ beforeDeadlineMinutes: 60, severity: 'urgent' }],
+        },
+        targetIds: ['family-hook'],
+      },
+      targets: [{ id: 'family-hook', enabled: true, provider: 'webhook', urlRef: `env:${secretReference}` }],
+    }), { mode: 0o600 });
+    fs.writeFileSync(path.join(dataDir, 'service-state.json'), JSON.stringify({
+      schemaVersion: 1,
+      jobId,
+      initializedAt: new Date().toISOString(),
+      stageOutcomes: [],
+      notifications: [{
+        id: notificationId,
+        jobId,
+        createdAt: new Date().toISOString(),
+        language: 'en',
+        displayTimezone: 'Europe/Berlin',
+        content: { schemaVersion: 1, type: 'reminder', severity: 'urgent', title: message, message },
+        deadlineGroup: { id: groupId, deadlineAt: '2099-09-04T18:00:00.000Z', gameIds: ['game-a'] },
+        stage: '60',
+        missingParticipants: [{ id: 'private-id', displayName: participant }],
+      }],
+      deliveries: [],
+      attempts: [],
+      scheduler: {
+        kicktippNetworkFailures: 0,
+        lastScheduleFetchAt: new Date().toISOString(),
+        lastReliableCheckAt: new Date().toISOString(),
+        reminderCapabilityAvailable: true,
+        sessionCondition: 'authenticated',
+        deadlineGroupId: groupId,
+        nextDeadlineAt: '2099-09-04T18:00:00.000Z',
+      },
+    }), { mode: 0o600 });
+    fs.writeFileSync(path.join(dataDir, 'service.lock'), JSON.stringify({
+      schemaVersion: 1,
+      pid: process.pid,
+      hostname: os.hostname(),
+      startedAt: new Date().toISOString(),
+      token: 'mcp-test',
+    }), { mode: 0o600 });
+
+    try {
+      const messages = await callServer([
+        INIT,
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_service_status', arguments: {} } },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_service_health', arguments: {} } },
+        { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'list_notification_targets', arguments: {} } },
+      ], { HOME: home, KICKTIPP_CONFIG_DIR: configDir, KICKTIPP_DATA_DIR: dataDir });
+      const results = [2, 3, 4].map((id) => messages.find((item) => item.id === id)?.result?.structuredContent?.data);
+      expect(results[0]).toMatchObject({ readable: true, notifications: [{ missingParticipantCount: 1 }] });
+      expect(results[1]).toMatchObject({ status: 'healthy' });
+      expect(results[2]).toMatchObject({ readable: true, targets: [{ secrets: [{ sourceClass: 'env' }] }] });
+      const encoded = JSON.stringify(results);
+      expect(encoded).not.toContain(participant);
+      expect(encoded).not.toContain(message);
+      expect(encoded).not.toContain(secretReference);
+      expect(encoded).not.toContain('env:');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('answers a tool call with both text and structured content', async () => {

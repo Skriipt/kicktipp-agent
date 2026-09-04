@@ -52,6 +52,17 @@ interface Wall {
   minute: number;
 }
 
+export type StrictTimestampResolution =
+  | { resolved: true; instant: Date }
+  | {
+      resolved: false;
+      reason:
+        | 'invalid-timestamp'
+        | 'unknown-source-time-zone'
+        | 'ambiguous-local-timestamp'
+        | 'nonexistent-local-timestamp';
+    };
+
 /** Read the wall-clock parts out of Kicktipp's German or US date formats. */
 function parseWallClock(dateStr: string): Wall | null {
   const trimmed = dateStr.trim();
@@ -109,6 +120,85 @@ function offsetMinutes(instant: Date, timeZone: string): number {
     get('second'),
   );
   return (asUtc - instant.getTime()) / 60000;
+}
+
+function wallClockAt(instant: Date, timeZone: string): Wall {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(instant);
+  const get = (type: string): number =>
+    Number(parts.find((value) => value.type === type)?.value ?? '0');
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour') % 24,
+    minute: get('minute'),
+  };
+}
+
+/**
+ * Resolve a provider wall clock only when it identifies exactly one instant.
+ * This strict path is for autonomous reminders; legacy interactive views keep
+ * their best-effort parsing behavior through `parseMatchDate`.
+ */
+export function resolveMatchDateStrict(
+  dateStr: string,
+  timeZone: string,
+): StrictTimestampResolution {
+  const wall = parseWallClock(dateStr);
+  if (!wall) return { resolved: false, reason: 'invalid-timestamp' };
+
+  const naiveUtc = Date.UTC(
+    wall.year,
+    wall.month - 1,
+    wall.day,
+    wall.hour,
+    wall.minute,
+  );
+  const normalized = new Date(naiveUtc);
+  if (
+    normalized.getUTCFullYear() !== wall.year ||
+    normalized.getUTCMonth() + 1 !== wall.month ||
+    normalized.getUTCDate() !== wall.day ||
+    normalized.getUTCHours() !== wall.hour ||
+    normalized.getUTCMinutes() !== wall.minute
+  ) {
+    return { resolved: false, reason: 'invalid-timestamp' };
+  }
+
+  let offsets: Set<number>;
+  try {
+    offsets = new Set(
+      [-86_400_000, 0, 86_400_000].map((delta) =>
+        offsetMinutes(new Date(naiveUtc + delta), timeZone),
+      ),
+    );
+  } catch {
+    return { resolved: false, reason: 'unknown-source-time-zone' };
+  }
+
+  const candidates = Array.from(offsets)
+    .map((offset) => new Date(naiveUtc - offset * 60_000))
+    .filter((instant) => {
+      const candidate = wallClockAt(instant, timeZone);
+      return (Object.keys(wall) as Array<keyof Wall>).every(
+        (key) => candidate[key] === wall[key],
+      );
+    });
+  if (candidates.length === 1) return { resolved: true, instant: candidates[0] };
+  return {
+    resolved: false,
+    reason: candidates.length
+      ? 'ambiguous-local-timestamp'
+      : 'nonexistent-local-timestamp',
+  };
 }
 
 /**

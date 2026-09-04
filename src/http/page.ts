@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import type { AnyNode, Element } from 'domhandler';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { urlBase, getAlternateUrls } from '../url.js';
@@ -304,10 +305,13 @@ export class Page {
 
   saveSession(file: string): void {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmpFile = `${file}.tmp`;
-    fs.writeFileSync(tmpFile, JSON.stringify(this.jar.toJSON(), null, 2));
-    fs.chmodSync(tmpFile, 0o600);
-    fs.renameSync(tmpFile, file);
+    const tmpFile = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(tmpFile, JSON.stringify(this.jar.toJSON(), null, 2), { mode: 0o600 });
+      fs.renameSync(tmpFile, file);
+    } finally {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    }
   }
 
   // ── Internals ────────────────────────────────────────────────────

@@ -1,0 +1,19 @@
+services:
+  kicktipp:
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 35s
+    command: ["kicktipp", "serve", "--log-format", "json"]
+    volumes:
+      - ./config:/config:ro
+      - kicktipp-data:/data
+      - ./secrets:/run/secrets:ro
+    healthcheck:
+      test: ["CMD", "kicktipp", "service", "health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  kicktipp-data:

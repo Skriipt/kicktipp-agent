@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import crypto from 'crypto';
 import { CookieJar } from '../http/cookie-jar.js';
 import { Page, type FetchLike } from '../http/page.js';
-import { getCommunities, login } from '../browser.js';
-import { saveAuth, saveCommunity, saveReadOnly, saveUiLanguage, saveUiSite, sessionFile, type AuthStore } from '../config.js';
+import { getCommunities, login, saveProfileSession } from '../browser.js';
+import { saveAuth, saveCommunity, saveReadOnly, saveUiLanguage, saveUiSite, type AuthStore } from '../config.js';
 import { communityPage, donePage, forbiddenPage, loginPage } from './html.js';
 import { parseLanguage, setLanguage, t } from '../i18n/index.js';
 import { parseSite, setUrlBase, siteLabel } from '../url.js';
@@ -225,9 +225,9 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
         return;
       }
 
-      saveAuth({ email, password: store === 'password' ? password : undefined, store });
+      await saveProfileSession(page);
+      await saveAuth({ email, password: store === 'password' ? password : undefined, store });
       saveReadOnly(readOnly);
-      page.saveSession(sessionFile());
 
       const communities = await getCommunities(page);
       if (communities.length === 0) {

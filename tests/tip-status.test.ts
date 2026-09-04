@@ -1,5 +1,14 @@
+import fs from 'fs';
 import { describe, expect, it } from 'vitest';
-import { parseTipStatusHtml } from '../src/tip-status.js';
+import {
+  parseStablePredictionStatusHtml,
+  parseTipStatusHtml,
+} from '../src/tip-status.js';
+
+const STABLE_HTML = fs.readFileSync(
+  new URL('./fixtures/tip-status.html', import.meta.url),
+  'utf8',
+);
 
 const HTML = `
   <div id="kicktipp-content">
@@ -83,6 +92,78 @@ describe('parseTipStatusHtml', () => {
       totalMatches: 0,
       players: [],
       summary: { complete: 0, partial: 0, missing: 0 },
+    });
+  });
+});
+
+describe('parseStablePredictionStatusHtml', () => {
+  it('maps duplicate display names by provider identity', () => {
+    expect(parseStablePredictionStatusHtml(STABLE_HTML)).toEqual({
+      available: true,
+      participants: [
+        { id: '9002', displayName: 'Alex' },
+        { id: '9001', displayName: 'Alex' },
+      ],
+      games: [{ id: '7001' }, { id: '7002' }],
+      cells: [
+        { participantId: '9002', gameId: '7001', status: 'missing' },
+        { participantId: '9002', gameId: '7002', status: 'predicted' },
+        { participantId: '9001', gameId: '7001', status: 'predicted' },
+        { participantId: '9001', gameId: '7002', status: 'missing' },
+      ],
+    });
+  });
+
+  it('keeps prediction ownership when participant rows are reordered', () => {
+    const rows = STABLE_HTML.match(/<tr class="teilnehmer"[\s\S]*?<\/tr>/g) ?? [];
+    const reordered = STABLE_HTML
+      .replace(rows[0]!, '__FIRST_PARTICIPANT__')
+      .replace(rows[1]!, rows[0]!)
+      .replace('__FIRST_PARTICIPANT__', rows[1]!);
+    const result = parseStablePredictionStatusHtml(reordered);
+
+    expect(result.available).toBe(true);
+    if (!result.available) return;
+    expect(result.participants.map(({ id }) => id)).toEqual(['9001', '9002']);
+    expect(result.cells.filter(({ participantId }) => participantId === '9002')).toEqual([
+      { participantId: '9002', gameId: '7001', status: 'missing' },
+      { participantId: '9002', gameId: '7002', status: 'predicted' },
+    ]);
+  });
+
+  it('is unavailable when a provider identifier is missing or ambiguous', () => {
+    const missingParticipantId = STABLE_HTML
+      .replace(' data-teilnehmer-id="9002"', '')
+      .replace('rankingTeilnehmerId=9002', 'participant=9002');
+    expect(parseStablePredictionStatusHtml(missingParticipantId)).toEqual({
+      available: false,
+      reason: 'missing-or-ambiguous-participant-id',
+    });
+
+    const missingGameId = STABLE_HTML.replace('tippspielId=7002', 'game=7002');
+    expect(parseStablePredictionStatusHtml(missingGameId)).toEqual({
+      available: false,
+      reason: 'missing-or-ambiguous-game-id',
+    });
+
+    const ambiguousParticipantId = STABLE_HTML.replace(
+      'rankingTeilnehmerId=9002',
+      'rankingTeilnehmerId=different',
+    );
+    expect(parseStablePredictionStatusHtml(ambiguousParticipantId)).toEqual({
+      available: false,
+      reason: 'missing-or-ambiguous-participant-id',
+    });
+  });
+
+  it('is unavailable instead of treating an incomplete matrix cell as missing', () => {
+    const incomplete = STABLE_HTML.replace(
+      '<td class="ereignis ereignis1">-:-</td>',
+      '',
+    );
+    expect(parseStablePredictionStatusHtml(incomplete)).toEqual({
+      available: false,
+      reason: 'incomplete-matrix',
     });
   });
 });

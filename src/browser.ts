@@ -2,18 +2,29 @@ import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
 import { urlLogin, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
-import { sessionFile, loadCredentials, isSessionOnly, SessionOnlyExpiredError } from './config.js';
+import {
+  getActiveProfile,
+  sessionFile,
+  loadCredentials,
+  loadProfileCredentials,
+  isSessionOnly,
+  isProfileSessionOnly,
+  SessionOnlyExpiredError,
+} from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
 import { t } from './i18n/index.js';
 import { normalizeSlug } from './helpers/normalize-slug.js';
 import { CookieJar } from './http/cookie-jar.js';
 import { Page } from './http/page.js';
 import type { FetchLike } from './http/page.js';
+import { withAuthProfileMutation } from './auth-profile-lock.js';
 
 export { Page } from './http/page.js';
 export type { FetchLike } from './http/page.js';
 
 export interface LaunchOptions {
+  /** Explicit Auth Profile. Omit to preserve interactive active-profile behavior. */
+  profileId?: string;
   /** Where to persist cookies. Pass null to keep the session in memory only. */
   sessionFile?: string | null;
   /** Injection point for tests. */
@@ -25,36 +36,65 @@ export interface LaunchOptions {
  * they still work, otherwise log in and save fresh ones.
  */
 export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
-  const file = opts.sessionFile === undefined ? sessionFile() : opts.sessionFile;
+  const profileId = opts.profileId === undefined ? getActiveProfile() : opts.profileId;
+  const file = opts.sessionFile === undefined ? sessionFile(profileId) : opts.sessionFile;
 
-  if (file && fs.existsSync(file)) {
+  const restoreSession = async (): Promise<Page | null> => {
+    if (!file || !fs.existsSync(file)) return null;
     status(t('status.restoringSession'));
+    let page: Page;
     try {
       const stored = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      const page = new Page(CookieJar.fromJSON(stored), opts.fetchImpl);
-      await page.goto(getCommunitiesUrl());
-      if (!page.isAuthRedirect() && !page.isNotFound()) {
-        statusClear();
-        return page;
-      }
+      page = new Page(CookieJar.fromJSON(stored), opts.fetchImpl);
     } catch {
-      // An unreadable or outdated session file is not worth reporting —
-      // logging in again produces a good one.
+      return null;
     }
+    try {
+      await page.goto(getCommunitiesUrl());
+    } catch (error) {
+      await page.close();
+      statusClear();
+      throw error;
+    }
+    if (!page.isAuthRedirect() && !page.isNotFound()) {
+      statusClear();
+      return page;
+    }
+    await page.close();
     status(t('status.sessionExpired'));
-  }
+    return null;
+  };
 
-  if (isSessionOnly()) {
+  const restored = await restoreSession();
+  if (restored) return restored;
+
+  return withAuthProfileMutation(profileId, async () => {
+    // Another process may have refreshed this profile while we waited.
+    const refreshed = await restoreSession();
+    if (refreshed) return refreshed;
+
+    const sessionOnly = opts.profileId === undefined
+      ? isSessionOnly()
+      : isProfileSessionOnly(opts.profileId);
+    if (sessionOnly) {
+      statusClear();
+      throw new SessionOnlyExpiredError();
+    }
+
     statusClear();
-    throw new SessionOnlyExpiredError();
-  }
+    const { email, password } = opts.profileId === undefined
+      ? await loadCredentials()
+      : await loadProfileCredentials(opts.profileId);
+    const page = new Page(new CookieJar(), opts.fetchImpl);
+    await login(page, email, password);
+    if (file) page.saveSession(file);
+    return page;
+  });
+}
 
-  statusClear();
-  const { email, password } = await loadCredentials();
-  const page = new Page(new CookieJar(), opts.fetchImpl);
-  await login(page, email, password);
-  if (file) page.saveSession(file);
-  return page;
+/** Persist a newly authenticated interactive session through its profile lock. */
+export async function saveProfileSession(page: Page, profileId = getActiveProfile()): Promise<void> {
+  await withAuthProfileMutation(profileId, () => page.saveSession(sessionFile(profileId)));
 }
 
 export async function login(page: Page, username: string, password: string): Promise<void> {

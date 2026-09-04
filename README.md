@@ -178,6 +178,54 @@ Common environment overrides include `KICKTIPP_EMAIL`, `KICKTIPP_PASSWORD`,
 `KICKTIPP_TZ`, and `KICKTIPP_READ_ONLY`. Run `kicktipp guide` for detailed
 usage and configuration help.
 
+### Docker Service
+
+The Compose example builds locally and runs the regular `kicktipp serve`
+process without an inbound port. It mounts Config from `./config` read-only,
+stores Service State in the `kicktipp-data` volume, and mounts Secret files
+from `./secrets` read-only. Put only Secret References such as
+`file:/run/secrets/discord-webhook` in `service.json`; never put secret values
+in the image, `compose.yaml`, or `service.json`. `env:NAME` references can
+instead receive named variables from a private Compose override.
+
+Create the host directories and prepare a valid Service configuration as
+`service.json` in the repository root. This one-time setup container writes
+Config and initial State through the existing durable setup operation; its
+explicit volume override is the only time `/config` is writable:
+
+```bash
+mkdir -p config secrets
+chmod 700 config secrets
+
+docker compose build
+docker compose run --rm --no-deps \
+  --volume "$PWD/config:/config:rw" \
+  --volume "$PWD/service.json:/setup/service.json:ro" \
+  --entrypoint node kicktipp \
+  --input-type=module --eval '
+    import fs from "node:fs";
+    const { setupService } = await import("./dist/service/store.js");
+    setupService(JSON.parse(fs.readFileSync("/setup/service.json", "utf8")));
+  '
+```
+
+On Linux, `config` must be writable and Secret files readable by UID 1000, the
+non-root `node` user in the image; adjust their ownership when the host user
+has a different UID. After setup, start and inspect the Service:
+
+```bash
+docker compose up -d
+docker compose exec kicktipp kicktipp service health
+docker compose logs -f kicktipp
+docker compose down
+```
+
+Compose uses JSON Service logs, `restart: unless-stopped`, an init process, and
+a 35-second stop grace period for the Service's internal 30-second shutdown
+contract. The Healthcheck runs `kicktipp service health` locally every 60
+seconds and does not contact Kicktipp or a Notification Target. Run the Docker
+smoke proof with `npm run test:docker`.
+
 ## Privacy and safety
 
 - Credentials go to the configured Kicktipp base URL during login. Treat a

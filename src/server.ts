@@ -27,6 +27,7 @@ import { resolveRules } from './rules/resolve.js';
 import { toOddsMatches } from './analytics/odds.js';
 import { suggestBets, type StrategyName } from './analytics/strategies.js';
 import { fetchTipStatus } from './tip-status.js';
+import { getServiceStatus } from './service/status.js';
 import {
   AuthError,
   resolveCommunity,
@@ -166,6 +167,41 @@ server.registerTool(
           setup_url,
           setup_instructions,
         });
+  },
+);
+
+server.registerTool(
+  'get_service_status',
+  {
+    description: 'Read summary-only Service Status from local configuration, State, and lock metadata without network requests.',
+    inputSchema: z.object({}),
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async () => jsonResult(getServiceStatus()),
+);
+
+server.registerTool(
+  'get_service_health',
+  {
+    description: 'Read current Service Health from local persisted observations without contacting Kicktipp or Notification providers.',
+    inputSchema: z.object({}),
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async () => jsonResult(getServiceStatus().health),
+);
+
+server.registerTool(
+  'list_notification_targets',
+  {
+    description: 'List summary-only local Notification Targets without Secret References, values, names, paths, or network requests.',
+    inputSchema: z.object({}),
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async () => {
+    const status = getServiceStatus();
+    return jsonResult(status.readable
+      ? { readable: true, targets: status.targets }
+      : { readable: false, error: status.error });
   },
 );
 

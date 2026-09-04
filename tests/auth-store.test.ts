@@ -33,7 +33,7 @@ afterEach(() => {
 describe('saveAuth', () => {
   it('encrypts a password by default', async () => {
     const config = await loadConfig();
-    config.saveAuth({ email: 'me@example.com', password: 'secret' });
+    await config.saveAuth({ email: 'me@example.com', password: 'secret' });
     expect(config.hasCredentials()).toBe(true);
     expect(config.hasUsableAuth()).toBe(true);
     expect(config.isSessionOnly()).toBe(false);
@@ -45,8 +45,8 @@ describe('saveAuth', () => {
 
   it('drops the password when store is session', async () => {
     const config = await loadConfig();
-    config.saveAuth({ email: 'me@example.com', password: 'secret', store: 'password' });
-    config.saveAuth({ email: 'me@example.com', store: 'session' });
+    await config.saveAuth({ email: 'me@example.com', password: 'secret', store: 'password' });
+    await config.saveAuth({ email: 'me@example.com', store: 'session' });
     expect(config.hasCredentials()).toBe(false);
     expect(config.hasUsableAuth()).toBe(true);
     expect(config.isSessionOnly()).toBe(true);

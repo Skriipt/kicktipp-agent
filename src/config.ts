@@ -6,6 +6,7 @@ import * as ini from 'ini';
 import readline from 'readline';
 import { t } from './i18n/index.js';
 import type { ScoringRules } from './rules/scoring.js';
+import { withAuthProfileMutation } from './auth-profile-lock.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
@@ -54,8 +55,10 @@ function writeProfileSection(
   else config.profile = { ...(config.profile ?? {}), [name]: merged };
 }
 
-function profileSection(config: Record<string, any>): Record<string, any> | null {
-  const name = getActiveProfile();
+function profileSection(
+  config: Record<string, any>,
+  name: string | null = getActiveProfile(),
+): Record<string, any> | null {
   if (!name) return null;
   const section = readProfileSection(config, name);
   if (!section) {
@@ -67,8 +70,7 @@ function profileSection(config: Record<string, any>): Record<string, any> | null
 }
 
 /** Session cookies are per profile so two accounts never share a jar. */
-export function sessionFile(): string {
-  const name = getActiveProfile();
+export function sessionFile(name: string | null = getActiveProfile()): string {
   return name
     ? path.join(CONFIG_DIR, `session-${name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
     : path.join(CONFIG_DIR, 'session.json');
@@ -125,10 +127,13 @@ export function readConfig(): Record<string, any> {
 
 function writeConfig(config: Record<string, any>): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  const tmpFile = CONFIG_FILE + '.tmp';
-  fs.writeFileSync(tmpFile, ini.stringify(config));
-  fs.chmodSync(tmpFile, 0o600);
-  fs.renameSync(tmpFile, CONFIG_FILE);
+  const tmpFile = `${CONFIG_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(tmpFile, ini.stringify(config), { mode: 0o600 });
+    fs.renameSync(tmpFile, CONFIG_FILE);
+  } finally {
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+  }
 }
 
 // ── Credentials ─────────────────────────────────────────────────────
@@ -145,6 +150,13 @@ export class SessionOnlyExpiredError extends Error {
   constructor() {
     super('Kicktipp session expired. Reconnect via the setup page.');
     this.name = 'SessionOnlyExpiredError';
+  }
+}
+
+export class MissingProfileCredentialsError extends Error {
+  constructor() {
+    super('The configured Auth Profile has no stored credentials.');
+    this.name = 'MissingProfileCredentialsError';
   }
 }
 
@@ -169,9 +181,8 @@ export function hasUsableAuth(): boolean {
   return !!(block?.email && block.store === 'session');
 }
 
-export function saveAuth(opts: { email: string; password?: string; store?: AuthStore }): void {
+export async function saveAuth(opts: { email: string; password?: string; store?: AuthStore }): Promise<void> {
   const store = opts.store ?? 'password';
-  const config = readConfig();
   const profile = getActiveProfile();
   const patch: Record<string, string> = { email: opts.email, store };
 
@@ -182,14 +193,17 @@ export function saveAuth(opts: { email: string; password?: string; store?: AuthS
     patch.password = encrypt(opts.password);
   }
 
-  if (profile) {
-    writeProfileSection(config, profile, patch);
-    if (store === 'session') delete readProfileSection(config, profile)?.password;
-  } else {
-    config.auth = { ...(config.auth ?? {}), ...patch };
-    if (store === 'session') delete config.auth.password;
-  }
-  writeConfig(config);
+  await withAuthProfileMutation(profile, () => {
+    const config = readConfig();
+    if (profile) {
+      writeProfileSection(config, profile, patch);
+      if (store === 'session') delete readProfileSection(config, profile)?.password;
+    } else {
+      config.auth = { ...(config.auth ?? {}), ...patch };
+      if (store === 'session') delete config.auth.password;
+    }
+    writeConfig(config);
+  });
 }
 
 export function saveReadOnly(readOnly: boolean): void {
@@ -260,6 +274,28 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
   writeConfig(config2);
   console.log(t('config.credentialsSaved'));
   return { email, password };
+}
+
+/** Load exactly one Auth Profile, ignoring interactive environment selection. */
+export async function loadProfileCredentials(
+  profileId: string,
+): Promise<{ email: string; password: string }> {
+  let block: Record<string, any> | null;
+  try {
+    block = profileSection(readConfig(), profileId);
+  } catch {
+    throw new MissingProfileCredentialsError();
+  }
+  if (block?.email && block?.password) {
+    return { email: block.email, password: decrypt(block.password) };
+  }
+  if (block?.email && block.store === 'session') throw new SessionOnlyExpiredError();
+  throw new MissingProfileCredentialsError();
+}
+
+export function isProfileSessionOnly(profileId: string): boolean {
+  const block = profileSection(readConfig(), profileId);
+  return block?.store === 'session' && !block?.password;
 }
 
 export function loadCommunity(): string | null {
@@ -370,13 +406,17 @@ export function hasCredentials(): boolean {
   return !!(config.auth?.email && config.auth?.password);
 }
 
-export function logout(): void {
-  const removed: string[] = [];
-  for (const p of [CONFIG_FILE, sessionFile()]) {
-    if (fs.existsSync(p)) {
-      fs.unlinkSync(p);
-      removed.push(path.basename(p));
+export async function logout(): Promise<void> {
+  const profile = getActiveProfile();
+  const removed = await withAuthProfileMutation(profile, () => {
+    const files: string[] = [];
+    for (const p of [CONFIG_FILE, sessionFile(profile)]) {
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+        files.push(path.basename(p));
+      }
     }
-  }
+    return files;
+  });
   console.log(removed.length ? t('logout.removed', { names: removed.join(', ') }) : t('logout.nothing'));
 }

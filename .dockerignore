@@ -1,0 +1,10 @@
+.git
+.github
+.env*
+node_modules
+dist
+coverage
+config
+data
+secrets
+*.mcpb

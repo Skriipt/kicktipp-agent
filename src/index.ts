@@ -42,6 +42,9 @@ import { registerScenarioCommand } from './commands/scenario.js';
 import { registerWhatifCommand } from './commands/whatif.js';
 import { registerAdminCommand } from './commands/admin.js';
 import { registerTuiCommand } from './commands/tui.js';
+import { registerTargetsCommand } from './commands/targets.js';
+import { registerServiceCommand } from './commands/service.js';
+import { registerDoctorCommand } from './commands/doctor.js';
 import { currentLanguage, parseLanguage, resolveLanguage, setLanguage, t } from './i18n/index.js';
 import { parseSite, resolveBaseUrl, setUrlBase, siteLabel, urlBase } from './url.js';
 
@@ -138,7 +141,7 @@ program
 program
   .command('logout')
   .description(t('cmd.logout.description'))
-  .action(() => logout());
+  .action(async () => logout());
 
 program
   .command('communities')
@@ -246,6 +249,9 @@ registerScenarioCommand(program);
 registerWhatifCommand(program);
 registerAdminCommand(program);
 registerTuiCommand(program);
+registerTargetsCommand(program);
+registerServiceCommand(program);
+registerDoctorCommand(program);
 
 export { program, ensureCommunity, ask };
 

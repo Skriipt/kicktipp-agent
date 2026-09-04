@@ -29,6 +29,7 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "test": "vitest run",
+    "test:docker": "bash scripts/docker-smoke.sh",
     "test:watch": "vitest",
     "pack:mcpb": "bash scripts/pack-mcpb.sh",
     "prepublishOnly": "npm test && npm run build"

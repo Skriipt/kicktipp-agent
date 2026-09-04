@@ -25,6 +25,38 @@ export interface TipStatusData {
   summary: TipStatusSummary;
 }
 
+export type PredictionStatusKind = 'predicted' | 'missing';
+
+export interface StablePredictionParticipant {
+  id: string;
+  displayName: string;
+}
+
+export interface StablePredictionGame {
+  id: string;
+}
+
+export interface ParticipantGamePredictionStatus {
+  participantId: string;
+  gameId: string;
+  status: PredictionStatusKind;
+}
+
+export type StablePredictionStatus =
+  | {
+      available: true;
+      participants: StablePredictionParticipant[];
+      games: StablePredictionGame[];
+      cells: ParticipantGamePredictionStatus[];
+    }
+  | {
+      available: false;
+      reason:
+        | 'missing-or-ambiguous-participant-id'
+        | 'missing-or-ambiguous-game-id'
+        | 'incomplete-matrix';
+    };
+
 function emptyTipStatus(title = ''): TipStatusData {
   return {
     title,
@@ -46,6 +78,133 @@ function eventClassForHeader(
   return index !== undefined ? `ereignis${index}` : null;
 }
 
+function eventHeaders(ranking: cheerio.Cheerio<any>): any[] {
+  const gameHeaders = ranking
+    .find('thead th.ereignis[data-spiel="true"]')
+    .toArray();
+  return gameHeaders.length
+    ? gameHeaders
+    : ranking.find('thead th.ereignis[data-index]').toArray();
+}
+
+export function providerIdFromUrl(
+  value: string | undefined,
+  parameter: string,
+): string | null | undefined {
+  if (!value) return undefined;
+  try {
+    const values = new URL(value, 'https://www.kicktipp.invalid').searchParams
+      .getAll(parameter)
+      .map((id) => id.trim());
+    if (!values.length) return undefined;
+    return values.length === 1 && values[0] ? values[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+function participantId(
+  $: cheerio.CheerioAPI,
+  row: any,
+): string | null {
+  const attributeId = ($(row).attr('data-teilnehmer-id') || '').trim();
+  const url = $(row).attr('data-url');
+  const urlId = providerIdFromUrl(url, 'rankingTeilnehmerId');
+  if (urlId === null) return null;
+  const ids = [attributeId, urlId].filter((id): id is string => !!id);
+  return ids.length && ids.every((id) => id === ids[0]) ? ids[0] : null;
+}
+
+function gameIdForHeader(
+  $: cheerio.CheerioAPI,
+  header: any,
+): string | null {
+  const ids = $(header)
+    .find('a[href]')
+    .toArray()
+    .map((link) => providerIdFromUrl($(link).attr('href'), 'tippspielId'));
+  if (ids.some((id) => id === null)) return null;
+  const found = ids.filter((id): id is string => !!id);
+  return found.length && found.every((id) => id === found[0])
+    ? found[0]
+    : null;
+}
+
+/**
+ * Parse the provider identities and complete Participant–Game status matrix.
+ * Partial data is intentionally not returned because it is unsafe for Reminders.
+ */
+export function parseStablePredictionStatusHtml(
+  html: string,
+): StablePredictionStatus {
+  const $ = cheerio.load(html);
+  const ranking = $('#kicktipp-content table#ranking').first();
+  if (!ranking.length) return { available: false, reason: 'incomplete-matrix' };
+
+  const games: StablePredictionGame[] = [];
+  const columns: Array<{ eventClass: string; gameId: string }> = [];
+  const eventClasses = new Set<string>();
+  const gameIds = new Set<string>();
+  for (const header of eventHeaders(ranking)) {
+    const eventClass = eventClassForHeader($, header);
+    const gameId = gameIdForHeader($, header);
+    if (
+      !eventClass ||
+      !/^ereignis\d+$/.test(eventClass) ||
+      !gameId ||
+      eventClasses.has(eventClass) ||
+      gameIds.has(gameId)
+    ) {
+      return { available: false, reason: 'missing-or-ambiguous-game-id' };
+    }
+    eventClasses.add(eventClass);
+    gameIds.add(gameId);
+    games.push({ id: gameId });
+    columns.push({ eventClass, gameId });
+  }
+  if (!games.length) return { available: false, reason: 'incomplete-matrix' };
+
+  const participants: StablePredictionParticipant[] = [];
+  const cells: ParticipantGamePredictionStatus[] = [];
+  const participantIds = new Set<string>();
+  const rows = ranking
+    .find('tbody tr')
+    .filter(
+      (_, row) =>
+        $(row).hasClass('teilnehmer') ||
+        !!$(row).find('div.mg_name').first().text().trim(),
+    )
+    .toArray();
+  if (!rows.length) return { available: false, reason: 'incomplete-matrix' };
+
+  for (const row of rows) {
+    const displayName = $(row).find('div.mg_name').first().text().trim();
+    const id = participantId($, row);
+    if (!displayName || !id || participantIds.has(id)) {
+      return { available: false, reason: 'missing-or-ambiguous-participant-id' };
+    }
+    if ($(row).children('td.ereignis').length !== games.length) {
+      return { available: false, reason: 'incomplete-matrix' };
+    }
+
+    participantIds.add(id);
+    participants.push({ id, displayName });
+    for (const column of columns) {
+      const cell = $(row).children(`td.${column.eventClass}`);
+      if (cell.length !== 1) {
+        return { available: false, reason: 'incomplete-matrix' };
+      }
+      cells.push({
+        participantId: id,
+        gameId: column.gameId,
+        status: cell.text().trim() ? 'predicted' : 'missing',
+      });
+    }
+  }
+
+  return { available: true, participants, games, cells };
+}
+
 export function parseTipStatusHtml(html: string): TipStatusData {
   const $ = cheerio.load(html);
   const content = $('#kicktipp-content');
@@ -54,22 +213,11 @@ export function parseTipStatusHtml(html: string): TipStatusData {
   if (!ranking.length) return emptyTipStatus(title);
 
   const eventClasses: string[] = [];
-  ranking
-    .find('thead th.ereignis[data-spiel="true"]')
-    .each((_, header) => {
-      const eventClass = eventClassForHeader($, header);
-      if (eventClass && !eventClasses.includes(eventClass)) {
-        eventClasses.push(eventClass);
-      }
-    });
-
-  if (!eventClasses.length) {
-    ranking.find('thead th.ereignis[data-index]').each((_, header) => {
-      const eventClass = eventClassForHeader($, header);
-      if (eventClass && !eventClasses.includes(eventClass)) {
-        eventClasses.push(eventClass);
-      }
-    });
+  for (const header of eventHeaders(ranking)) {
+    const eventClass = eventClassForHeader($, header);
+    if (eventClass && !eventClasses.includes(eventClass)) {
+      eventClasses.push(eventClass);
+    }
   }
 
   const totalMatches = eventClasses.length;
@@ -118,4 +266,13 @@ export async function fetchTipStatus(
 ): Promise<TipStatusData> {
   await page.goto(getLeaderboardUrl(community, matchday));
   return parseTipStatusHtml(await page.content());
+}
+
+export async function fetchStablePredictionStatus(
+  page: Page,
+  community: string,
+  matchday?: number,
+): Promise<StablePredictionStatus> {
+  await page.goto(getLeaderboardUrl(community, matchday));
+  return parseStablePredictionStatusHtml(await page.content());
 }
