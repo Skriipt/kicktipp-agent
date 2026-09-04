@@ -169,9 +169,27 @@ writes, so the restriction does not depend on the MCP client behaving correctly.
 
 ## Configuration
 
-Settings and sessions live in `~/.config/kicktipp-agent/`. Cache and audit data
-use the platform data directory. Inspect or clear the cache with
-`kicktipp cache status` and `kicktipp cache clear`.
+Settings and sessions live in `~/.config/kicktipp-agent/` by default, preserving
+existing CLI installations. `KICKTIPP_CONFIG_DIR` overrides the directory for
+`config.ini`; `KICKTIPP_DATA_DIR` independently moves session cookies and Auth
+Profile mutation locks to writable storage. Without a Data override, cookies
+and auth locks remain beside `config.ini`. Cache and audit data use the platform
+data directory. Inspect or clear the cache with `kicktipp cache status` and
+`kicktipp cache clear`.
+
+Default `session.json` and simple profile filenames such as `session-work.json`
+are unchanged. Other profile names are URL-encoded, not replaced with underscores:
+`team/a`, `team?a`, and `team_a` now have separate cookie files. Sessions formerly
+saved under a lossy name (for example `session-team_a.json` for `team/a`) are not
+automatically adopted: reconnect that profile to avoid using another account's
+cookie. On case-insensitive filesystems, avoid profile names differing only by
+letter case. Moving to an explicit Data directory requires copying known,
+correctly owned sessions there (see Docker below); there is no implicit fallback
+to old cookie files.
+
+On Linux, Service and Auth mutation locks require util-linux `flock` (included
+in the tested container image). See [lock ownership and upgrade notes](docs/service-lock-ownership.md)
+for stranded legacy locks, the persistent `.guard` files, and platform limits.
 
 Common environment overrides include `KICKTIPP_EMAIL`, `KICKTIPP_PASSWORD`,
 `KICKTIPP_COMMUNITY`, `KICKTIPP_PROFILE`, `KICKTIPP_SITE`, `KICKTIPP_LANG`,
@@ -181,8 +199,9 @@ usage and configuration help.
 ### Docker Service
 
 The Compose example builds locally and runs the regular `kicktipp serve`
-process without an inbound port. It mounts Config from `./config` read-only,
-stores Service State in the `kicktipp-data` volume, and mounts Secret files
+process without an inbound port. It mounts Config (`service.json`, `config.ini`)
+from `./config` read-only, stores Service State, session cookies and Auth Profile
+locks in the writable `kicktipp-data` volume, and mounts Secret files
 from `./secrets` read-only. Put only Secret References such as
 `file:/run/secrets/discord-webhook` in `service.json`; never put secret values
 in the image, `compose.yaml`, or `service.json`. `env:NAME` references can
@@ -211,7 +230,46 @@ docker compose run --rm --no-deps \
 
 On Linux, `config` must be writable and Secret files readable by UID 1000, the
 non-root `node` user in the image; adjust their ownership when the host user
-has a different UID. After setup, start and inspect the Service:
+has a different UID. Use BCP 47 language tags such as `de-DE` (not `de_DE`) in
+Service configuration.
+
+The Service's `profileId` must also exist in `/config/config.ini`. For example,
+for an existing session-only login to profile `work`, place this in
+`config/config.ini` (use the account's actual email):
+
+```ini
+[profile.work]
+email = you@example.com
+store = session
+```
+
+Copy that account's existing `session-work.json` into `config/` temporarily,
+then seed the persistent Data volume without making Config writable:
+
+```bash
+chmod 600 config/config.ini config/session-work.json
+docker compose run --rm --no-deps --entrypoint node kicktipp --input-type=module --eval '
+  import fs from "node:fs";
+  fs.copyFileSync("/config/session-work.json", "/data/session-work.json", fs.constants.COPYFILE_EXCL);
+  fs.chmodSync("/data/session-work.json", 0o600);
+'
+rm config/session-work.json
+```
+
+Only import a session whose account ownership is known; never reuse an ambiguous
+legacy sanitized filename for a different profile. The copy refuses to overwrite
+an existing Data session. Session-only profiles require reconnection when cookies
+expire. For password-backed profiles, provision credentials in a setup container
+with writable Config, using the same `node` user and hostname as the runtime.
+Compose fixes the hostname to `kicktipp-agent` so encrypted passwords remain
+readable after container recreation. Host-encrypted passwords are **not portable**
+into the container; do not copy them and expect decryption to work. Plaintext
+passwords in `config.ini` are supported for named profiles but are not recommended.
+Credential/config changes require a writable setup mount; ordinary cookie refresh
+writes only `/data`, with owner-only file permissions. Back up the Data volume as
+sensitive account data; `docker compose down -v` deletes sessions and State.
+
+After setup, start and inspect the Service:
 
 ```bash
 docker compose up -d
@@ -224,7 +282,13 @@ Compose uses JSON Service logs, `restart: unless-stopped`, an init process, and
 a 35-second stop grace period for the Service's internal 30-second shutdown
 contract. The Healthcheck runs `kicktipp service health` locally every 60
 seconds and does not contact Kicktipp or a Notification Target. Run the Docker
-smoke proof with `npm run test:docker`.
+smoke proof with `npm run test:docker`. It uses disposable fixtures and containers
+with `--network none`: a loopback-only mock Kicktipp verifies encrypted credential
+loading, expired-cookie refresh under read-only Config, isolation of colliding
+profile names, and cookie reuse after container recreation without another login.
+It also SIGKILLs the Service and recreates it under a changed hostname to verify
+lock recovery while preserving State.
+No real account login or Notification delivery occurs.
 
 ## Privacy and safety
 

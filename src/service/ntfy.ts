@@ -126,9 +126,8 @@ function validMessageId(value: unknown): value is string {
 
 export async function deliverNtfy(
   request: { url: string; headers: Record<string, string>; body: string },
-  options: { fetchImpl?: FetchLike; now?: Date; signal?: AbortSignal } = {},
+  options: { fetchImpl?: FetchLike; now?: Date; clock?: { now(): Date }; signal?: AbortSignal } = {},
 ): Promise<NtfyDeliveryOutcome> {
-  const now = options.now ?? new Date();
   try {
     const response = await requestProvider(request.url, {
       method: 'POST',
@@ -136,6 +135,7 @@ export async function deliverNtfy(
       headers: request.headers,
       body: request.body,
     }, options.fetchImpl);
+    const now = options.clock?.now() ?? options.now ?? new Date();
     if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) {
       return { state: 'unknown', retryable: false, safeErrorCode: 'malformed_response' };
     }

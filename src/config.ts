@@ -7,8 +7,9 @@ import readline from 'readline';
 import { t } from './i18n/index.js';
 import type { ScoringRules } from './rules/scoring.js';
 import { withAuthProfileMutation } from './auth-profile-lock.js';
+import { authConfigDir, authDataDir } from './auth-paths.js';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
+const CONFIG_DIR = authConfigDir();
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
 
 // ── Profiles ────────────────────────────────────────────────────────
@@ -72,8 +73,8 @@ function profileSection(
 /** Session cookies are per profile so two accounts never share a jar. */
 export function sessionFile(name: string | null = getActiveProfile()): string {
   return name
-    ? path.join(CONFIG_DIR, `session-${name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
-    : path.join(CONFIG_DIR, 'session.json');
+    ? path.join(authDataDir(), `session-${encodeURIComponent(name)}.json`)
+    : path.join(authDataDir(), 'session.json');
 }
 
 export function listProfiles(): string[] {

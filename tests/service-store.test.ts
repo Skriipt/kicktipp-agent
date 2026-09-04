@@ -103,6 +103,24 @@ describe('Service configuration schema', () => {
     expect(() => serviceConfigurationSchema.parse(configuration(false))).not.toThrow();
   });
 
+  it.each(['de_DE', 'en_US', 'de--DE'])('rejects invalid locale %s when reading configuration', (language) => {
+    const invalid = configuration();
+    invalid.job.language = language;
+    writeOwnerOnly(paths.configFile, invalid);
+    expect(() => readServiceConfiguration(paths)).toThrow(InvalidServiceFileError);
+    fs.unlinkSync(paths.configFile);
+    expect(() => setupService(invalid, paths)).toThrow(/Invalid language locale/);
+    expect(fs.existsSync(paths.configFile)).toBe(false);
+    expect(fs.existsSync(paths.stateFile)).toBe(false);
+  });
+
+  it.each(['de', 'de-DE', 'en-US', 'zh-Hant-TW'])('reads valid locale %s unchanged', (language) => {
+    const valid = configuration();
+    valid.job.language = language;
+    writeOwnerOnly(paths.configFile, valid);
+    expect(readServiceConfiguration(paths).job.language).toBe(language);
+  });
+
   it('rejects duplicate Stage identities and unknown Target references', () => {
     const duplicateStage = configuration();
     duplicateStage.job.policy.stages.push({ beforeDeadlineMinutes: 60, severity: 'info' });

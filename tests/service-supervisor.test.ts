@@ -197,6 +197,37 @@ describe('Service scheduling', () => {
 });
 
 describe('continuous supervision', () => {
+  it('does not send when a slow snapshot query crosses the deadline', async () => {
+    const config = configuration();
+    setupService(config, paths);
+    const provider = vi.fn<FetchLike>(async () => new Response(null, { status: 204 }));
+    const running = start({ getReminderCapability: async () => {
+      await clock.advance(2_000);
+      return capability({ deadline: '2026-09-04T11:00:01.000Z' });
+    }, providerFetchImpl: provider });
+    await flush();
+    await flush();
+    signals.emit('SIGTERM');
+    await running;
+    expect(provider).not.toHaveBeenCalled();
+    expect(readServiceState(config, paths).attempts).toHaveLength(0);
+  });
+
+  it.each(['60', 'Fri, 04 Sep 2026 11:01:12 GMT'])('anchors Retry-After %s after 12 seconds of provider latency', async (retryAfter) => {
+    const config = configuration();
+    setupService(config, paths);
+    const running = start({ getReminderCapability: async () => capability(), providerFetchImpl: async () => {
+      await clock.advance(12_000);
+      return new Response(null, { status: 429, headers: { 'Retry-After': retryAfter } });
+    } });
+    await flush();
+    signals.emit('SIGTERM');
+    await running;
+    const state = readServiceState(config, paths);
+    expect(state.deliveries[0].nextAttemptAt).toBe('2026-09-04T11:01:12.000Z');
+    expect(state.attempts[0].completedAt).toBe('2026-09-04T11:00:12.000Z');
+  });
+
   it('checks immediately, owns the Service Lock for its lifetime, and exits zero on SIGTERM', async () => {
     setupService(configuration(), paths);
     const getReminderCapability = vi.fn(async () => capability({ missing: false }));

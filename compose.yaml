@@ -1,6 +1,8 @@
 services:
   kicktipp:
     build: .
+    # Password encryption is bound to hostname + OS user; keep both stable.
+    hostname: kicktipp-agent
     init: true
     restart: unless-stopped
     stop_grace_period: 35s

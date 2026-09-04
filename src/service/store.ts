@@ -120,7 +120,14 @@ const jobSchema = z.object({
   enabled: z.boolean(),
   profileId: id,
   communityId: id,
-  language: id,
+  language: id.refine((value) => {
+    try {
+      new Intl.DateTimeFormat(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Invalid language locale'),
   displayTimezone: id.refine((value) => {
     try {
       new Intl.DateTimeFormat('en', { timeZone: value });

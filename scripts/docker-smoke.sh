@@ -44,6 +44,7 @@ docker compose config --format json | node --input-type=module --eval '
   const volumes = Object.fromEntries(service.volumes.map((volume) => [volume.target, volume]));
   if (
     service.init !== true
+    || service.hostname !== "kicktipp-agent"
     || service.restart !== "unless-stopped"
     || service.stop_grace_period !== "35s"
     || service.ports !== undefined
@@ -57,6 +58,9 @@ docker volume create "$volume" >/dev/null
 
 docker run --rm \
   --user node \
+  --hostname kicktipp-agent-smoke \
+  --network none \
+  --mount "type=bind,source=$PWD/scripts,target=/smoke,readonly" \
   --mount "type=bind,source=$fixture_dir,target=/setup,readonly" \
   --mount "type=bind,source=$fixture_dir/config,target=/config" \
   --mount "type=volume,source=$volume,target=/data" \
@@ -66,12 +70,17 @@ docker run --rm \
     import fs from "node:fs";
     const { setupService } = await import("./dist/service/store.js");
     setupService(JSON.parse(fs.readFileSync("/setup/service.json", "utf8")));
+    const { seedAuth } = await import("/smoke/auth-smoke.mjs");
+    await seedAuth();
   '
 
 start_container() {
   docker run --detach \
     --init \
     --name "$container" \
+    --hostname "${1:-kicktipp-agent-smoke}" \
+    --network none \
+    --mount "type=bind,source=$PWD/scripts,target=/smoke,readonly" \
     --mount "type=bind,source=$fixture_dir/config,target=/config,readonly" \
     --mount "type=volume,source=$volume,target=/data" \
     "$image" kicktipp serve --log-format json >/dev/null
@@ -98,6 +107,10 @@ if docker exec "$container" node -e 'require("node:fs").writeFileSync("/config/w
   echo "/config unexpectedly accepted a write" >&2
   exit 1
 fi
+docker exec "$container" node --input-type=module --eval '
+  const { runAuthSmoke } = await import("/smoke/auth-smoke.mjs");
+  await runAuthSmoke("refresh");
+'
 before="$(state_hash)"
 
 started="$(date +%s)"
@@ -109,7 +122,23 @@ docker rm "$container" >/dev/null
 
 start_container
 test "$(state_hash)" = "$before"
+docker exec "$container" node --input-type=module --eval '
+  const { runAuthSmoke } = await import("/smoke/auth-smoke.mjs");
+  await runAuthSmoke("restore");
+'
 docker stop --time 35 "$container" >/dev/null
 test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = "0"
 
-echo "Docker smoke test passed"
+# A hard-killed container leaves metadata with a PID that can exist again in
+# the next PID namespace. Recovery must follow the kernel lock, not that PID.
+docker rm "$container" >/dev/null
+start_container
+docker kill --signal KILL "$container" >/dev/null
+test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = "137"
+docker rm "$container" >/dev/null
+start_container kicktipp-agent-smoke-recreated
+test "$(state_hash)" = "$before"
+docker stop --time 35 "$container" >/dev/null
+test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = "0"
+
+echo "Docker smoke test passed (including SIGKILL and changed hostname)"

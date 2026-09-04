@@ -216,7 +216,7 @@ function webhookRequest(
 export async function deliverWebhook(
   request: { resolved: ResolvedWebhookTarget; body: string },
   ids: { notificationId: string; deliveryId: string },
-  options: { fetchImpl?: FetchLike; now?: Date; signal?: AbortSignal } = {},
+  options: { fetchImpl?: FetchLike; now?: Date; clock?: { now(): Date }; signal?: AbortSignal } = {},
 ): Promise<WebhookDeliveryOutcome> {
   const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   try {
@@ -231,6 +231,7 @@ export async function deliverWebhook(
       },
       body: request.body,
     }, fetchImpl);
+    const now = options.clock?.now() ?? options.now ?? new Date();
     if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) {
       return { state: 'unknown', retryable: false, safeErrorCode: 'malformed_response' };
     }
@@ -238,14 +239,14 @@ export async function deliverWebhook(
       return {
         state: 'confirmed',
         retryable: false,
-        receipt: { provider: 'webhook', acceptedAt: (options.now ?? new Date()).toISOString() },
+        receipt: { provider: 'webhook', acceptedAt: now.toISOString() },
       };
     }
     if (response.status >= 500) {
       return { state: 'unknown', retryable: false, safeErrorCode: 'provider_5xx' };
     }
     if (response.status === 429 || response.status === 408 || response.status === 425) {
-      const retryAfter = retryAfterMilliseconds(response, options.now ?? new Date());
+      const retryAfter = retryAfterMilliseconds(response, now);
       return {
         state: 'failed',
         retryable: true,
@@ -290,7 +291,7 @@ function buildProviderRequest(
 function deliverProvider(
   request: ProviderRequest,
   ids: { notificationId: string; deliveryId: string },
-  options: { fetchImpl?: FetchLike; now: Date; signal?: AbortSignal },
+  options: { fetchImpl?: FetchLike; now?: Date; clock?: { now(): Date }; signal?: AbortSignal },
 ): Promise<ProviderDeliveryOutcome> {
   switch (request.provider) {
     case 'webhook': return deliverWebhook(request.value, ids, options);
@@ -439,7 +440,7 @@ function cancelDueRetriesWithoutSnapshot(
 ): void {
   let changed = false;
   for (const delivery of state.deliveries) {
-    if (!retryIsDue(state, delivery, now)) continue;
+    if (!deliveryIsUnattempted(state, delivery.id) && !retryIsDue(state, delivery, now)) continue;
     delivery.state = 'cancelled';
     delivery.safeErrorCode = 'retry_validation_failed';
     delete delivery.nextAttemptAt;
@@ -458,6 +459,8 @@ function retrySnapshotMatches(
   if (
     !configuration.job.enabled
     || notification.jobId !== configuration.job.id
+    || preview.job.profileId !== configuration.job.profileId
+    || preview.job.communityId !== configuration.job.communityId
     || !preview.deadlineGroup
     || groupId !== notification.deadlineGroup.id
     || preview.deadlineGroup.deadlineAt !== notification.deadlineGroup.deadlineAt
@@ -480,7 +483,7 @@ function cancelInvalidDueRetries(
 ): void {
   let changed = false;
   for (const delivery of state.deliveries) {
-    if (!retryIsDue(state, delivery, now)) continue;
+    if (!deliveryIsUnattempted(state, delivery.id) && !retryIsDue(state, delivery, now)) continue;
     const notification = state.notifications.find(({ id }) => id === delivery.notificationId);
     if (notification && retrySnapshotMatches(notification, configuration, preview, groupId, now)) continue;
     delivery.state = 'cancelled';
@@ -524,13 +527,12 @@ function supersedeOlderDeliveries(
 async function deliverPending(
   state: ServiceState,
   notification: ReminderNotification,
-  configuration: ServiceConfiguration,
   lock: Parameters<typeof writeServiceState>[1],
   options: {
     paths: ServicePaths;
     env?: NodeJS.ProcessEnv;
     providerFetchImpl?: FetchLike;
-    now: Date;
+    clock: { now(): Date };
     preview: Extract<ReturnType<typeof evaluateReminderDryRun>, { reliable: true }>['preview'];
     groupId?: string;
     stopSignal?: AbortSignal;
@@ -540,17 +542,25 @@ async function deliverPending(
 ): Promise<void> {
   const candidates = state.deliveries.filter((candidate) =>
     candidate.notificationId === notification.id
-    && (deliveryIsUnattempted(state, candidate.id) || retryIsDue(state, candidate, options.now)));
+    && (deliveryIsUnattempted(state, candidate.id) || retryIsDue(state, candidate, options.clock.now())));
   const deliverOne = async (delivery: Delivery): Promise<void> => {
     if (options.stopSignal?.aborted) return;
+    if (delivery.state !== 'pending') return;
+    // Only gate NEW attempts: other workers may already have provider I/O in flight.
+    const latestConfiguration = readServiceConfiguration(options.paths);
+    if (!latestConfiguration.job.enabled) {
+      cancelDelivery(state, delivery, 'job_disabled', lock, options.paths);
+      return;
+    }
     const priorAttempts = deliveryAttempts(state, delivery);
     const retry = priorAttempts.length > 0;
-    const target = currentTarget(configuration, delivery);
+    const target = currentTarget(latestConfiguration, delivery);
     if (!target) {
       cancelDelivery(state, delivery, 'target_changed', lock, options.paths);
       return;
     }
-    if (retry && !retrySnapshotMatches(notification, configuration, options.preview, options.groupId, options.now)) {
+    const now = options.clock.now();
+    if (!retrySnapshotMatches(notification, latestConfiguration, options.preview, options.groupId, now)) {
       cancelDelivery(state, delivery, 'retry_validation_failed', lock, options.paths);
       return;
     }
@@ -590,22 +600,46 @@ async function deliverPending(
     const attempt: ServiceState['attempts'][number] = {
       id: crypto.randomUUID(),
       deliveryId: delivery.id,
-      startedAt: options.now.toISOString(),
+      startedAt: now.toISOString(),
     };
     state.attempts.push(attempt);
     writeServiceState(state, lock, options.paths);
-    await options.afterAttemptStarted?.(delivery);
+    if (options.afterAttemptStarted) await options.afterAttemptStarted(delivery);
 
+    // A write-ahead marker is not proof that HTTP dispatch has begun.
+    const dispatchConfiguration = readServiceConfiguration(options.paths);
+    const dispatchTime = options.clock.now();
+    const cancellation = !dispatchConfiguration.job.enabled
+      ? 'job_disabled'
+      : !currentTarget(dispatchConfiguration, delivery)
+        ? 'target_changed'
+        : !retrySnapshotMatches(notification, dispatchConfiguration, options.preview, options.groupId, dispatchTime)
+          ? 'retry_validation_failed'
+          : undefined;
+    if (cancellation) {
+      attempt.completedAt = dispatchTime.toISOString();
+      attempt.outcome = { state: 'failed', retryable: false, safeErrorCode: cancellation };
+      cancelDelivery(state, delivery, cancellation, lock, options.paths);
+      return;
+    }
+
+    let responseReceivedAt: Date | undefined;
+    const providerFetch = options.providerFetchImpl ?? ((input, init) => fetch(input, init));
     const adapterOutcome = await deliverProvider(request, {
       notificationId: notification.id,
       deliveryId: delivery.id,
     }, {
-      fetchImpl: options.providerFetchImpl,
-      now: options.now,
+      fetchImpl: async (input, init) => {
+        const response = await providerFetch(input, init);
+        responseReceivedAt = options.clock.now();
+        return response;
+      },
+      clock: options.clock,
       signal: options.providerAbortSignal,
     });
     const { retryAfterMilliseconds: retryAfter, ...outcome } = adapterOutcome;
-    attempt.completedAt = options.now.toISOString();
+    const completedAt = options.clock.now();
+    attempt.completedAt = completedAt.toISOString();
     attempt.outcome = outcome;
     delivery.safeErrorCode = outcome.safeErrorCode;
     delete delivery.nextAttemptAt;
@@ -620,7 +654,8 @@ async function deliverPending(
       if (attemptNumber >= 3) {
         delivery.state = 'failed';
       } else {
-        const nextAttemptAt = options.now.getTime() + (retryAfter ?? RETRY_DELAYS[attemptNumber - 1]);
+        const retryOrigin = retryAfter === undefined ? completedAt : responseReceivedAt ?? completedAt;
+        const nextAttemptAt = retryOrigin.getTime() + (retryAfter ?? RETRY_DELAYS[attemptNumber - 1]);
         if (nextAttemptAt >= Date.parse(notification.deadlineGroup.deadlineAt)) {
           delivery.state = 'cancelled';
           delivery.safeErrorCode = 'retry_deadline_reached';
@@ -657,6 +692,7 @@ function deliveryIsUnattempted(state: ServiceState, deliveryIdValue: string): bo
 export async function runReminderOnce(options: {
   paths?: ServicePaths;
   now?: Date;
+  clock?: { now(): Date };
   site?: string;
   env?: NodeJS.ProcessEnv;
   kicktippFetchImpl?: FetchLike;
@@ -678,7 +714,9 @@ export async function runReminderOnce(options: {
   try {
     const configuration = readServiceConfiguration(paths);
     const state = readServiceState(configuration, paths);
-    const now = options.now ?? new Date();
+    // A fixed `now` remains supported for deterministic one-shot callers.
+    const clock = options.clock ?? { now: () => options.now ?? new Date() };
+    let now = clock.now();
     if (recoverOpenAttempts(state, now)) writeServiceState(state, lock, paths);
     cancelObsoleteDeliveries(state, configuration, lock, paths);
     cancelRetriesPastDeadline(state, lock, paths, now);
@@ -699,6 +737,7 @@ export async function runReminderOnce(options: {
         communityId: configuration.job.communityId,
         fetchImpl: options.kicktippFetchImpl,
       }).getReminderSnapshot();
+    now = clock.now();
     const evaluation = evaluateReminderDryRun(configuration, capability, now);
     if (!evaluation.reliable) {
       cancelDueRetriesWithoutSnapshot(state, lock, paths, now);
@@ -758,11 +797,11 @@ export async function runReminderOnce(options: {
       const notification = state.notifications.find(({ id }) => id === existingNotificationId);
       if (existingStage.state === 'notified' && notification) {
         supersedeOlderDeliveries(state, notification, lock, paths);
-        await deliverPending(state, notification, configuration, lock, {
+        await deliverPending(state, notification, lock, {
           paths,
           env: options.env,
           providerFetchImpl: options.providerFetchImpl,
-          now,
+          clock,
           preview,
           groupId,
           stopSignal: options.stopSignal,
@@ -812,11 +851,11 @@ export async function runReminderOnce(options: {
     writeServiceState(state, lock, paths);
     supersedeOlderDeliveries(state, notification, lock, paths);
 
-    await deliverPending(state, notification, configuration, lock, {
+    await deliverPending(state, notification, lock, {
       paths,
       env: options.env,
       providerFetchImpl: options.providerFetchImpl,
-      now,
+      clock,
       preview,
       groupId,
       stopSignal: options.stopSignal,

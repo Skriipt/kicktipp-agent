@@ -100,6 +100,16 @@ describe('profiles', () => {
     expect(work).toMatch(/session-work\.json$/);
   });
 
+  it('never aliases profile names through lossy filename sanitization', async () => {
+    const config = await loadConfig(WITH_PROFILES);
+    const names = ['a/b', 'a?b', 'a_b', 'a%2Fb', 'ü', '_', '../work', '.._work'];
+    const files = names.map((name) => config.sessionFile(name));
+    expect(new Set(files).size).toBe(names.length);
+    for (const file of files) expect(path.dirname(file)).toBe(path.dirname(configFile));
+    expect(config.sessionFile(null)).toBe(path.join(path.dirname(configFile), 'session.json'));
+    expect(config.sessionFile('work')).toBe(path.join(path.dirname(configFile), 'session-work.json'));
+  });
+
   it('report a name that does not exist instead of silently using defaults', async () => {
     const config = await loadConfig(WITH_PROFILES);
     config.setActiveProfile('nope');

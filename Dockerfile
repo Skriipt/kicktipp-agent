@@ -9,6 +9,7 @@ RUN npm run build \
 
 FROM node:24-bookworm-slim
 
+# Config is read-only at runtime; sessions and auth locks live in writable Data.
 ENV NODE_ENV=production \
     KICKTIPP_CONFIG_DIR=/config \
     KICKTIPP_DATA_DIR=/data

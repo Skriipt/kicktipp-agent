@@ -282,7 +282,7 @@ export async function runServiceSupervisor(options: {
           const result = await runReminderOnce({
             paths,
             lock,
-            now,
+            clock,
             site: options.site,
             env: options.env,
             kicktippFetchImpl: withKicktippAbort(options.kicktippFetchImpl, abortIo.signal),

@@ -293,6 +293,52 @@ describe('restart-safe Generic Webhook delivery', () => {
 });
 
 describe('Delivery retries and cancellation', () => {
+  it.each(['60', 'Fri, 04 Sep 2026 11:31:12 GMT'])('keeps response reception as retry origin while reading a slow body: %s', async (retryAfter) => {
+    const config = configuration();
+    config.targets = [{ id: config.job.targetIds[0], provider: 'telegram', enabled: true,
+      botTokenRef: 'env:BOT_TOKEN', chatId: '-1001234567890' }];
+    setupService(config, paths);
+    let current = NOW;
+    await runReminderOnce({ paths, clock: { now: () => current }, site: 'https://www.kicktipp.com',
+      env: { BOT_TOKEN: '123456789:telegram_bot_token-value' }, getReminderCapability: async () => available(),
+      providerFetchImpl: async () => {
+        current = new Date('2026-09-04T11:30:12.000Z');
+        return new Response(new ReadableStream({ pull(controller) {
+          current = new Date('2026-09-04T11:30:17.000Z');
+          controller.enqueue(new TextEncoder().encode('{}'));
+          controller.close();
+        } }, { highWaterMark: 0 }), { status: 429, headers: { 'Retry-After': retryAfter } });
+      } });
+    const state = readServiceState(config, paths);
+    expect(state.deliveries[0].nextAttemptAt).toBe('2026-09-04T11:31:12.000Z');
+    expect(state.attempts[0].completedAt).toBe('2026-09-04T11:30:17.000Z');
+  });
+
+  it.each(['partial', 'all', 'unavailable', 'no-deadline', 'not-due'] as const)('validates persisted unattempted deliveries after restart: %s', async (change) => {
+    const config = configuration(5);
+    setupService(config, paths);
+    const stop = new AbortController();
+    const provider = vi.fn<FetchLike>(async () => new Response(null, { status: 204 }));
+    const options = { paths, now: NOW, site: 'https://www.kicktipp.com', env: environment(5), providerFetchImpl: provider };
+    await runReminderOnce({ ...options, getReminderCapability: async () => available(), stopSignal: stop.signal,
+      afterAttemptStarted: () => stop.abort() });
+    const original = readServiceState(config, paths).notifications[0];
+    const fresh = snapshot(change !== 'all');
+    if (change === 'no-deadline' || change === 'not-due') {
+      for (const game of fresh.games) game.deadlineAt = change === 'no-deadline'
+        ? '2026-09-04T10:00:00.000Z' : '2026-09-06T12:00:00.000Z';
+    }
+    if (change === 'partial') for (const cell of fresh.cells) if (cell.participantId === 'bob') cell.status = 'predicted';
+    await runReminderOnce({ ...options, getReminderCapability: async () => change === 'unavailable'
+      ? { available: false, reason: 'incomplete-matrix' }
+      : { available: true, snapshot: fresh } });
+    const state = readServiceState(config, paths);
+    expect(provider).toHaveBeenCalledOnce();
+    expect(state.deliveries.slice(1).every((delivery) => delivery.state === 'cancelled')).toBe(true);
+    expect(state.notifications[0]).toEqual(original);
+    expect(state.attempts).toHaveLength(1);
+  });
+
   it('uses the 10s/60s retry schedule and stops after three Attempts', async () => {
     const config = configuration();
     setupService(config, paths);
@@ -601,6 +647,56 @@ describe('Delivery retries and cancellation', () => {
 });
 
 describe('Delivery fan-out safety', () => {
+  it.each(['job', 'target', 'deadline', 'profile', 'community'] as const)('does not dispatch if %s changes while the write-ahead hook is awaited', async (change) => {
+    const config = configuration();
+    setupService(config, paths);
+    let current = NOW;
+    const provider = vi.fn<FetchLike>(async () => new Response(null, { status: 204 }));
+    await runReminderOnce({ paths, clock: { now: () => current }, site: 'https://www.kicktipp.com', env: environment(),
+      getReminderCapability: async () => available(), providerFetchImpl: provider,
+      afterAttemptStarted: async () => {
+        await Promise.resolve();
+        if (change === 'deadline') current = new Date('2026-09-04T12:00:00.000Z');
+        else mutateServiceConfiguration((next) => {
+          if (change === 'job') next.job.enabled = false;
+          else if (change === 'profile') next.job.profileId = 'other-profile';
+          else if (change === 'community') next.job.communityId = 'other-community';
+          else if (next.targets[0].provider === 'webhook') next.targets[0].urlRef = 'env:CHANGED_URL';
+          return next;
+        }, paths);
+      } });
+    const state = readServiceState(readServiceConfiguration(paths), paths);
+    expect(provider).not.toHaveBeenCalled();
+    expect(state.deliveries[0].state).toBe('cancelled');
+    expect(state.attempts[0].outcome).toMatchObject({ state: 'failed', retryable: false });
+  });
+
+  it.each(['job', 'disabled', 'removed', 'revision'].flatMap((change) =>
+    ['query', 'queued'].map((phase) => ({ change, phase }))))('rechecks $change configuration at $phase boundary', async ({ change, phase }) => {
+    const config = configuration(5);
+    setupService(config, paths);
+    const changeConfig = () => mutateServiceConfiguration((next) => {
+      if (change === 'job') next.job.enabled = false;
+      else if (change === 'disabled') next.targets[4].enabled = false;
+      else if (change === 'removed') { next.targets.pop(); next.job.targetIds.pop(); }
+      else if (next.targets[4].provider === 'webhook') next.targets[4].urlRef = 'env:CHANGED_URL';
+      return next;
+    }, paths);
+    const provider = vi.fn<FetchLike>(async () => {
+      if (phase === 'queued' && provider.mock.calls.length === 1) changeConfig();
+      return new Response(null, { status: 204 });
+    });
+    await runReminderOnce({ paths, now: NOW, site: 'https://www.kicktipp.com', env: environment(5),
+      getReminderCapability: async () => { if (phase === 'query') changeConfig(); return available(); },
+      providerFetchImpl: provider });
+    const state = readServiceState(readServiceConfiguration(paths), paths);
+    const expectedAttempts = change === 'job' ? (phase === 'query' ? 0 : 1) : 4;
+    expect(provider).toHaveBeenCalledTimes(expectedAttempts);
+    expect(state.deliveries[4].state).toBe('cancelled');
+    expect(state.attempts).toHaveLength(expectedAttempts);
+    if (expectedAttempts > 0) expect(state.deliveries[0].state).toBe('confirmed');
+  });
+
   it('keeps provider outcomes independent per Target', async () => {
     const config = configuration(4);
     setupService(config, paths);

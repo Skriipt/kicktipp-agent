@@ -97,9 +97,8 @@ function isDiscordMessageId(value: unknown): value is string {
 
 export async function deliverDiscord(
   request: { url: string; body: string },
-  options: { fetchImpl?: FetchLike; now?: Date; signal?: AbortSignal } = {},
+  options: { fetchImpl?: FetchLike; now?: Date; clock?: { now(): Date }; signal?: AbortSignal } = {},
 ): Promise<DiscordDeliveryOutcome> {
-  const now = options.now ?? new Date();
   const url = new URL(request.url);
   url.searchParams.set('wait', 'true');
   try {
@@ -109,6 +108,7 @@ export async function deliverDiscord(
       headers: { 'Content-Type': 'application/json' },
       body: request.body,
     }, options.fetchImpl);
+    const now = options.clock?.now() ?? options.now ?? new Date();
     if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) {
       return { state: 'unknown', retryable: false, safeErrorCode: 'malformed_response' };
     }
