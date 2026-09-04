@@ -33,8 +33,6 @@ function configuration(): ServiceConfiguration {
       language: 'de',
       displayTimezone: 'Europe/Berlin',
       policy: {
-        matchSelection: 'next-deadline-group',
-        completion: 'all-games-in-group',
         excludeParticipantIds: ['excluded'],
         stages: [
           { beforeDeadlineMinutes: 60, severity: 'urgent' },

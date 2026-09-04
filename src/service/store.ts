@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { FileLock, observeLock, type LockObservation } from './lock.js';
+import { FileLock, observeLock, syncDirectory, type LockObservation } from './lock.js';
 import { servicePaths, type ServicePaths } from './paths.js';
 
 const id = z.string().trim().min(1);
@@ -130,8 +130,8 @@ const jobSchema = z.object({
     }
   }, 'Invalid display timezone'),
   policy: z.object({
-    matchSelection: z.literal('next-deadline-group'),
-    completion: z.literal('all-games-in-group'),
+    matchSelection: z.literal('next-deadline-group').optional(),
+    completion: z.literal('all-games-in-group').optional(),
     excludeParticipantIds: z.array(id),
     stages: z.array(stageSchema).min(1),
   }).strict(),
@@ -406,21 +406,6 @@ export function readServiceState(
   }
 }
 
-function syncDirectory(directory: string): void {
-  let fd: number | undefined;
-  try {
-    fd = fs.openSync(directory, 'r');
-    fs.fsyncSync(fd);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (!['EINVAL', 'ENOTSUP', 'EISDIR'].includes(code ?? '') && process.platform !== 'win32') {
-      throw error;
-    }
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-  }
-}
-
 export function durableReplace(file: string, contents: string): void {
   const directory = path.dirname(file);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -595,7 +580,7 @@ function assertStateTransition(current: ServiceState, next: ServiceState): void 
   }
 }
 
-function fileRevision(file: string): string | null {
+export function fileRevision(file: string): string | null {
   try {
     return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   } catch (error) {

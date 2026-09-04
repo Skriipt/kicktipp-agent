@@ -64,7 +64,7 @@ export function observeLock(file: string): LockObservation {
   }
 }
 
-function syncDirectory(dir: string): void {
+export function syncDirectory(dir: string): void {
   let fd: number | undefined;
   try {
     fd = fs.openSync(dir, 'r');

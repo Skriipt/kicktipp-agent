@@ -40,8 +40,6 @@ function configuration(enabled = false): ServiceConfiguration {
       language: 'de',
       displayTimezone: 'Europe/Berlin',
       policy: {
-        matchSelection: 'next-deadline-group',
-        completion: 'all-games-in-group',
         excludeParticipantIds: [],
         stages: [
           { beforeDeadlineMinutes: 1440, severity: 'info' },
@@ -82,16 +80,15 @@ afterEach(() => {
 });
 
 describe('Service configuration schema', () => {
-  it('accepts exactly one Job with the fixed MVP policy', () => {
-    expect(serviceConfigurationSchema.parse(configuration(true)).job.policy.matchSelection)
-      .toBe('next-deadline-group');
+  it('accepts exactly one Job and rejects unknown fields', () => {
+    expect(serviceConfigurationSchema.parse(configuration(true)).job.id).toBe(JOB_ID);
+    const legacy = configuration(true);
+    legacy.job.policy.matchSelection = 'next-deadline-group';
+    legacy.job.policy.completion = 'all-games-in-group';
+    expect(serviceConfigurationSchema.parse(legacy).job.id).toBe(JOB_ID);
     expect(() => serviceConfigurationSchema.parse({
       ...configuration(),
       extra: true,
-    })).toThrow();
-    expect(() => serviceConfigurationSchema.parse({
-      ...configuration(),
-      job: { ...configuration().job, policy: { ...configuration().job.policy, completion: 'some-games' } },
     })).toThrow();
   });
 

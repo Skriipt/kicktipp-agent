@@ -6,6 +6,7 @@ import { servicePaths, type ServicePaths } from './paths.js';
 import {
   ConfigurationConflictError,
   durableReplace,
+  fileRevision,
   mutateServiceConfiguration,
   notificationTargetSchema,
   readServiceConfiguration,
@@ -153,15 +154,6 @@ export function resolveSecretReference(
   if (fileConfigured) return requireSecret(readSecretFile(env[fileName] ?? ''), true);
   if (directConfigured) return requireSecret(env[identifier] ?? '', false);
   throw new SecretResolutionError('unavailable');
-}
-
-function fileRevision(file: string): string | null {
-  try {
-    return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
 }
 
 function readLocalSecrets(paths: ServicePaths): Record<string, string> {
@@ -324,6 +316,17 @@ export interface AddNtfyTargetInput {
   allowInsecureHttp?: boolean;
 }
 
+function addTarget(target: NotificationTarget, paths: ServicePaths): ServiceConfiguration {
+  return mutateServiceConfiguration((configuration) => {
+    if (configuration.targets.some((existing) => existing.id === target.id)) {
+      throw new TargetAlreadyExistsError();
+    }
+    configuration.targets.push(target);
+    configuration.job.targetIds.push(target.id);
+    return configuration;
+  }, paths);
+}
+
 function buildDiscordTarget(input: AddDiscordTargetInput): DiscordTarget {
   const parsed = notificationTargetSchema.safeParse({
     id: input.id,
@@ -346,15 +349,7 @@ export function addDiscordTarget(
   input: AddDiscordTargetInput,
   paths: ServicePaths = servicePaths(),
 ): ServiceConfiguration {
-  const target = buildDiscordTarget(input);
-  return mutateServiceConfiguration((configuration) => {
-    if (configuration.targets.some((existing) => existing.id === target.id)) {
-      throw new TargetAlreadyExistsError();
-    }
-    configuration.targets.push(target);
-    configuration.job.targetIds.push(target.id);
-    return configuration;
-  }, paths);
+  return addTarget(buildDiscordTarget(input), paths);
 }
 
 function buildTelegramTarget(input: AddTelegramTargetInput): TelegramTarget {
@@ -381,15 +376,7 @@ export function addTelegramTarget(
   input: AddTelegramTargetInput,
   paths: ServicePaths = servicePaths(),
 ): ServiceConfiguration {
-  const target = buildTelegramTarget(input);
-  return mutateServiceConfiguration((configuration) => {
-    if (configuration.targets.some((existing) => existing.id === target.id)) {
-      throw new TargetAlreadyExistsError();
-    }
-    configuration.targets.push(target);
-    configuration.job.targetIds.push(target.id);
-    return configuration;
-  }, paths);
+  return addTarget(buildTelegramTarget(input), paths);
 }
 
 function buildNtfyTarget(input: AddNtfyTargetInput): NtfyTarget {
@@ -417,15 +404,7 @@ export function addNtfyTarget(
   input: AddNtfyTargetInput,
   paths: ServicePaths = servicePaths(),
 ): ServiceConfiguration {
-  const target = buildNtfyTarget(input);
-  return mutateServiceConfiguration((configuration) => {
-    if (configuration.targets.some((existing) => existing.id === target.id)) {
-      throw new TargetAlreadyExistsError();
-    }
-    configuration.targets.push(target);
-    configuration.job.targetIds.push(target.id);
-    return configuration;
-  }, paths);
+  return addTarget(buildNtfyTarget(input), paths);
 }
 
 function buildWebhookTarget(input: AddWebhookTargetInput): WebhookTarget {
@@ -458,15 +437,7 @@ export function addWebhookTarget(
   input: AddWebhookTargetInput,
   paths: ServicePaths = servicePaths(),
 ): ServiceConfiguration {
-  const target = buildWebhookTarget(input);
-  return mutateServiceConfiguration((configuration) => {
-    if (configuration.targets.some((existing) => existing.id === target.id)) {
-      throw new TargetAlreadyExistsError();
-    }
-    configuration.targets.push(target);
-    configuration.job.targetIds.push(target.id);
-    return configuration;
-  }, paths);
+  return addTarget(buildWebhookTarget(input), paths);
 }
 
 export function setTargetEnabled(

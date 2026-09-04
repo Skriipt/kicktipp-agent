@@ -53,8 +53,6 @@ function configuration(targetCount = 1): ServiceConfiguration {
       language: 'en',
       displayTimezone: 'Europe/Berlin',
       policy: {
-        matchSelection: 'next-deadline-group',
-        completion: 'all-games-in-group',
         excludeParticipantIds: [],
         stages: [
           { beforeDeadlineMinutes: 360, severity: 'warning' },

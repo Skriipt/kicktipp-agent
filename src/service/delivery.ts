@@ -17,7 +17,7 @@ import {
   NtfyPayloadTooLargeError,
 } from './ntfy.js';
 import { servicePaths, type ServicePaths } from './paths.js';
-import { requestProvider } from './provider-http.js';
+import { requestProvider, retryAfterMilliseconds, retryableTransportFailure } from './provider-http.js';
 import {
   deliverTelegram,
   InvalidTelegramTargetError,
@@ -213,28 +213,6 @@ function webhookRequest(
   };
 }
 
-function retryableTransportFailure(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || !('cause' in error)) return false;
-  const cause = error.cause;
-  return !!cause
-    && typeof cause === 'object'
-    && 'code' in cause
-    && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(String(cause.code));
-}
-
-function retryAfterMilliseconds(response: Response, now: Date): number | undefined {
-  const value = response.headers.get('Retry-After');
-  if (value === null) return undefined;
-  if (/^\d+$/.test(value)) {
-    const milliseconds = Number(value) * 1_000;
-    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
-  }
-  const instant = Date.parse(value);
-  return Number.isFinite(instant) && instant >= now.getTime()
-    ? instant - now.getTime()
-    : undefined;
-}
-
 export async function deliverWebhook(
   request: { resolved: ResolvedWebhookTarget; body: string },
   ids: { notificationId: string; deliveryId: string },
@@ -287,6 +265,38 @@ export async function deliverWebhook(
       return { state: 'failed', retryable: true, safeErrorCode: 'connection_unavailable' };
     }
     return { state: 'unknown', retryable: false, safeErrorCode: 'transport_ambiguous' };
+  }
+}
+
+type ProviderRequest =
+  | { provider: 'webhook'; value: ReturnType<typeof webhookRequest> }
+  | { provider: 'discord'; value: ReturnType<typeof discordRequest> }
+  | { provider: 'telegram'; value: ReturnType<typeof telegramRequest> }
+  | { provider: 'ntfy'; value: ReturnType<typeof ntfyRequest> };
+
+function buildProviderRequest(
+  notification: ReminderNotification,
+  target: NotificationTarget,
+  options: { env?: NodeJS.ProcessEnv; paths: ServicePaths },
+): ProviderRequest {
+  switch (target.provider) {
+    case 'webhook': return { provider: target.provider, value: webhookRequest(notification, target, options) };
+    case 'discord': return { provider: target.provider, value: discordRequest(notification, target, options) };
+    case 'telegram': return { provider: target.provider, value: telegramRequest(notification, target, options) };
+    case 'ntfy': return { provider: target.provider, value: ntfyRequest(notification, target, options) };
+  }
+}
+
+function deliverProvider(
+  request: ProviderRequest,
+  ids: { notificationId: string; deliveryId: string },
+  options: { fetchImpl?: FetchLike; now: Date; signal?: AbortSignal },
+): Promise<ProviderDeliveryOutcome> {
+  switch (request.provider) {
+    case 'webhook': return deliverWebhook(request.value, ids, options);
+    case 'discord': return deliverDiscord(request.value, options);
+    case 'telegram': return deliverTelegram(request.value, options);
+    case 'ntfy': return deliverNtfy(request.value, options);
   }
 }
 
@@ -548,28 +558,9 @@ async function deliverPending(
       deterministicDeliveryFailure(state, delivery, 'retry_budget_exhausted', lock, options.paths);
       return;
     }
-    if (
-      target.provider !== 'webhook'
-      && target.provider !== 'discord'
-      && target.provider !== 'telegram'
-      && target.provider !== 'ntfy'
-    ) {
-      deterministicDeliveryFailure(state, delivery, 'unsupported_provider', lock, options.paths);
-      return;
-    }
-
-    let request: ReturnType<typeof webhookRequest>
-      | ReturnType<typeof discordRequest>
-      | ReturnType<typeof telegramRequest>
-      | ReturnType<typeof ntfyRequest>;
+    let request: ProviderRequest;
     try {
-      request = target.provider === 'webhook'
-        ? webhookRequest(notification, target, { env: options.env, paths: options.paths })
-        : target.provider === 'discord'
-          ? discordRequest(notification, target, { env: options.env, paths: options.paths })
-          : target.provider === 'telegram'
-            ? telegramRequest(notification, target, { env: options.env, paths: options.paths })
-            : ntfyRequest(notification, target, { env: options.env, paths: options.paths });
+      request = buildProviderRequest(notification, target, { env: options.env, paths: options.paths });
     } catch (error) {
       if (
         error instanceof SecretResolutionError
@@ -605,32 +596,14 @@ async function deliverPending(
     writeServiceState(state, lock, options.paths);
     await options.afterAttemptStarted?.(delivery);
 
-    const adapterOutcome = target.provider === 'webhook'
-      ? await deliverWebhook(request as ReturnType<typeof webhookRequest>, {
-        notificationId: notification.id,
-        deliveryId: delivery.id,
-      }, {
-        fetchImpl: options.providerFetchImpl,
-        now: options.now,
-        signal: options.providerAbortSignal,
-      })
-      : target.provider === 'discord'
-        ? await deliverDiscord(request as ReturnType<typeof discordRequest>, {
-          fetchImpl: options.providerFetchImpl,
-          now: options.now,
-          signal: options.providerAbortSignal,
-        })
-        : target.provider === 'telegram'
-          ? await deliverTelegram(request as ReturnType<typeof telegramRequest>, {
-            fetchImpl: options.providerFetchImpl,
-            now: options.now,
-            signal: options.providerAbortSignal,
-          })
-          : await deliverNtfy(request as ReturnType<typeof ntfyRequest>, {
-            fetchImpl: options.providerFetchImpl,
-            now: options.now,
-            signal: options.providerAbortSignal,
-          });
+    const adapterOutcome = await deliverProvider(request, {
+      notificationId: notification.id,
+      deliveryId: delivery.id,
+    }, {
+      fetchImpl: options.providerFetchImpl,
+      now: options.now,
+      signal: options.providerAbortSignal,
+    });
     const { retryAfterMilliseconds: retryAfter, ...outcome } = adapterOutcome;
     attempt.completedAt = options.now.toISOString();
     attempt.outcome = outcome;
@@ -874,14 +847,6 @@ export async function testNotificationTarget(
   const configuration = readServiceConfiguration(paths);
   const target: NotificationTarget | undefined = configuration.targets.find(({ id }) => id === targetIdValue);
   if (!target) throw new Error('The Notification Target does not exist.');
-  if (
-    target.provider !== 'webhook'
-    && target.provider !== 'discord'
-    && target.provider !== 'telegram'
-    && target.provider !== 'ntfy'
-  ) {
-    throw new Error('This Notification Target provider is not available yet.');
-  }
   const now = options.now ?? new Date();
   const notificationDiagnosticId = crypto.randomUUID();
   const deliveryDiagnosticId = crypto.randomUUID();
@@ -910,28 +875,7 @@ export async function testNotificationTarget(
     stage: 'diagnostic-test',
     missingParticipants: [{ id: 'diagnostic-test', displayName: 'Diagnostic test' }],
   };
-  if (target.provider === 'discord') {
-    return deliverDiscord(discordRequest(notification, target, {
-      env: options.env,
-      paths,
-    }), { fetchImpl: options.fetchImpl, now });
-  }
-  if (target.provider === 'telegram') {
-    return deliverTelegram(telegramRequest(notification, target, {
-      env: options.env,
-      paths,
-    }), { fetchImpl: options.fetchImpl, now });
-  }
-  if (target.provider === 'ntfy') {
-    return deliverNtfy(ntfyRequest(notification, target, {
-      env: options.env,
-      paths,
-    }), { fetchImpl: options.fetchImpl, now });
-  }
-  return deliverWebhook(webhookRequest(notification, target, {
-    env: options.env,
-    paths,
-  }), {
+  return deliverProvider(buildProviderRequest(notification, target, { env: options.env, paths }), {
     notificationId: notificationDiagnosticId,
     deliveryId: deliveryDiagnosticId,
   }, { fetchImpl: options.fetchImpl, now });

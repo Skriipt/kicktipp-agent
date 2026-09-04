@@ -3,6 +3,53 @@ import { VERSION } from '../version.js';
 
 const MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024;
 
+export function validateKicktippActionUrl(
+  value: string | undefined,
+  invalid: () => never,
+): string | undefined {
+  if (!value) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return invalid();
+  }
+  const host = url.hostname.toLowerCase();
+  if (
+    url.protocol !== 'https:'
+    || url.username
+    || url.password
+    || url.hash
+    || !(host === 'kicktipp.de' || host.endsWith('.kicktipp.de')
+      || host === 'kicktipp.com' || host.endsWith('.kicktipp.com'))
+  ) return invalid();
+  return url.toString();
+}
+
+export function retryableTransportFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('cause' in error)) return false;
+  const cause = error.cause;
+  return !!cause
+    && typeof cause === 'object'
+    && 'code' in cause
+    && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(String(cause.code));
+}
+
+export function retryAfterMilliseconds(
+  response: Response,
+  now: Date,
+  fractionalSeconds = false,
+): number | undefined {
+  const value = response.headers.get('Retry-After');
+  if (value === null) return undefined;
+  if ((fractionalSeconds ? /^\d+(?:\.\d+)?$/ : /^\d+$/).test(value)) {
+    const milliseconds = Number(value) * 1_000;
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+  }
+  const instant = Date.parse(value);
+  return Number.isFinite(instant) && instant >= now.getTime() ? instant - now.getTime() : undefined;
+}
+
 export function requestProvider(
   url: string,
   init: RequestInit,

@@ -1,6 +1,12 @@
 import type { FetchLike } from '../browser.js';
 import type { ServicePaths } from './paths.js';
-import { readProviderResponse, requestProvider } from './provider-http.js';
+import {
+  readProviderResponse,
+  requestProvider,
+  retryAfterMilliseconds,
+  retryableTransportFailure,
+  validateKicktippActionUrl,
+} from './provider-http.js';
 import {
   ntfyServerUrlSchema,
   ntfyTopicSchema,
@@ -55,35 +61,16 @@ export function validateNtfyToken(value: string): string {
   return value;
 }
 
-function validateActionUrl(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new InvalidNtfyTargetError('invalid_action_url');
-  }
-  const host = url.hostname.toLowerCase();
-  if (
-    url.protocol !== 'https:'
-    || url.username
-    || url.password
-    || url.hash
-    || ![
-      host === 'kicktipp.de' || host.endsWith('.kicktipp.de'),
-      host === 'kicktipp.com' || host.endsWith('.kicktipp.com'),
-    ].some(Boolean)
-  ) throw new InvalidNtfyTargetError('invalid_action_url');
-  return url.toString();
-}
-
 export function ntfyRequest(
   notification: ReminderNotification,
   target: NtfyTarget,
   options: { env?: NodeJS.ProcessEnv; paths?: ServicePaths } = {},
 ): { url: string; headers: Record<string, string>; body: string } {
   const url = validateNtfyServerUrl(target.serverUrl, target.allowInsecureHttp);
-  const actionUrl = validateActionUrl(notification.content.actionUrl);
+  const actionUrl = validateKicktippActionUrl(
+    notification.content.actionUrl,
+    () => { throw new InvalidNtfyTargetError('invalid_action_url'); },
+  );
   const payload = {
     topic: validateNtfyTopic(target.topic),
     title: notification.content.title,
@@ -108,26 +95,6 @@ export function ntfyRequest(
     },
     body,
   };
-}
-
-function retryableTransportFailure(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || !('cause' in error)) return false;
-  const cause = error.cause;
-  return !!cause
-    && typeof cause === 'object'
-    && 'code' in cause
-    && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(String(cause.code));
-}
-
-function retryAfterMilliseconds(response: Response, now: Date): number | undefined {
-  const value = response.headers.get('Retry-After');
-  if (value === null) return undefined;
-  if (/^\d+(?:\.\d+)?$/u.test(value)) {
-    const milliseconds = Number(value) * 1_000;
-    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
-  }
-  const instant = Date.parse(value);
-  return Number.isFinite(instant) && instant >= now.getTime() ? instant - now.getTime() : undefined;
 }
 
 function rejection(status: number, retryAfter?: number): NtfyDeliveryOutcome {
@@ -186,10 +153,10 @@ export async function deliverNtfy(
           retryable: false,
           safeErrorCode: body.reason === 'too_large' ? 'response_too_large' : 'malformed_receipt',
         }
-        : rejection(response.status, retryAfterMilliseconds(response, now));
+        : rejection(response.status, retryAfterMilliseconds(response, now, true));
     }
     if (response.status < 200 || response.status >= 300) {
-      return rejection(response.status, retryAfterMilliseconds(response, now));
+      return rejection(response.status, retryAfterMilliseconds(response, now, true));
     }
     try {
       const receipt = JSON.parse(body.text) as { id?: unknown };

@@ -102,8 +102,6 @@ describe('the MCP server as a client sees it', () => {
         language: 'en',
         displayTimezone: 'Europe/Berlin',
         policy: {
-          matchSelection: 'next-deadline-group',
-          completion: 'all-games-in-group',
           excludeParticipantIds: [],
           stages: [{ beforeDeadlineMinutes: 60, severity: 'urgent' }],
         },

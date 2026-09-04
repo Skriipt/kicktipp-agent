@@ -5,7 +5,13 @@ import {
   resolveSecretReference,
   type DiscordTarget,
 } from './targets.js';
-import { readProviderResponse, requestProvider } from './provider-http.js';
+import {
+  readProviderResponse,
+  requestProvider,
+  retryAfterMilliseconds,
+  retryableTransportFailure,
+  validateKicktippActionUrl,
+} from './provider-http.js';
 
 type ReminderNotification = ServiceState['notifications'][number];
 type AttemptOutcome = NonNullable<ServiceState['attempts'][number]['outcome']>;
@@ -58,28 +64,6 @@ function escapeDiscordMarkdown(value: string): string {
   return value.replace(/([\\`*_{}\[\]()#+\-.!|>~])/gu, '\\$1');
 }
 
-function validateActionUrl(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new InvalidWebhookTargetError('invalid_url');
-  }
-  const host = url.hostname.toLowerCase();
-  if (
-    url.protocol !== 'https:'
-    || url.username
-    || url.password
-    || url.hash
-    || ![
-      host === 'kicktipp.de' || host.endsWith('.kicktipp.de'),
-      host === 'kicktipp.com' || host.endsWith('.kicktipp.com'),
-    ].some(Boolean)
-  ) throw new InvalidWebhookTargetError('invalid_url');
-  return url.toString();
-}
-
 export function discordRequest(
   notification: ReminderNotification,
   target: DiscordTarget,
@@ -90,7 +74,7 @@ export function discordRequest(
   if (title.length > 256 || description.length > 4096 || title.length + description.length > 6000) {
     throw new DiscordPayloadTooLargeError();
   }
-  const actionUrl = validateActionUrl(notification.content.actionUrl);
+  const actionUrl = validateKicktippActionUrl(notification.content.actionUrl, invalidDiscordUrl);
   return {
     url: resolveDiscordTarget(target, options).url,
     body: JSON.stringify({
@@ -103,28 +87,6 @@ export function discordRequest(
       }],
     }),
   };
-}
-
-function retryableTransportFailure(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || !('cause' in error)) return false;
-  const cause = error.cause;
-  return !!cause
-    && typeof cause === 'object'
-    && 'code' in cause
-    && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(String(cause.code));
-}
-
-function retryAfterMilliseconds(response: Response, now: Date): number | undefined {
-  const value = response.headers.get('Retry-After');
-  if (value === null) return undefined;
-  if (/^\d+(?:\.\d+)?$/.test(value)) {
-    const milliseconds = Number(value) * 1_000;
-    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
-  }
-  const instant = Date.parse(value);
-  return Number.isFinite(instant) && instant >= now.getTime()
-    ? instant - now.getTime()
-    : undefined;
 }
 
 function isDiscordMessageId(value: unknown): value is string {
@@ -177,7 +139,7 @@ export async function deliverDiscord(
       return { state: 'unknown', retryable: false, safeErrorCode: 'provider_5xx' };
     }
     if (response.status === 429 || response.status === 408 || response.status === 425) {
-      const retryAfter = retryAfterMilliseconds(response, now);
+      const retryAfter = retryAfterMilliseconds(response, now, true);
       return {
         state: 'failed',
         retryable: true,

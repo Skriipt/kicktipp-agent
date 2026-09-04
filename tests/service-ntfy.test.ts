@@ -7,6 +7,12 @@ import type { FetchLike } from '../src/browser.js';
 import { registerTargetsCommand } from '../src/commands/targets.js';
 import { setJsonMode } from '../src/helpers/output.js';
 import type { ReminderCapability } from '../src/reminder-capability.js';
+import {
+  SERVICE_JOB_ID as JOB_ID,
+  serviceCapability,
+  serviceConfiguration as configuration,
+  serviceNotification,
+} from './helpers/service-fixtures.js';
 import { runReminderOnce } from '../src/service/delivery.js';
 import {
   deliverNtfy,
@@ -21,7 +27,6 @@ import {
   readServiceConfiguration,
   readServiceState,
   setupService,
-  type ServiceConfiguration,
   type ServiceState,
 } from '../src/service/store.js';
 import { getServiceStatus } from '../src/service/status.js';
@@ -33,7 +38,6 @@ import {
 } from '../src/service/targets.js';
 
 const NOW = new Date('2026-09-04T11:30:00.000Z');
-const JOB_ID = '9e90818e-a71f-472c-b4ad-c82f67f5195c';
 const TOKEN = 'tk_12345678901234567890123456789';
 const SECRET_CANARY = '12345678901234567890123456789';
 
@@ -52,73 +56,19 @@ function target(overrides: Partial<NtfyTarget> = {}): NtfyTarget {
   };
 }
 
-function configuration(targets: ServiceConfiguration['targets'] = []): ServiceConfiguration {
-  return {
-    schemaVersion: 1,
-    job: {
-      id: JOB_ID,
-      name: 'community-reminder',
-      enabled: targets.length > 0,
-      profileId: 'service-profile',
-      communityId: 'family',
-      language: 'en',
-      displayTimezone: 'Europe/Berlin',
-      policy: {
-        matchSelection: 'next-deadline-group',
-        completion: 'all-games-in-group',
-        excludeParticipantIds: [],
-        stages: [{ beforeDeadlineMinutes: 60, severity: 'urgent' }],
-      },
-      targetIds: targets.map(({ id }) => id),
-    },
-    targets,
-  };
-}
-
 function notification(
   content: Partial<ServiceState['notifications'][number]['content']> = {},
 ): ServiceState['notifications'][number] {
-  return {
-    id: 'a'.repeat(64),
-    jobId: JOB_ID,
-    createdAt: NOW.toISOString(),
-    language: 'en',
-    displayTimezone: 'Europe/Berlin',
-    content: {
-      schemaVersion: 1,
-      type: 'reminder',
-      severity: 'warning',
-      title: 'Kicktipp reminder: Family',
-      message: 'Predictions are missing from Alice.',
-      actionUrl: 'https://www.kicktipp.com/family/predict',
-      ...content,
-    },
-    deadlineGroup: {
-      id: 'b'.repeat(64),
-      deadlineAt: '2026-09-04T12:00:00.000Z',
-      gameIds: ['game-1'],
-    },
-    stage: '60',
-    missingParticipants: [{ id: 'alice', displayName: 'Alice' }],
-  };
+  return serviceNotification({
+    now: NOW,
+    message: 'Predictions are missing from Alice.',
+    displayName: 'Alice',
+    content,
+  });
 }
 
 function capability(displayName = 'Alice'): ReminderCapability {
-  return {
-    available: true,
-    snapshot: {
-      profileId: 'service-profile',
-      communityId: 'family',
-      sourceTimeZone: 'Europe/Berlin',
-      participants: [{ id: 'alice', displayName }],
-      games: [{
-        id: 'game-1',
-        deadlineAt: '2026-09-04T12:00:00.000Z',
-        deadlineSource: 'event',
-      }],
-      cells: [{ participantId: 'alice', gameId: 'game-1', status: 'missing' }],
-    },
-  };
+  return serviceCapability(displayName);
 }
 
 beforeEach(() => {

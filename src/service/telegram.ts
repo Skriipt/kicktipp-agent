@@ -1,6 +1,12 @@
 import type { FetchLike } from '../browser.js';
 import type { ServiceState } from './store.js';
-import { readProviderResponse, requestProvider } from './provider-http.js';
+import {
+  readProviderResponse,
+  requestProvider,
+  retryAfterMilliseconds,
+  retryableTransportFailure,
+  validateKicktippActionUrl,
+} from './provider-http.js';
 import {
   resolveSecretReference,
   type TelegramTarget,
@@ -38,30 +44,6 @@ export function validateTelegramBotToken(value: string): string {
   return value;
 }
 
-function validateActionUrl(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new InvalidTelegramTargetError('invalid_action_url');
-  }
-  const host = url.hostname.toLowerCase();
-  if (
-    url.protocol !== 'https:'
-    || url.username
-    || url.password
-    || url.hash
-    || !(
-      host === 'kicktipp.de'
-      || host.endsWith('.kicktipp.de')
-      || host === 'kicktipp.com'
-      || host.endsWith('.kicktipp.com')
-    )
-  ) throw new InvalidTelegramTargetError('invalid_action_url');
-  return url.toString();
-}
-
 export function resolveTelegramTarget(
   target: TelegramTarget,
   options: Parameters<typeof resolveSecretReference>[1] = {},
@@ -81,7 +63,10 @@ export function telegramRequest(
 ): { url: string; body: string } {
   const text = `${SEVERITY_MARKERS[notification.content.severity]} ${neutralizeMentions(notification.content.title)}\n\n${neutralizeMentions(notification.content.message)}`;
   if (text.length > 4096) throw new TelegramPayloadTooLargeError();
-  const actionUrl = validateActionUrl(notification.content.actionUrl);
+  const actionUrl = validateKicktippActionUrl(
+    notification.content.actionUrl,
+    () => { throw new InvalidTelegramTargetError('invalid_action_url'); },
+  );
   return {
     url: resolveTelegramTarget(target, options).url,
     body: JSON.stringify({
@@ -93,28 +78,6 @@ export function telegramRequest(
       } : {}),
     }),
   };
-}
-
-function retryableTransportFailure(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || !('cause' in error)) return false;
-  const cause = error.cause;
-  return !!cause
-    && typeof cause === 'object'
-    && 'code' in cause
-    && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(String(cause.code));
-}
-
-function headerRetryAfter(response: Response, now: Date): number | undefined {
-  const value = response.headers.get('Retry-After');
-  if (value === null) return undefined;
-  if (/^\d+(?:\.\d+)?$/u.test(value)) {
-    const milliseconds = Number(value) * 1_000;
-    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
-  }
-  const instant = Date.parse(value);
-  return Number.isFinite(instant) && instant >= now.getTime()
-    ? instant - now.getTime()
-    : undefined;
 }
 
 function telegramRetryAfter(value: unknown): number | undefined {
@@ -189,7 +152,7 @@ export async function deliverTelegram(
           safeErrorCode: body.reason === 'too_large' ? 'response_too_large' : 'malformed_receipt',
         };
       }
-      return rejection(response.status, headerRetryAfter(response, now));
+      return rejection(response.status, retryAfterMilliseconds(response, now, true));
     }
 
     let parsed: unknown;
@@ -199,7 +162,7 @@ export async function deliverTelegram(
       if (response.status >= 200 && response.status < 300) {
         return { state: 'unknown', retryable: false, safeErrorCode: 'malformed_receipt' };
       }
-      return rejection(response.status, headerRetryAfter(response, now));
+      return rejection(response.status, retryAfterMilliseconds(response, now, true));
     }
     if (
       response.status >= 200
@@ -226,13 +189,13 @@ export async function deliverTelegram(
     if (code !== undefined && parsed && typeof parsed === 'object' && 'ok' in parsed && parsed.ok === false) {
       return rejection(
         response.status >= 200 && response.status < 300 ? code : response.status,
-        telegramRetryAfter(parsed) ?? headerRetryAfter(response, now),
+        telegramRetryAfter(parsed) ?? retryAfterMilliseconds(response, now, true),
       );
     }
     if (response.status >= 200 && response.status < 300) {
       return { state: 'unknown', retryable: false, safeErrorCode: 'malformed_receipt' };
     }
-    return rejection(response.status, headerRetryAfter(response, now));
+    return rejection(response.status, retryAfterMilliseconds(response, now, true));
   } catch (error) {
     if (retryableTransportFailure(error)) {
       return { state: 'failed', retryable: true, safeErrorCode: 'connection_unavailable' };

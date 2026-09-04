@@ -27,7 +27,6 @@ const KNOWN_PROVIDER_CODES = new Set([
   'target_changed',
   'temporary_rejection',
   'transport_ambiguous',
-  'unsupported_provider',
 ]);
 
 /** Convert persisted, bounded error codes into the only error shape public surfaces may emit. */
