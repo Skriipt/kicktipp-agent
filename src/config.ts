@@ -8,9 +8,14 @@ import { t } from './i18n/index.js';
 import type { ScoringRules } from './rules/scoring.js';
 import { withAuthProfileMutation } from './auth-profile-lock.js';
 import { authConfigDir, authDataDir } from './auth-paths.js';
+import { FileLock } from './service/lock.js';
 
 const CONFIG_DIR = authConfigDir();
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
+const CONFIG_LOCK_FILE = path.join(
+  authDataDir(),
+  `config-${crypto.createHash('sha256').update(CONFIG_FILE).digest('hex').slice(0, 16)}.lock`,
+);
 
 // ── Profiles ────────────────────────────────────────────────────────
 
@@ -54,6 +59,13 @@ function writeProfileSection(
   const merged = { ...existing, ...patch };
   if (config[`profile.${name}`]) config[`profile.${name}`] = merged;
   else config.profile = { ...(config.profile ?? {}), [name]: merged };
+}
+
+function deleteProfileSection(config: Record<string, any>, name: string): void {
+  delete config[`profile.${name}`];
+  if (!config.profile) return;
+  delete config.profile[name];
+  if (Object.keys(config.profile).length === 0) delete config.profile;
 }
 
 function profileSection(
@@ -126,7 +138,7 @@ export function readConfig(): Record<string, any> {
   return ini.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
 }
 
-function writeConfig(config: Record<string, any>): void {
+function writeConfigUnlocked(config: Record<string, any>): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   const tmpFile = `${CONFIG_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
@@ -134,6 +146,19 @@ function writeConfig(config: Record<string, any>): void {
     fs.renameSync(tmpFile, CONFIG_FILE);
   } finally {
     if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+  }
+}
+
+/** Serialize every read-modify-write of the shared config.ini across profiles. */
+function mutateConfig<T>(mutation: (config: Record<string, any>) => T): T {
+  const lock = FileLock.acquire(CONFIG_LOCK_FILE);
+  try {
+    const config = readConfig();
+    const result = mutation(config);
+    writeConfigUnlocked(config);
+    return result;
+  } finally {
+    lock.release();
   }
 }
 
@@ -194,8 +219,7 @@ export async function saveAuth(opts: { email: string; password?: string; store?:
     patch.password = encrypt(opts.password);
   }
 
-  await withAuthProfileMutation(profile, () => {
-    const config = readConfig();
+  mutateConfig((config) => {
     if (profile) {
       writeProfileSection(config, profile, patch);
       if (store === 'session') delete readProfileSection(config, profile)?.password;
@@ -203,14 +227,13 @@ export async function saveAuth(opts: { email: string; password?: string; store?:
       config.auth = { ...(config.auth ?? {}), ...patch };
       if (store === 'session') delete config.auth.password;
     }
-    writeConfig(config);
   });
 }
 
 export function saveReadOnly(readOnly: boolean): void {
-  const config = readConfig();
-  config.server = { ...(config.server ?? {}), read_only: readOnly };
-  writeConfig(config);
+  mutateConfig((config) => {
+    config.server = { ...(config.server ?? {}), read_only: readOnly };
+  });
 }
 
 export async function loadCredentials(): Promise<{ email: string; password: string }> {
@@ -218,18 +241,13 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
   }
   const config = readConfig();
+  const activeProfile = getActiveProfile();
   const profile = profileSection(config);
   if (profile?.email && profile?.password) {
     return { email: profile.email, password: decrypt(profile.password) };
   }
-  if (config.auth?.email && config.auth?.password) {
-    const password = decrypt(config.auth.password);
-    // Migrate plaintext passwords to encrypted on read
-    if (!config.auth.password.startsWith('enc.')) {
-      config.auth.password = encrypt(password);
-      writeConfig(config);
-    }
-    return { email: config.auth.email, password };
+  if (!activeProfile && config.auth?.email && config.auth?.password) {
+    return { email: config.auth.email, password: decrypt(config.auth.password) };
   }
 
   if (isSessionOnly()) throw new SessionOnlyExpiredError();
@@ -270,9 +288,7 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
   });
   rl.close();
 
-  const config2 = readConfig();
-  config2.auth = { email, password: encrypt(password) };
-  writeConfig(config2);
+  await saveAuth({ email, password });
   console.log(t('config.credentialsSaved'));
   return { email, password };
 }
@@ -307,11 +323,11 @@ export function loadCommunity(): string | null {
 }
 
 export function saveCommunity(name: string): void {
-  const config = readConfig();
   const profile = getActiveProfile();
-  if (profile) writeProfileSection(config, profile, { community: name });
-  else config.community = { name };
-  writeConfig(config);
+  mutateConfig((config) => {
+    if (profile) writeProfileSection(config, profile, { community: name });
+    else config.community = { name };
+  });
 }
 
 export function loadPlayer(): string | null {
@@ -321,20 +337,20 @@ export function loadPlayer(): string | null {
 }
 
 export function savePlayer(name: string): void {
-  const config = readConfig();
   const profile = getActiveProfile();
-  if (profile) writeProfileSection(config, profile, { player: name });
-  else config.player = { name };
-  writeConfig(config);
+  mutateConfig((config) => {
+    if (profile) writeProfileSection(config, profile, { player: name });
+    else config.player = { name };
+  });
 }
 
 /** Replace the [notify] section. Passing no target clears a previous one. */
 export function saveNotifySection(notify: { kind: string; target?: string }): void {
-  const config = readConfig();
-  config.notify = notify.target
-    ? { kind: notify.kind, target: notify.target }
-    : { kind: notify.kind };
-  writeConfig(config);
+  mutateConfig((config) => {
+    config.notify = notify.target
+      ? { kind: notify.kind, target: notify.target }
+      : { kind: notify.kind };
+  });
 }
 
 /**
@@ -374,9 +390,9 @@ export function readDefaultStrategy(): string | null {
 }
 
 function patchUi(patch: Record<string, string>): void {
-  const config = readConfig();
-  config.ui = { ...(config.ui ?? {}), ...patch };
-  writeConfig(config);
+  mutateConfig((config) => {
+    config.ui = { ...(config.ui ?? {}), ...patch };
+  });
 }
 
 /** Optional UI language from `[ui] language` in config.ini. */
@@ -403,7 +419,7 @@ export function hasCredentials(): boolean {
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
   const config = readConfig();
   const profile = profileSection(config);
-  if (profile?.email && profile?.password) return true;
+  if (profile) return !!(profile.email && profile.password);
   return !!(config.auth?.email && config.auth?.password);
 }
 
@@ -411,11 +427,17 @@ export async function logout(): Promise<void> {
   const profile = getActiveProfile();
   const removed = await withAuthProfileMutation(profile, () => {
     const files: string[] = [];
-    for (const p of [CONFIG_FILE, sessionFile(profile)]) {
-      if (fs.existsSync(p)) {
-        fs.unlinkSync(p);
-        files.push(path.basename(p));
-      }
+    if (fs.existsSync(CONFIG_FILE)) {
+      mutateConfig((config) => {
+        if (profile) deleteProfileSection(config, profile);
+        else delete config.auth;
+      });
+      files.push(path.basename(CONFIG_FILE));
+    }
+    const savedSession = sessionFile(profile);
+    if (fs.existsSync(savedSession)) {
+      fs.unlinkSync(savedSession);
+      files.push(path.basename(savedSession));
     }
     return files;
   });

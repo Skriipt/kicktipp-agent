@@ -10,14 +10,16 @@ describe('the MCPB manifest', () => {
   it('declares a Desktop settings form and a node server', () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
-    ) as { version: string };
+    ) as { version: string; engines: { node: string } };
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
       manifest_version: string;
+      compatibility: { runtimes: { node: string } };
       version: string;
       server: { mcp_config: { command: string; args: string[]; env: Record<string, string> } };
       user_config: Record<string, { type: string; sensitive?: boolean; required?: boolean }>;
     };
     expect(manifest.version).toBe(pkg.version);
+    expect(manifest.compatibility.runtimes.node).toBe(pkg.engines.node);
     expect(VERSION).toBe(pkg.version);
     expect(manifest.manifest_version).toBe('0.4');
     expect(manifest.server.mcp_config.command).toBe('node');

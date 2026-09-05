@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseMatchDate,
+  resolveMatchDateStrict,
   humanDelta,
   displayTimeZone,
   inheritPrintedDate,
@@ -25,6 +26,11 @@ function bet(over: Partial<BetMatch> = {}): BetMatch {
 }
 
 describe('parseMatchDate', () => {
+  it.each(['0:30 AM', '13:30 AM', '0:30 PM', '24:30 PM'])('rejects invalid 12-hour clocks: %s', (clock) => {
+    const date = `8/21/26 ${clock}`;
+    expect(parseMatchDate(date)).toBeNull();
+    expect(resolveMatchDateStrict(date, 'America/Chicago')).toEqual({ resolved: false, reason: 'invalid-timestamp' });
+  });
   it('reads the German format in a named zone', () => {
     // 20:30 Berlin in August is UTC+2, so 18:30Z.
     expect(parseMatchDate('21.08.26 20:30', TZ)?.toISOString()).toBe('2026-08-21T18:30:00.000Z');

@@ -95,6 +95,15 @@ describe('the audit file', () => {
 });
 
 describe('placeBets records every attempt', () => {
+  it.each([404, 429, 500, 503])('does not mark an HTTP %s submission as successful', async (status) => {
+    const { fetchImpl } = mockFetch((req) => req.method === 'GET'
+      ? htmlPage(FORM()) : { status, body: 'failed' });
+    await expect(placeBets(new Page(new CookieJar(), fetchImpl), 'c', ['Bayern vs BVB=2:1']))
+      .rejects.toThrow();
+    expect(readAudit('c').map((record) => record.outcome)).toEqual(['intent', expect.stringMatching(/^failed:/)]);
+    expect(lastSubmission('c')).toBeNull();
+  });
+
   it('writes intent then submitted, with the source', async () => {
     const { page } = betPage();
     await placeBets(page, 'c', ['Bayern vs BVB=2:1'], 3, true, 'mcp:place_bets');

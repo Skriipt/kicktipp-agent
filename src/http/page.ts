@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { urlBase, getAlternateUrls } from '../url.js';
-import { CookieJar } from './cookie-jar.js';
+import { CookieJar, isAllowedHost } from './cookie-jar.js';
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -102,10 +102,20 @@ export class Page {
     let currentReferer = referer;
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const target = new URL(currentUrl);
+      if (currentBody && !isAllowedHost(target.hostname)) {
+        throw new Error('Refusing to send form data outside trusted Kicktipp hosts.');
+      }
+      if (currentReferer?.startsWith('https:') && target.protocol !== 'https:') {
+        throw new Error('Refusing an insecure redirect or form action.');
+      }
       const headers = new Headers(DEFAULT_HEADERS);
       const cookie = this.jar.header(currentUrl);
       if (cookie) headers.set('Cookie', cookie);
-      if (currentReferer) headers.set('Referer', currentReferer);
+      if (currentReferer) {
+        const previous = new URL(currentReferer);
+        headers.set('Referer', previous.origin === target.origin ? currentReferer : `${previous.origin}/`);
+      }
       if (currentMethod === 'POST') {
         headers.set('Content-Type', 'application/x-www-form-urlencoded');
       }
@@ -115,11 +125,13 @@ export class Page {
         headers,
         body: currentMethod === 'POST' ? currentBody : undefined,
         redirect: 'manual',
+        signal: AbortSignal.timeout(30_000),
       });
       this.jar.store(currentUrl, res.headers);
 
       const location = res.headers.get('location');
       if (location && [301, 302, 303, 307, 308].includes(res.status)) {
+        await res.body?.cancel();
         currentReferer = currentUrl;
         currentUrl = this.absoluteUrl(location, currentUrl);
         // 301/302/303 turn the follow-up into a GET; 307/308 keep the method.
@@ -134,6 +146,9 @@ export class Page {
       this.lastStatus = res.status;
       this.html = await decodeBody(res);
       this.$dom = cheerio.load(this.html);
+      if (!res.ok && res.status !== 404) {
+        throw new Error(`Kicktipp request failed with HTTP ${res.status}.`);
+      }
       return;
     }
 
@@ -237,17 +252,29 @@ export class Page {
     submitter: cheerio.Cheerio<AnyNode>,
   ): Promise<void> {
     if (!form.length) throw new Error('Submit target is not inside a form.');
+    const wasLoginPage = this.isAuthRedirect();
     const method = (form.attr('method') || 'get').toLowerCase();
     const action = this.absoluteUrl(form.attr('action') || this.currentUrl);
+    if (!isAllowedHost(new URL(action).hostname)) {
+      throw new Error('Refusing to send form data outside trusted Kicktipp hosts.');
+    }
     const body = this.serializeForm(form, submitter);
 
     if (method === 'post') {
       await this.navigate('POST', action, body, this.currentUrl);
+      this.assertSubmissionResponse(wasLoginPage);
       return;
     }
     const target = new URL(action);
     for (const [key, value] of body) target.searchParams.append(key, value);
     await this.navigate('GET', target.toString(), undefined, this.currentUrl);
+    this.assertSubmissionResponse(wasLoginPage);
+  }
+
+  private assertSubmissionResponse(wasLoginPage: boolean): void {
+    if ((!wasLoginPage && this.isAuthRedirect()) || this.isNotFound()) {
+      throw new Error('Kicktipp did not accept the form submission (login or missing page).');
+    }
   }
 
   /** Serialize a form the way a browser would for urlencoded submission. */

@@ -8,7 +8,7 @@ import {
   discordRequest,
   DiscordPayloadTooLargeError,
 } from './discord.js';
-import { evaluateReminderDryRun } from './dry-run.js';
+import { compareCodePoints, evaluateReminderDryRun } from './dry-run.js';
 import type { FileLock } from './lock.js';
 import {
   deliverNtfy,
@@ -71,15 +71,6 @@ export function reminderRunExitCode(result: ReminderRunResult): 0 | 1 | 2 {
   return result.deliveryStates.some((state) => ['failed', 'unknown', 'pending'].includes(state))
     ? 2
     : 0;
-}
-
-function compareCodePoints(left: string, right: string): number {
-  const a = Array.from(left, (value) => value.codePointAt(0)!);
-  const b = Array.from(right, (value) => value.codePointAt(0)!);
-  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
-    if (a[index] !== b[index]) return a[index] - b[index];
-  }
-  return a.length - b.length;
 }
 
 function hash(value: object): string {

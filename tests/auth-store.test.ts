@@ -31,6 +31,15 @@ afterEach(() => {
 });
 
 describe('saveAuth', () => {
+  it('reads legacy credentials without rewriting a read-only config', async () => {
+    const contents = '[auth]\nemail = me@example.com\npassword = legacy\n';
+    const config = await loadConfig(contents);
+    const write = vi.spyOn(fs, 'writeFileSync');
+    await expect(config.loadCredentials()).resolves.toEqual({ email: 'me@example.com', password: 'legacy' });
+    expect(write).not.toHaveBeenCalled();
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(contents);
+  });
+
   it('encrypts a password by default', async () => {
     const config = await loadConfig();
     await config.saveAuth({ email: 'me@example.com', password: 'secret' });

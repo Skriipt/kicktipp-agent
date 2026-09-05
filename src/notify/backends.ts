@@ -119,15 +119,6 @@ async function desktop(title: string, body: string): Promise<void> {
   );
 }
 
-async function webhook(target: string, payload: unknown): Promise<void> {
-  const res = await fetch(target, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`Webhook ${target} answered ${res.status} ${res.statusText}.`);
-}
-
 /**
  * Deliver a notification. The payload is the deadline report plus a human
  * `summary`, documented as a stable shape so webhook consumers can rely
@@ -146,17 +137,16 @@ export async function notify(
       if (!config.target) {
         throw new Error('The webhook notifier needs a target URL ([notify] target = ...).');
       }
-      const body = { summary, ...(payload as object) };
-      if (deps.fetchImpl) {
-        const res = await deps.fetchImpl(config.target, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error(`Webhook ${config.target} answered ${res.status}.`);
-        return;
-      }
-      return webhook(config.target, body);
+      const res = await (deps.fetchImpl ?? fetch)(config.target, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summary, ...(payload as object) }),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15_000),
+      });
+      await res.body?.cancel();
+      if (!res.ok) throw new Error(`Webhook answered ${res.status}.`);
+      return;
     }
     case 'command':
       if (!config.target) {

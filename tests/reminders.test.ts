@@ -83,6 +83,17 @@ describe('icsCalendar', () => {
 });
 
 describe('notify', () => {
+  it('bounds webhook requests, refuses redirects, and keeps the endpoint out of errors', async () => {
+    const target = 'https://example.test/private-token';
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      expect(init.redirect).toBe('manual');
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      return new Response('', { status: 307, headers: { location: 'https://elsewhere.test' } });
+    }) as unknown as typeof fetch;
+    await expect(notify({ kind: 'webhook', target }, 's', {}, { fetchImpl }))
+      .rejects.toThrow('Webhook answered 307.');
+  });
+
   it('posts the summary and payload to a webhook', async () => {
     const calls: { url: string; body: unknown }[] = [];
     const fetchImpl = (async (url: string, init: RequestInit) => {

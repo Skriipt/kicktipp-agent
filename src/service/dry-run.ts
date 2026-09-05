@@ -37,7 +37,7 @@ export type ReminderDryRunResult =
   | { reliable: true; preview: ReminderPreview }
   | { reliable: false; reason: ReminderCapabilityReason | 'snapshot-scope-mismatch' | 'invalid-snapshot' };
 
-function compareCodePoints(left: string, right: string): number {
+export function compareCodePoints(left: string, right: string): number {
   const a = Array.from(left, (value) => value.codePointAt(0)!);
   const b = Array.from(right, (value) => value.codePointAt(0)!);
   for (let index = 0; index < Math.min(a.length, b.length); index += 1) {

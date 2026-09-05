@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
+import { fork } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 let home: string;
 let configFile: string;
@@ -131,6 +135,57 @@ describe('profiles', () => {
     config.setActiveProfile(null);
     // The default profile is untouched.
     expect(config.loadCommunity()).toBe('default-pool');
+  });
+
+  it('never falls back to the default account for a selected session-only profile', async () => {
+    const config = await loadConfig(WITH_PROFILES.replace('password = workpass', 'store = session'));
+    config.setActiveProfile('work');
+    expect(config.hasCredentials()).toBe(false);
+    await expect(config.loadCredentials()).rejects.toMatchObject({ name: 'SessionOnlyExpiredError' });
+  });
+
+  it('keeps unrelated settings and other profiles when logging out one profile', async () => {
+    const config = await loadConfig(`${WITH_PROFILES}\n[ui]\nlanguage = de\n`);
+    config.setActiveProfile('work');
+    fs.writeFileSync(config.sessionFile(), '{}');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await config.logout();
+
+    expect(fs.existsSync(path.join(path.dirname(configFile), 'session-work.json'))).toBe(false);
+    config.setActiveProfile(null);
+    expect(config.loadCommunity()).toBe('default-pool');
+    expect(config.listProfiles()).toEqual(['family']);
+    expect(config.readUiLanguage()).toBe('de');
+  });
+});
+
+describe('shared config mutation lock', () => {
+  it('can save credentials while its caller owns the session lock', async () => {
+    const config = await loadConfig(CLASSIC);
+    const { withAuthProfileMutation } = await import('../src/auth-profile-lock.js');
+    await withAuthProfileMutation(null, () => config.saveAuth({ email: 'new@example.test', password: 'new-secret' }));
+    expect(await config.loadCredentials()).toEqual({ email: 'new@example.test', password: 'new-secret' });
+  });
+
+  it('fails fast while another process owns the shared config lock', async () => {
+    const config = await loadConfig(CLASSIC);
+    const lockFile = path.join(
+      path.dirname(configFile),
+      `config-${crypto.createHash('sha256').update(configFile).digest('hex').slice(0, 16)}.lock`,
+    );
+    const moduleUrl = pathToFileURL(fileURLToPath(new URL('../dist/service/lock.js', import.meta.url))).href;
+    const child = fork(fileURLToPath(new URL('./helpers/config-mutation-child.mjs', import.meta.url)),
+      [moduleUrl, lockFile], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+    try {
+      const [message] = await once(child, 'message');
+      expect(message).toEqual({ status: 'held' });
+      expect(() => config.saveCommunity('blocked')).toThrow(/lock is already held/i);
+      expect(config.loadCommunity()).toBe('default-pool');
+    } finally {
+      if (child.connected) child.send('release');
+      await once(child, 'exit');
+    }
   });
 });
 

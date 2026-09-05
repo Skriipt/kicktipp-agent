@@ -5,7 +5,7 @@
 Use [Kicktipp](https://www.kicktipp.com/) from a terminal or an MCP-compatible assistant.
 
 [![GitHub release](https://img.shields.io/github/v/release/Skriipt/kicktipp-agent?style=flat-square)](https://github.com/Skriipt/kicktipp-agent/releases/latest)
-[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 24 LTS](https://img.shields.io/badge/Node.js-24_LTS-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Release](https://img.shields.io/github/actions/workflow/status/Skriipt/kicktipp-agent/release-mcpb.yml?style=flat-square&label=release)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/release-mcpb.yml)
 
 [Quick start](#quick-start) · [CLI](#cli) · [MCP](#mcp) · [Privacy](#privacy-and-safety) · [Development](#development)
@@ -26,7 +26,8 @@ Use [Kicktipp](https://www.kicktipp.com/) from a terminal or an MCP-compatible a
 
 ## Quick start
 
-Install [Node.js](https://nodejs.org/) 20 or newer.
+Install [Node.js](https://nodejs.org/) 24.15 or newer in the 24 LTS line.
+Node 22.22.2+ in the 22 LTS line and Node 26+ are also supported.
 
 > [!NOTE]
 > This fork is not published on npm. The unscoped `kicktipp-agent` package on
@@ -294,6 +295,8 @@ No real account login or Notification delivery occurs.
 
 - Credentials go to the configured Kicktipp base URL during login. Treat a
   custom `KICKTIPP_BASE_URL` as trusted.
+  Autonomous Service reminders require an official Kicktipp HTTPS origin;
+  custom origins are only supported by the interactive HTTP client and test fixtures.
 - The localhost setup page keeps passwords out of prompts and terminal history.
 - Passwords stored by the CLI use AES-256-GCM tied to the local hostname and
   operating-system user. Session-only mode stores a login cookie instead.
@@ -303,13 +306,22 @@ No real account login or Notification delivery occurs.
 
 ## Troubleshooting
 
-- If `node` or `npm` is missing, install Node.js 20+ and reopen the terminal.
+- If `node` or `npm` is missing, install Node.js 24 LTS and reopen the terminal.
 - If setup does not open, copy the printed `127.0.0.1` URL into a local browser.
 - After `git pull`, run `npm run build` because clients execute `dist/server.js`.
-- If parsing fails, retry with `--site de` or `--site com`, then open a
-  sanitized [issue](https://github.com/Skriipt/kicktipp-agent/issues).
+- If parsing fails, retry with `--site de` or `--site com`, then capture the
+  error with account details removed. GitHub Issues are currently disabled on this fork.
 
 ## Development
+
+`npm test` builds first and runs against temporary home directories so tests
+cannot reuse your saved account. CI covers Windows and Linux on Node 22, 24,
+and 26, plus the Docker smoke test.
+
+The Cheerio `encoding-sniffer` override replaces deprecated `whatwg-encoding`
+with the maintained `@exodus/bytes` implementation. Remove the override once
+Cheerio adopts it. `@types/node` follows the oldest supported runtime; the
+explicit `domhandler` type dependency matches Cheerio's DOM version.
 
 ```bash
 git clone https://github.com/Skriipt/kicktipp-agent.git

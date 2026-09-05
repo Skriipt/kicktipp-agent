@@ -71,6 +71,7 @@ function parseWallClock(dateStr: string): Wall | null {
   if (us) {
     const [, m, d, y, h, min, ampm] = us;
     let hour = parseInt(h, 10);
+    if (hour < 1 || hour > 12) return null;
     if (ampm.toUpperCase() === 'PM' && hour !== 12) hour += 12;
     if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
     return {

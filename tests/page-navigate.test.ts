@@ -32,6 +32,49 @@ describe('Page.goto', () => {
 });
 
 describe('redirects', () => {
+  it.each([307, 308])('does not resend form data to an external host on %s', async (status) => {
+    const { fetchImpl, calls } = mockFetch((req) => req.method === 'GET'
+      ? htmlPage('<form method="post"><input name="password" value="private"><button>Go</button></form>')
+      : { status, location: 'https://external.example/collect' });
+    const page = new Page(new CookieJar(), fetchImpl);
+    await page.goto(`${BASE}/form`);
+    await expect(page.click('button')).rejects.toThrow(/outside trusted/);
+    expect(calls.map((call) => call.url)).toEqual([`${BASE}/form`, `${BASE}/form`]);
+  });
+
+  it.each(['get', 'post'])('refuses an external %s form action before sending fields', async (method) => {
+    const { fetchImpl, calls } = mockFetch(() => htmlPage(
+      `<form method="${method}" action="https://external.example/collect"><input name="password" value="private"><button>Go</button></form>`,
+    ));
+    const page = new Page(new CookieJar(), fetchImpl);
+    await page.goto(`${BASE}/form`);
+    await expect(page.click('button')).rejects.toThrow(/outside trusted/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refuses HTTPS downgrades before sending cookies', async () => {
+    const { fetchImpl, calls } = mockFetch(() => ({ status: 302, location: 'http://www.kicktipp.com/end' }));
+    const page = new Page(new CookieJar(), fetchImpl);
+    await expect(page.goto(`${BASE}/start`)).rejects.toThrow(/insecure redirect/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('cancels redirect bodies and strips private paths from external referrers', async () => {
+    let cancelled = false;
+    const response = new Response(new ReadableStream({ cancel() { cancelled = true; } }), {
+      status: 302, headers: { location: 'https://external.example/end' },
+    });
+    let referer: string | null = null;
+    const page = new Page(new CookieJar(), async (url, init) => {
+      if (url.startsWith(BASE)) return response;
+      referer = new Headers(init.headers).get('referer');
+      return new Response('done');
+    });
+    await page.goto(`${BASE}/private?token=secret`);
+    expect(cancelled).toBe(true);
+    expect(referer).toBe(`${BASE}/`);
+  });
+
   it('follows a 302 and reports the final URL', async () => {
     const { fetchImpl } = mockFetch(routes({
       [`${BASE}/start`]: { status: 302, location: '/end' },
