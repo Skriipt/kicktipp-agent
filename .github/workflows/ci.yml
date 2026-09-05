@@ -22,6 +22,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        run: npm run pack:mcpb
 
   docker-smoke:
     name: Docker release smoke

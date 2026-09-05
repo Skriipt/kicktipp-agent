@@ -4,27 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { fork, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
-import ts from 'typescript';
+import { fileURLToPath } from 'node:url';
 import { AmbiguousLockError, FileLock, LockUnavailableError, observeLock } from '../src/service/lock.js';
 
 let root: string;
 let file: string;
-let moduleUrl: string;
+const moduleUrl = new URL('../dist/service/lock.js', import.meta.url).href;
 let children: ChildProcess[];
 beforeEach(() => {
   children = [];
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-lock-'));
   file = path.join(root, 'owner.lock');
-  const source = fs.readFileSync(new URL('../src/service/lock.ts', import.meta.url), 'utf8')
-    .replace("from 'zod'", `from '${pathToFileURL(createRequire(import.meta.url).resolve('zod')).href}'`);
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
-  }).outputText;
-  const moduleFile = path.join(root, 'lock.mjs');
-  fs.writeFileSync(moduleFile, compiled);
-  moduleUrl = pathToFileURL(moduleFile).href;
 });
 afterEach(async () => {
   vi.restoreAllMocks();
