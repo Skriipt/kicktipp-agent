@@ -28,7 +28,8 @@
   ],
   "scripts": {
     "pretest": "npm run build",
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "build": "node scripts/build.mjs",
+    "dashboard": "node dist/index.js dashboard",
     "test": "vitest run",
     "test:docker": "bash scripts/docker-smoke.sh",
     "test:watch": "vitest",

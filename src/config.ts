@@ -150,7 +150,7 @@ function writeConfigUnlocked(config: Record<string, any>): void {
 }
 
 /** Serialize every read-modify-write of the shared config.ini across profiles. */
-function mutateConfig<T>(mutation: (config: Record<string, any>) => T): T {
+export function mutateConfig<T>(mutation: (config: Record<string, any>) => T): T {
   const lock = FileLock.acquire(CONFIG_LOCK_FILE);
   try {
     const config = readConfig();
@@ -347,9 +347,8 @@ export function savePlayer(name: string): void {
 /** Replace the [notify] section. Passing no target clears a previous one. */
 export function saveNotifySection(notify: { kind: string; target?: string }): void {
   mutateConfig((config) => {
-    config.notify = notify.target
-      ? { kind: notify.kind, target: notify.target }
-      : { kind: notify.kind };
+    const warn_hours = config.notify?.warn_hours;
+    config.notify = { ...notify, ...(warn_hours === undefined ? {} : { warn_hours }) };
   });
 }
 

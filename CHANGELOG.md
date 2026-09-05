@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Local web dashboard with red accents, responsive navigation, account and community selection, match and bonus tip editors, and forms covering the CLI operations and options.
+- Dashboard configuration for notification targets and secrets, reminder stages, participant exclusions, target assignments, and service start/stop.
+- Confirmed and audited dashboard submissions, including explicit member identity confirmation for Spielleiter tips.
+- Shared persisted display timezone and warning-window settings, with environment variables retaining precedence.
+
+### Changed
+
+- Builds and Docker images include the dashboard assets without adding runtime or frontend dependencies.
+
 ## [1.3.0] - 2026-09-03
 
 ### Changed

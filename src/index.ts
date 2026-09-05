@@ -3,6 +3,8 @@
 import { Command } from 'commander';
 import { VERSION } from './version.js';
 import { spawn } from 'child_process';
+import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
 import {
   savePlayer,
   logout,
@@ -10,6 +12,7 @@ import {
   setActiveProfile,
   setCommunityOverride,
   getActiveProfile,
+  loadCommunity,
   readUiLanguage,
   readUiSite,
   saveUiLanguage,
@@ -253,11 +256,28 @@ registerTargetsCommand(program);
 registerServiceCommand(program);
 registerDoctorCommand(program);
 
+program.command('dashboard')
+  .description('Open the local web dashboard')
+  .option('--port <port>', 'Local HTTP port (0 selects a free port)', '3210')
+  .action(async (options) => {
+    const { startDashboard } = await import('./dashboard/server.js');
+    const globals = program.opts();
+    const dashboard = await startDashboard({
+      port: Number(options.port), profile: getActiveProfile(), community: loadCommunity(),
+      env: { ...process.env, ...(globals.lang ? { KICKTIPP_LANG: currentLanguage() } : {}),
+        ...(globals.site ? { KICKTIPP_BASE_URL: urlBase() } : {}) },
+    });
+    console.log(`Kicktipp Dashboard: ${dashboard.url}`);
+    const close = () => { void dashboard.close(); };
+    process.once('SIGINT', close);
+    process.once('SIGTERM', close);
+  });
+
 export { program, ensureCommunity, ask };
 
 // Errors from the Kicktipp layer (failed login, expired session, unknown
 // community) are reported as plain messages rather than stack traces.
-program.parseAsync().catch((err) => {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) program.parseAsync().catch((err) => {
   statusClear();
   // In --json mode the failure has to be machine-readable too, so scripts
   // can parse errors instead of guessing from the exit code alone.

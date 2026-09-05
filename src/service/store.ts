@@ -596,7 +596,7 @@ export function fileRevision(file: string): string | null {
   }
 }
 
-function readConfigurationSnapshot(paths: ServicePaths): {
+export function readConfigurationSnapshot(paths: ServicePaths): {
   configuration: ServiceConfiguration;
   revision: string;
 } {

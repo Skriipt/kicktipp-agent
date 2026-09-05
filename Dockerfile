@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY src ./src
+COPY scripts/build.mjs ./scripts/build.mjs
 RUN npm run build \
     && npm prune --omit=dev --ignore-scripts --no-audit --no-fund
 

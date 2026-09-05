@@ -2,13 +2,13 @@
 
 # kicktipp-agent
 
-Use [Kicktipp](https://www.kicktipp.com/) from a terminal or an MCP-compatible assistant.
+Use [Kicktipp](https://www.kicktipp.com/) from a web dashboard, terminal, or MCP-compatible assistant.
 
 [![GitHub release](https://img.shields.io/github/v/release/Skriipt/kicktipp-agent?style=flat-square)](https://github.com/Skriipt/kicktipp-agent/releases/latest)
 [![Node.js 24 LTS](https://img.shields.io/badge/Node.js-24_LTS-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Release](https://img.shields.io/github/actions/workflow/status/Skriipt/kicktipp-agent/release-mcpb.yml?style=flat-square&label=release)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/release-mcpb.yml)
 
-[Quick start](#quick-start) · [CLI](#cli) · [MCP](#mcp) · [Privacy](#privacy-and-safety) · [Development](#development)
+[Quick start](#quick-start) · [Dashboard](#web-dashboard) · [CLI](#cli) · [MCP](#mcp) · [Privacy](#privacy-and-safety) · [Development](#development)
 
 </div>
 
@@ -16,6 +16,7 @@ Use [Kicktipp](https://www.kicktipp.com/) from a terminal or an MCP-compatible a
 `kicktipp.de`. It reads the Kicktipp website over HTTP and provides:
 
 - a command-line interface for direct use and scripts
+- a local web dashboard for account setup, tips, analytics, notifications, and service control
 - a full-screen terminal UI for browsing and placing tips
 - a local Model Context Protocol server for Claude and other MCP clients
 - season analytics, odds-based suggestions, reminders, and an undo log
@@ -49,6 +50,31 @@ kicktipp tui
 
 `login --web` opens a private setup page on `127.0.0.1`. Sign in, select a
 community, then return to the terminal.
+
+### Web dashboard
+
+After building the repository, run:
+
+```bash
+npm run dashboard
+# Or, after npm link:
+kicktipp dashboard --port 3210
+```
+
+Open the complete link printed in the terminal. The dashboard has a German
+interface with red accents and works on desktop and mobile viewports. Connect
+your Kicktipp account under **Konten**, then choose your community and player.
+The CLI, MCP server, and dashboard share the same settings and sessions.
+
+Match and bonus tips have editable forms with preview and confirmation.
+The other CLI operations are available as forms in the corresponding sections,
+including all their options. Notifications support Discord, Telegram, ntfy,
+webhooks, desktop notifications, and local programs. The reminder service can
+be configured, started, inspected, and stopped from the dashboard.
+
+The HTTP server listens only on `127.0.0.1`. Its private access link is valid
+until the process exits. Keep that terminal running. For setup, the complete
+feature mapping, and SSH access, see [Dashboard documentation](docs/dashboard.md).
 
 ### Claude Desktop
 
@@ -106,7 +132,7 @@ kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 | Rankings and rules | `leaderboard`, `overview`, `table`, `rules` |
 | Analytics | `sync`, `stats`, `rival`, `suggest`, `scenario`, `whatif` |
 | Automation and history | `remind`, `notify`, `set-notify`, `log`, `cache` |
-| Other | `tui`, `guide`, `admin` |
+| Other | `dashboard`, `tui`, `guide`, `admin` |
 
 Run `kicktipp <command> --help` for options. Global `--community`, `--profile`,
 `--lang`, and `--site` flags override saved settings for one run.

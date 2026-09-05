@@ -1,3 +1,5 @@
+import { readConfig } from '../config.js';
+
 /**
  * Kicktipp's HTML is not what the browser shows.
  *
@@ -22,6 +24,7 @@ const US_DATE = /^\d{1,2}\/\d{1,2}\/\d{2}\s+\d{1,2}:\d{2}\s*(AM|PM)$/i;
 export function displayTimeZone(): string {
   return (
     process.env.KICKTIPP_TZ ||
+    readConfig().ui?.timezone ||
     Intl.DateTimeFormat().resolvedOptions().timeZone ||
     'UTC'
   );

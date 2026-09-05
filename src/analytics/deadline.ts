@@ -1,4 +1,5 @@
 import type { BetMatch } from '../core.js';
+import { readConfig } from '../config.js';
 import { displayTimeZone, humanDelta, parseMatchDate } from '../helpers/match-date.js';
 
 export interface DeadlineMatch {
@@ -30,7 +31,7 @@ export interface DeadlineReport {
 }
 
 export function warnHoursDefault(): number {
-  const raw = Number(process.env.KICKTIPP_WARN_HOURS);
+  const raw = Number(process.env.KICKTIPP_WARN_HOURS ?? readConfig().notify?.warn_hours);
   return Number.isFinite(raw) && raw > 0 ? raw : 6;
 }
 
