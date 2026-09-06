@@ -6,7 +6,7 @@ import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
 import { CacheStore } from '../src/cache/store.js';
 import { planSeasonSync, syncSeason } from '../src/cache/sync.js';
-import { fetchCurrentMatchday } from '../src/core.js';
+import { fetchCurrentMatchday, fetchBets } from '../src/core.js';
 import { mockFetch, page as htmlPage } from './helpers/mock-fetch.js';
 import type { ScheduleMatch } from '../src/core.js';
 
@@ -157,8 +157,8 @@ describe('syncSeason', () => {
       now,
     });
 
-    expect(result.fetched).toBe(1);
-    expect(result.skipped).toBe(1);
+    expect(result.fetched).toBe(2);
+    expect(result.skipped).toBe(0);
     expect(result.knownMatchdays).toBe(2);
 
     const requested = calls
@@ -169,5 +169,60 @@ describe('syncSeason', () => {
       .filter((n): n is number => n !== null);
     expect(requested.every((n) => n <= 2)).toBe(true);
     expect(requested).not.toContain(3);
+  });
+
+  it('repairs a finished matchday after sync failed between schedule and bets', async () => {
+    const completed = SCHEDULE_HTML.replace('kicktipp-heim">-', 'kicktipp-heim">2')
+      .replace('kicktipp-gast">-', 'kicktipp-gast">1');
+    let fail = true;
+    const { fetchImpl, calls } = mockFetch(req => {
+      if (req.url.includes('/schedule')) return htmlPage(completed);
+      if (req.url.includes('/predict')) {
+        if (fail) throw new Error('connection reset');
+        return htmlPage(BETS_HTML);
+      }
+      return htmlPage('<div id="kicktipp-content"></div>');
+    });
+    const page = new Page(new CookieJar(), fetchImpl);
+    await expect(syncSeason(page, 'cape', { store, currentMatchday: 1, delayMs: 0, now })).rejects.toThrow('connection reset');
+    expect(store.has('schedule', 1)).toBe(true);
+    expect(store.has('bets', 1)).toBe(false);
+    fail = false;
+    const repaired = await syncSeason(page, 'cape', { store, currentMatchday: 1, delayMs: 0, now });
+    expect(repaired.fetched).toBe(1);
+    expect(store.has('bets', 1)).toBe(true);
+    expect(store.has('leaderboard', 1)).toBe(true);
+    expect(store.has('matchdayBets', 1)).toBe(true);
+    calls.length = 0;
+    const repeated = await syncSeason(page, 'cape', { store, currentMatchday: 1, delayMs: 0, now });
+    expect(repeated.skipped).toBe(1);
+    expect(calls.some(req => req.url.includes('/predict'))).toBe(false);
+  });
+
+  it('selects a fresh season before planning and preserves the old snapshots', async () => {
+    let year = '26';
+    const { fetchImpl } = mockFetch(req => {
+      if (req.url.includes('/schedule')) return htmlPage(SCHEDULE_HTML.replaceAll('.26', '.' + year)
+        .replace('kicktipp-heim">-', 'kicktipp-heim">2').replace('kicktipp-gast">-', 'kicktipp-gast">1'));
+      if (req.url.includes('/predict')) return htmlPage(BETS_HTML.replaceAll('.26', '.' + year));
+      return htmlPage('<div id="kicktipp-content"></div>');
+    });
+    const page = new Page(new CookieJar(), fetchImpl);
+    await syncSeason(page, 'cape', { store, currentMatchday: 1, delayMs: 0, now });
+    const oldDir = store.dir;
+    store.writeMeta({ knownMatchdays: 34 });
+    year = '27';
+    const liveStore = new CacheStore('cape', path.join(tmp, 'cape'));
+    await fetchBets(page, 'cape', 1, { store: liveStore });
+    expect(liveStore.dir).not.toBe(oldDir);
+    expect(liveStore.read('schedule', 1)).toBeNull();
+    expect(liveStore.read('bets', 1)?.data.matches[0].date).toContain('.27');
+    const updated = await syncSeason(page, 'cape', { store, currentMatchday: 1, delayMs: 0, now });
+    expect(updated.fetched).toBe(1);
+    expect(updated.knownMatchdays).toBe(1);
+    expect(store.dir).not.toBe(oldDir);
+    expect(store.read('schedule', 1)?.data.matches[0].date).toContain('.27');
+    expect(fs.existsSync(path.join(oldDir, 'matchday-01', 'schedule.json'))).toBe(true);
+    expect(new CacheStore('cape', path.join(tmp, 'cape')).dir).toBe(store.dir);
   });
 });

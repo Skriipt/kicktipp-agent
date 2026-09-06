@@ -164,6 +164,9 @@ Submission activity from the CLI, TUI, and MCP server is written to a local
 JSONL audit log. `kicktipp log --undo` restores replaced values only from the
 latest successful regular match submission for the signed-in account. It skips
 bonus tips and Spielleiter submissions made for another member.
+Undo also requires the same fixture dates and unchanged saved tips. A real
+submission is marked successful only after reading back the saved form values;
+if verification is unavailable, check Kicktipp before retrying.
 
 Profiles keep separate accounts, communities, players, and sessions:
 
@@ -203,6 +206,13 @@ Profile mutation locks to writable storage. Without a Data override, cookies
 and auth locks remain beside `config.ini`. Cache and audit data use the platform
 data directory. Inspect or clear the cache with `kicktipp cache status` and
 `kicktipp cache clear`.
+
+Cache and audit files are isolated by profile, account and site. Legacy shared
+files are preserved but not automatically attributed to an account; run `sync`
+to rebuild the cache. Online cached reads validate the first matchday's teams
+and dates before reusing a season. A changed first matchday selects a separate
+snapshot directory, preserving prior snapshots. Offline reads use the last
+validated season. Interrupted syncs repair missing matchday data on the next run.
 
 Default `session.json` and simple profile filenames such as `session-work.json`
 are unchanged. Other profile names are URL-encoded, not replaced with underscores:

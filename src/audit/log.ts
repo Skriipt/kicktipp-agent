@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { dataDir } from '../cache/paths.js';
+import { accountDataKey } from '../data-scope.js';
 
 /** Where a submission came from, so the log can answer "who did this?". */
 export type BetSource =
@@ -28,6 +29,8 @@ export interface AuditRecord {
   source: BetSource;
   community: string;
   matchday: number | null;
+  /** Exact fixture dates and teams, guarding undo across season changes. */
+  fixtureFingerprint?: string;
   kind: 'match' | 'bonus';
   dryRun: boolean;
   bets: AuditBet[];
@@ -37,8 +40,8 @@ export interface AuditRecord {
 }
 
 export function auditFile(community: string): string {
-  const safe = community.replace(/[^A-Za-z0-9._-]/g, '_');
-  return path.join(dataDir(), 'audit', `${safe}.jsonl`);
+  const safe = encodeURIComponent(community).replace(/\./g, '%2E');
+  return path.join(dataDir(), 'audit', accountDataKey(), `${safe}.jsonl`);
 }
 
 /**

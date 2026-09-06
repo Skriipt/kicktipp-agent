@@ -3,7 +3,7 @@ import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
 import { fetchMembers, resolveMember, fetchBetsForMember, placeBetsForMember, AdminRequiredError } from '../src/core.js';
 import { getAdminMembersUrl, getAdminTipsUrl } from '../src/url.js';
-import { mockFetch, page as htmlPage } from './helpers/mock-fetch.js';
+import { mockFetch, savedForm, page as htmlPage } from './helpers/mock-fetch.js';
 
 const BASE = 'https://www.kicktipp.com';
 
@@ -23,10 +23,11 @@ const TIPS_PAGE = (bet = '') => {
 };
 
 function adminPage(existing = '') {
+  const tips = savedForm(TIPS_PAGE(existing));
   const { fetchImpl, calls } = mockFetch((req) => {
     if (req.url.startsWith(`${BASE}/mycomm/spielleiter/mitgliederliste`)) return htmlPage(MEMBER_LIST);
     if (req.url.startsWith(`${BASE}/mycomm/spielleiter/tippsnachtragen`)) {
-      return req.method === 'GET' ? htmlPage(TIPS_PAGE(existing)) : htmlPage('saved');
+      return tips(req);
     }
     return undefined;
   });

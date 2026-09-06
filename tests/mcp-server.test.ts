@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import http from 'node:http';
 
 /**
  * Drives the built server over stdio, the same way a client would. This is
@@ -63,6 +64,90 @@ beforeAll(() => {
 });
 
 describe('the MCP server as a client sees it', () => {
+  it('serializes concurrent reads, settings and writes on the shared session and recovers after failure', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-concurrent-'));
+    fs.writeFileSync(path.join(root, 'config.ini'), '[auth]\nemail = test@example.com\npassword = test\n[community]\nname = family\n');
+    fs.writeFileSync(path.join(root, 'session.json'), '{"cookies":[]}');
+    let active = 0;
+    let maxActive = 0;
+    const visited: string[] = [];
+    const site = http.createServer(async (req, res) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      const url = new URL(req.url!, 'http://127.0.0.1');
+      visited.push(url.pathname + url.search);
+      // Keep navigation in flight long enough for concurrent MCP requests to overlap.
+      await new Promise(resolve => setTimeout(resolve, 40));
+      let html: string;
+      if (url.pathname === '/info/profil/meinetipprunden') {
+        html = '<a href="/family/">family</a><a href="/office/">office</a>';
+      } else if (url.pathname.endsWith('/tippabgabe')) {
+        html = '<form><table id="tippabgabeSpiele"><tbody><tr><td>10.09.30 20:30</td><td>Bayern</td><td>Dortmund</td><td>'
+          + '<input id="one_heimTipp" name="home"><input id="one_gastTipp" name="away"></td><td></td></tr></tbody></table></form>';
+      } else if (url.searchParams.get('spieltagIndex') === '3') {
+        res.statusCode = 503;
+        html = 'Temporarily unavailable';
+      } else {
+        html = `<div class="pagetitle">${url.pathname.split('/')[1]}: Spieltag ${url.searchParams.get('spieltagIndex')}</div>`;
+      }
+      active--;
+      res.end(`<div id="kicktipp-content">${html}</div>`);
+    });
+    await new Promise<void>(resolve => site.listen(0, '127.0.0.1', resolve));
+    const address = site.address();
+    if (!address || typeof address === 'string') throw new Error('Missing test site address');
+    const child = spawn(process.execPath, ['dist/server.js'], {
+      env: { ...process.env, HOME: root, USERPROFILE: root, KICKTIPP_CONFIG_DIR: root, KICKTIPP_DATA_DIR: root,
+        KICKTIPP_BASE_URL: `http://127.0.0.1:${address.port}`, KICKTIPP_EMAIL: '', KICKTIPP_PASSWORD: '',
+        KICKTIPP_COMMUNITY: '', KICKTIPP_PROFILE: '', KICKTIPP_READ_ONLY: '0' },
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    let nextId = 10;
+    const pending = new Map<number, (message: any) => void>();
+    let output = '';
+    child.stdout.on('data', chunk => {
+      output += String(chunk);
+      let newline: number;
+      while ((newline = output.indexOf('\n')) >= 0) {
+        const message = JSON.parse(output.slice(0, newline));
+        output = output.slice(newline + 1);
+        pending.get(message.id)?.(message);
+        pending.delete(message.id);
+      }
+    });
+    const rpc = (method: string, params: object) => new Promise<any>(resolve => {
+      const id = nextId++;
+      pending.set(id, resolve);
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    });
+    const call = (name: string, args: object = {}) => rpc('tools/call', { name, arguments: args });
+    try {
+      await rpc('initialize', INIT.params);
+      expect((await call('get_communities')).result.structuredContent.data).toEqual(['family', 'office']);
+      // The persistent Page already exists; all these requests now compete for it.
+      const results = await Promise.all([
+        call('get_schedule', { matchday: 1 }),
+        call('get_schedule', { matchday: 2 }),
+        call('place_bets', { bets: ['Bayern vs Dortmund=2:1'], dry_run: true }),
+        call('set_community', { name: 'office' }),
+        call('get_schedule', { matchday: 3 }),
+        call('get_schedule', { matchday: 4 }),
+      ]);
+      expect(results[0].result.structuredContent.data.title).toBe('family: Spieltag 1');
+      expect(results[1].result.structuredContent.data.title).toBe('family: Spieltag 2');
+      expect(results[2].result.structuredContent.data).toMatchObject({ success: true, dry_run: true });
+      expect(results[3].result.structuredContent.data).toMatchObject({ success: true, community: 'office' });
+      expect(results[4].result.isError).toBe(true);
+      expect(results[5].result.structuredContent.data.title).toBe('office: Spieltag 4');
+      expect(maxActive).toBe(1);
+      expect(visited).toContain('/family/tippabgabe');
+    } finally {
+      child.kill();
+      await new Promise<void>(resolve => { site.close(() => resolve()); site.closeAllConnections(); });
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('lists every tool with an input and output schema', async () => {
     const messages = await callServer([INIT, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }], {
       HOME: home,

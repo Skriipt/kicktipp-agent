@@ -55,6 +55,15 @@ setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 // ── Persistent Kicktipp session ────────────────────────────────────
 
 let pageInstance: Page | null = null;
+let sessionQueue: Promise<void> = Promise.resolve();
+
+/** Hold the shared Page for the entire operation, including login and retries. */
+function withSession<T>(fn: () => Promise<T>): Promise<T> {
+  const result = sessionQueue.then(fn);
+  // A failed tool must not prevent the next tool from using the session.
+  sessionQueue = result.then(() => {}, () => {});
+  return result;
+}
 
 async function setupPrompt(kind: 'missing' | 'expired'): Promise<{ url: string; text: string }> {
   const url = await ensureSetupListener({
@@ -101,13 +110,15 @@ async function discardSession(): Promise<void> {
  * first attempt may already have submitted data.
  */
 async function withFreshSession<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (!(err instanceof AuthError)) throw err;
-    await discardSession();
-    return fn();
-  }
+  return withSession(async () => {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!(err instanceof AuthError)) throw err;
+      await discardSession();
+      return fn();
+    }
+  });
 }
 
 // ── MCP Server ─────────────────────────────────────────────────────
@@ -413,7 +424,7 @@ if (!readOnly) {
     inputSchema: z.object({ name: z.string().describe('Exact community name as returned by get_communities.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
-  async ({ name }) => {
+  async ({ name }) => withSession(async () => {
       const page = await getPage();
       const communities = await getCommunities(page);
       if (!communities.includes(name)) {
@@ -421,7 +432,7 @@ if (!readOnly) {
       }
       saveCommunity(name);
       return jsonResult({ success: true, community: name });
-    },
+    }),
 );
 }
 
@@ -433,7 +444,7 @@ if (!readOnly) {
     inputSchema: z.object({ name: z.string().describe('Exact player name as returned by get_players.') }),
     outputSchema: OUTPUT_SCHEMA,
   },
-  async ({ name }) => {
+  async ({ name }) => withSession(async () => {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const players = await getPlayers(page, community);
@@ -442,7 +453,7 @@ if (!readOnly) {
       }
       savePlayer(name);
       return jsonResult({ success: true, player: name });
-    },
+    }),
 );
 }
 
@@ -694,12 +705,12 @@ server.registerTool(
     }),
     outputSchema: OUTPUT_SCHEMA,
   },
-  async ({ from, to }) => {
+  async ({ from, to }) => withSession(async () => {
     const page = await getPage();
     const community = await resolveCommunity(page);
     const result = await syncSeason(page, community, { from, to });
     return jsonResult(result);
-  },
+  }),
 );
 
 server.registerTool(
@@ -795,7 +806,7 @@ if (!readOnly) {
       }),
       outputSchema: OUTPUT_SCHEMA,
     },
-    async ({ member, confirm_member, bets, matchday, dry_run }) => {
+    async ({ member, confirm_member, bets, matchday, dry_run }) => withSession(async () => {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const resolved = resolveMember(await fetchMembers(page, community), member);
@@ -818,7 +829,7 @@ if (!readOnly) {
         'mcp:place_bets_for_member',
       );
       return jsonResult({ success: true, dry_run: !!dry_run, member: resolved, placed });
-    },
+    }),
   );
 }
 
@@ -834,12 +845,12 @@ if (!readOnly) {
     }),
     outputSchema: OUTPUT_SCHEMA,
   },
-  async ({ bets, matchday, dry_run }) => {
+  async ({ bets, matchday, dry_run }) => withSession(async () => {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const placed = await placeBets(page, community, bets, matchday, !dry_run, 'mcp:place_bets');
       return jsonResult({ success: true, dry_run: !!dry_run, placed });
-    },
+    }),
 );
 }
 
@@ -854,12 +865,12 @@ if (!readOnly) {
     }),
     outputSchema: OUTPUT_SCHEMA,
   },
-  async ({ bets, dry_run }) => {
+  async ({ bets, dry_run }) => withSession(async () => {
       const page = await getPage();
       const community = await resolveCommunity(page);
       const placed = await placeBonusBets(page, community, bets, !dry_run, 'mcp:place_bonus_bets');
       return jsonResult({ success: true, dry_run: !!dry_run, placed });
-    },
+    }),
 );
 }
 

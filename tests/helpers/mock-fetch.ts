@@ -1,4 +1,5 @@
 import type { FetchLike } from '../../src/http/page.js';
+import { load } from 'cheerio';
 
 export interface RecordedRequest {
   url: string;
@@ -18,6 +19,29 @@ export interface MockResponse {
 }
 
 export type Handler = (req: RecordedRequest) => MockResponse | undefined;
+
+/** A fake server that persists form submissions for subsequent GET reads. */
+export function savedForm(initialHtml: string): Handler {
+  let html = initialHtml;
+  return req => {
+    if (req.method === 'POST') {
+      const $ = load(html);
+      const fields = new URLSearchParams(req.body ?? '');
+      $('input[name], select[name]').each((_, node) => {
+        const field = $(node), value = fields.get(field.attr('name')!);
+        if (value === null) return;
+        if (field.is('select')) field.find('option').each((__, option) => {
+          if ($(option).attr('value') === value) $(option).attr('selected', 'selected');
+          else $(option).removeAttr('selected');
+        });
+        else field.attr('value', value);
+      });
+      html = $.html();
+      return page('saved');
+    }
+    return page(html);
+  };
+}
 
 const NOT_FOUND: MockResponse = {
   status: 404,

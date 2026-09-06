@@ -6,7 +6,7 @@ import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
 import { placeBets } from '../src/core.js';
 import { appendAudit, readAudit, lastSubmission, auditFile } from '../src/audit/log.js';
-import { mockFetch, page as htmlPage } from './helpers/mock-fetch.js';
+import { mockFetch, savedForm, page as htmlPage } from './helpers/mock-fetch.js';
 
 let tmp: string;
 
@@ -21,9 +21,7 @@ const FORM = (bet = '') => {
 };
 
 function betPage(existing = '') {
-  const { fetchImpl, calls } = mockFetch((req) =>
-    req.method === 'GET' ? htmlPage(FORM(existing)) : htmlPage('saved'),
-  );
+  const { fetchImpl, calls } = mockFetch(savedForm(FORM(existing)));
   return { page: new Page(new CookieJar(), fetchImpl), calls };
 }
 
@@ -95,6 +93,42 @@ describe('the audit file', () => {
 });
 
 describe('placeBets records every attempt', () => {
+  it('verifies the saved match tips even when Kicktipp remembers the bonus tab', async () => {
+    let submitted = false;
+    const saved = savedForm(FORM());
+    const { fetchImpl } = mockFetch(req => {
+      if (req.method === 'POST') { submitted = true; return saved(req); }
+      if (submitted && !new URL(req.url).searchParams.has('spieltagIndex')) {
+        return htmlPage('<div id="kicktipp-content"><input name="spieltagIndex" value="3"><table id="tippabgabeFragen"></table></div>');
+      }
+      return saved(req);
+    });
+    await expect(placeBets(new Page(new CookieJar(), fetchImpl), 'c', ['Bayern vs BVB=2:1']))
+      .resolves.toHaveLength(1);
+    expect(lastSubmission('c')?.bets[0].bet).toBe('2:1');
+  });
+  it('does not report an HTTP 200 rejection or unchanged saved tips as success', async () => {
+    const { fetchImpl, calls } = mockFetch(req => req.method === 'POST'
+      ? htmlPage('<div class="error">Tippabgabe nicht mehr möglich</div>') : htmlPage(FORM('1:0')));
+    await expect(placeBets(new Page(new CookieJar(), fetchImpl), 'c', ['Bayern vs BVB=2:1']))
+      .rejects.toThrow(/could not be confirmed/);
+    expect(calls.filter(req => req.method === 'POST')).toHaveLength(1);
+    expect(lastSubmission('c')).toBeNull();
+  });
+
+  it('refuses undo against another season or subsequently changed tips', async () => {
+    const first = betPage('1:0');
+    await placeBets(first.page, 'c', ['Bayern vs BVB=2:1'], 1);
+    const previous = lastSubmission('c')!;
+    for (const html of [FORM('2:1').replace('21.08.26', '21.08.27'), FORM('4:4')]) {
+      const { fetchImpl, calls } = mockFetch(() => htmlPage(html));
+      await expect(placeBets(new Page(new CookieJar(), fetchImpl), 'c', ['Bayern vs BVB=1:0'], 1, true, 'cli:bet', previous))
+        .rejects.toThrow(/Cannot undo/);
+      expect(calls.some(req => req.method === 'POST')).toBe(false);
+    }
+    const current = betPage('2:1');
+    await expect(placeBets(current.page, 'c', ['Bayern vs BVB=1:0'], 1, true, 'cli:bet', previous)).resolves.toHaveLength(1);
+  });
   it.each([404, 429, 500, 503])('does not mark an HTTP %s submission as successful', async (status) => {
     const { fetchImpl } = mockFetch((req) => req.method === 'GET'
       ? htmlPage(FORM()) : { status, body: 'failed' });

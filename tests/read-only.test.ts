@@ -3,7 +3,7 @@ import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
 import { placeBets, placeBonusBets } from '../src/core.js';
 import { isReadOnly, assertWritable, ReadOnlyError } from '../src/read-only.js';
-import { mockFetch, page as htmlPage } from './helpers/mock-fetch.js';
+import { mockFetch, savedForm, page as htmlPage } from './helpers/mock-fetch.js';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -49,7 +49,7 @@ describe('the core submitting functions refuse regardless of entry point', () =>
       <button type="submit" name="submitbutton" value="save">save</button></form></div>`;
 
   function betPage() {
-    const { fetchImpl, calls } = mockFetch(() => htmlPage(FORM));
+    const { fetchImpl, calls } = mockFetch(savedForm(FORM));
     return { page: new Page(new CookieJar(), fetchImpl), calls };
   }
 

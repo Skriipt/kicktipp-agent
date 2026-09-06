@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import crypto from 'node:crypto';
 import type { AnyNode } from 'domhandler';
 import { Page, parseOdds, getCommunities } from './browser.js';
 import {
@@ -20,6 +21,7 @@ import {
 } from './helpers/parse-bet-arg.js';
 import { escapeCssValue } from './helpers/escape-css-value.js';
 import { throughCache, type CacheOptions } from './cache/cached-fetch.js';
+import type { CacheKind, CacheKinds } from './cache/store.js';
 import { assertWritable } from './read-only.js';
 import {
   displayTimeZone,
@@ -28,7 +30,24 @@ import {
   isSameCalendarDay,
   parseMatchDate,
 } from './helpers/match-date.js';
-import { appendAudit, submitAudited, type AuditBet, type BetSource } from './audit/log.js';
+import { appendAudit, submitAudited, type AuditBet, type AuditRecord, type BetSource } from './audit/log.js';
+
+async function throughSeasonCache<K extends CacheKind>(
+  page: Page, community: string, kind: K, matchday: number | undefined,
+  cache: CacheOptions, live: () => Promise<CacheKinds[K]>,
+): Promise<CacheKinds[K]> {
+  if (cache.store && !cache.offline && !cache.store.seasonVerified) {
+    try {
+      const first = await fetchSchedule(page, community, 1);
+      cache.store.selectSeason(first.matches);
+    } catch {
+      // If a season cannot be established, return live data without writing
+      // into a potentially stale namespace. Cache failures are best effort.
+      cache = { ...cache, store: null };
+    }
+  }
+  return throughCache(kind, matchday, cache, live);
+}
 
 // ── Errors ─────────────────────────────────────────────────────────
 
@@ -299,7 +318,7 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
 }
 
 export async function fetchBets(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: BetMatch[] }> {
-  return throughCache('bets', matchday, cache, async () => {
+  return throughSeasonCache(page, community, 'bets', matchday, cache, async () => {
   const $ = await loadMatchPredictPage(page, community, matchday);
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
@@ -342,7 +361,7 @@ export async function fetchBets(page: Page, community: string, matchday?: number
 }
 
 export async function fetchSchedule(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: ScheduleMatch[] }> {
-  return throughCache('schedule', matchday, cache, async () => {
+  return throughSeasonCache(page, community, 'schedule', matchday, cache, async () => {
   const $ = await loadPage(page, getScheduleUrl(community, matchday));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
@@ -380,7 +399,7 @@ export async function fetchLeaderboard(page: Page, community: string, matchday?:
   // The bonus view is a different payload under the same URL; it is not
   // cached, so it can neither overwrite the regular leaderboard nor be
   // served offline.
-  return throughCache('leaderboard', matchday, bonus ? { ...cache, store: null } : cache, async () => {
+  return throughSeasonCache(page, community, 'leaderboard', matchday, bonus ? { ...cache, store: null } : cache, async () => {
   const $ = await loadPage(page, getLeaderboardUrl(community, matchday, bonus));
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
@@ -465,7 +484,7 @@ export const OVERVIEW_VIEW_OPTIONS = Object.keys(OVERVIEW_VIEWS);
 export async function fetchOverview(page: Page, community: string, view = 'matchday-points', cache: CacheOptions = {}): Promise<OverviewData> {
   // Only the default view is cached — the other views are the same data
   // rearranged, and they would otherwise overwrite each other.
-  return throughCache('overview', undefined, view === 'matchday-points' ? cache : { ...cache, store: null }, async () => {
+  return throughSeasonCache(page, community, 'overview', undefined, view === 'matchday-points' ? cache : { ...cache, store: null }, async () => {
   if (!(view in OVERVIEW_VIEWS)) {
     throw new Error(`Unknown view '${view}'. Options: ${OVERVIEW_VIEW_OPTIONS.join(', ')}`);
   }
@@ -513,7 +532,7 @@ export async function fetchOverview(page: Page, community: string, view = 'match
 
 export async function fetchTable(page: Page, community: string, option?: 'home' | 'away', cache: CacheOptions = {}): Promise<{ label: string; teams: TableTeam[] }> {
   // Home/away tables are separate payloads; only the full table is cached.
-  return throughCache('table', undefined, option === undefined ? cache : { ...cache, store: null }, async () => {
+  return throughSeasonCache(page, community, 'table', undefined, option === undefined ? cache : { ...cache, store: null }, async () => {
   let label = 'League Table';
   if (option === 'home') label = 'League Table (Home)';
   else if (option === 'away') label = 'League Table (Away)';
@@ -548,7 +567,7 @@ export async function fetchTable(page: Page, community: string, option?: 'home' 
 }
 
 export async function fetchRules(page: Page, community: string, cache: CacheOptions = {}): Promise<RulesSection[]> {
-  return throughCache('rules', undefined, cache, async () => {
+  return throughSeasonCache(page, community, 'rules', undefined, cache, async () => {
   const $ = await loadPage(page, getRulesUrl(community));
   const pagecontent = $('#kicktipp-content div.pagecontent');
   if (!pagecontent.length) return [];
@@ -631,6 +650,7 @@ export async function placeBets(
   matchday?: number,
   submit = true,
   source: BetSource = 'unknown',
+  expectedSubmission?: AuditRecord,
 ): Promise<PlacedBet[]> {
   // Checked here as well as at the entry points: this is the last line before
   // anything reaches Kicktipp.
@@ -638,6 +658,13 @@ export async function placeBets(
   const $ = await loadMatchPredictPage(page, community, matchday);
   const tbody = $('#kicktipp-content table#tippabgabeSpiele tbody');
   if (!tbody.length) throw new Error('No matches found.');
+
+  const fixtures = tbody.find('tr').toArray().map(row =>
+    $(row).children('td').slice(0, 3).toArray().map(cell => $(cell).text().trim()));
+  const fixtureFingerprint = crypto.createHash('sha256').update(JSON.stringify(fixtures)).digest('hex');
+  if (expectedSubmission && expectedSubmission.fixtureFingerprint !== fixtureFingerprint) {
+    throw new Error('Cannot undo: the recorded fixtures do not match the current season or matchday.');
+  }
 
   const editable: EditableMatch[] = [];
   tbody.find('tr').each((_, tr) => {
@@ -659,11 +686,17 @@ export async function placeBets(
 
   const { placed, audited } = fillMatchBets(page, $, bets, editable);
 
+  if (expectedSubmission && audited.some(bet =>
+    expectedSubmission.bets.find(previous => previous.fixture === bet.fixture)?.bet !== bet.previous)) {
+    throw new Error('Cannot undo: saved tips have changed since the recorded submission.');
+  }
+
   const record = {
     at: new Date().toISOString(),
     source,
     community,
-    matchday: matchday ?? null,
+    matchday: matchday ?? spieltagIndexFromPage($) ?? null,
+    fixtureFingerprint,
     kind: 'match' as const,
     dryRun: !submit,
     bets: audited,
@@ -674,7 +707,9 @@ export async function placeBets(
     return placed;
   }
 
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await submitAudited(record, () => page.clickAndVerifyTips(
+    'button[name="submitbutton"]', () => loadMatchPredictPage(page, community, record.matchday ?? undefined),
+  ));
 
   return placed;
 }
@@ -873,7 +908,7 @@ export async function placeBonusBets(
     return placed;
   }
 
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await submitAudited(record, () => page.clickAndVerifyTips('button[name="submitbutton"]'));
 
   return placed;
 }
@@ -894,7 +929,7 @@ export async function fetchMatchdayBets(
   matchday?: number,
   cache: CacheOptions = {},
 ): Promise<MatchdayBets> {
-  return throughCache('matchdayBets', matchday, cache, async () => {
+  return throughSeasonCache(page, community, 'matchdayBets', matchday, cache, async () => {
   const $ = await loadPage(page, getLeaderboardUrl(community, matchday));
   const resolved = matchday ?? spieltagIndexFromPage($);
   const content = $('#kicktipp-content');
@@ -1179,7 +1214,7 @@ export async function placeBetsForMember(
     return placed;
   }
 
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await submitAudited(record, () => page.clickAndVerifyTips('button[name="submitbutton"]'));
 
   return placed;
 }

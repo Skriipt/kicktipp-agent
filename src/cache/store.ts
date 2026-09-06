@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { parseMatchDate } from '../helpers/match-date.js';
 import { communityDir } from './paths.js';
 import type {
@@ -62,7 +63,7 @@ function matchdayFolder(matchday: number): string {
 
 function writeJsonAtomic(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
   fs.chmodSync(tmp, 0o600);
   fs.renameSync(tmp, file);
@@ -84,10 +85,30 @@ function readJson<T>(file: string): T | null {
  * keeps installs light.
  */
 export class CacheStore {
+  seasonVerified = false;
+  private root: string;
   constructor(
     readonly community: string,
-    private readonly root: string = communityDir(community),
-  ) {}
+    private readonly base: string = communityDir(community),
+  ) {
+    const active = readJson<{ key: string }>(path.join(base, 'active-season.json'));
+    this.root = active && /^[a-f0-9]{64}$/.test(active.key)
+      ? path.join(base, 'seasons', active.key) : base;
+  }
+
+  /** Validate the first matchday online before reusing a season's snapshots. */
+  selectSeason(matches: ScheduleMatch[]): void {
+    const fixtures = matches.map(({ home, away, date }) => [home, away, date]).sort();
+    const key = crypto.createHash('sha256').update(JSON.stringify(fixtures)).digest('hex');
+    const root = path.join(this.base, 'seasons', key);
+    this.root = root;
+    this.seasonVerified = false;
+    const active = readJson<{ key: string }>(path.join(this.base, 'active-season.json'));
+    if (active?.key === key) { this.seasonVerified = true; return; }
+    fs.mkdirSync(root, { recursive: true });
+    writeJsonAtomic(path.join(this.base, 'active-season.json'), { key });
+    this.seasonVerified = true;
+  }
 
   get dir(): string {
     return this.root;
@@ -117,7 +138,8 @@ export class CacheStore {
 
   read<K extends CacheKind>(kind: K, matchday?: number): Envelope<K> | null {
     const envelope = readJson<Envelope<K>>(this.fileFor(kind, matchday));
-    if (!envelope || envelope.schemaVersion !== SCHEMA_VERSION) return null;
+    if (!envelope || envelope.schemaVersion !== SCHEMA_VERSION
+      || envelope.community !== this.community || envelope.kind !== kind || envelope.matchday !== matchday) return null;
     return envelope;
   }
 
@@ -151,7 +173,9 @@ export class CacheStore {
   }
 
   clear(): void {
-    fs.rmSync(this.root, { recursive: true, force: true });
+    fs.rmSync(this.base, { recursive: true, force: true });
+    this.root = this.base;
+    this.seasonVerified = false;
   }
 
   /** Total bytes on disk, for `kicktipp cache status`. */

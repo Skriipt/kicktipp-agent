@@ -1,5 +1,6 @@
 import path from 'path';
 import os from 'os';
+import { accountDataKey } from '../data-scope.js';
 
 /**
  * Where the season history lives. Follows the XDG data spec on Linux and
@@ -24,7 +25,7 @@ export function dataDir(): string {
 }
 
 export function cacheDir(): string {
-  return path.join(dataDir(), 'cache');
+  return path.join(dataDir(), 'cache', accountDataKey());
 }
 
 /**
@@ -32,6 +33,6 @@ export function cacheDir(): string {
  * characters that are awkward in a path, so keep the directory name tame.
  */
 export function communityDir(community: string): string {
-  const safe = community.replace(/[^A-Za-z0-9._-]/g, '_');
+  const safe = encodeURIComponent(community).replace(/\./g, '%2E');
   return path.join(cacheDir(), safe);
 }

@@ -5,7 +5,7 @@ import path from 'path';
 import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
 import { fetchBonusQuestions, fetchBonusBets, placeBonusBets } from '../src/core.js';
-import { mockFetch, page as htmlPage, type RecordedRequest } from './helpers/mock-fetch.js';
+import { mockFetch, savedForm, page as htmlPage, type RecordedRequest } from './helpers/mock-fetch.js';
 
 const BASE = 'https://www.kicktipp.com';
 const BONUS_URL = `${BASE}/cape/predict?bonus=true`;
@@ -61,11 +61,7 @@ function bonusForm(): string {
 }
 
 function bonusPage() {
-  const { fetchImpl, calls } = mockFetch((req) =>
-    req.method === 'GET' && req.url.startsWith(BONUS_URL)
-      ? htmlPage(bonusForm())
-      : htmlPage('saved'),
-  );
+  const { fetchImpl, calls } = mockFetch(savedForm(bonusForm()));
   return { page: new Page(new CookieJar(), fetchImpl), calls };
 }
 
@@ -228,9 +224,7 @@ describe('placeBonusBets', () => {
   });
 
   it('fills the next empty ranking slot instead of overwriting the first', async () => {
-    const { fetchImpl, calls } = mockFetch((req) =>
-      req.method === 'GET' && req.url.startsWith(BONUS_URL)
-        ? htmlPage(`<div id="kicktipp-content"><form method="post" action="/cape/predict">
+    const { fetchImpl, calls } = mockFetch(savedForm(`<div id="kicktipp-content"><form method="post" action="/cape/predict">
             <table id="tippabgabeFragen"><tbody>
               <tr>
                 <td>2</td>
@@ -243,9 +237,7 @@ describe('placeBonusBets', () => {
               </tr>
             </tbody></table>
             <button type="submit" name="submitbutton" value="save">save</button>
-          </form></div>`)
-        : htmlPage('saved'),
-    );
+          </form></div>`));
     const page = new Page(new CookieJar(), fetchImpl);
     await placeBonusBets(page, 'cape', ['Who will be relegated?=1. FC Heidenheim'], true);
 

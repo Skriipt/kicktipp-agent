@@ -230,6 +230,40 @@ export class Page {
     await this.submit(submitter.closest('form'), submitter);
   }
 
+  /** A successful HTTP response alone does not prove that Kicktipp saved tips. */
+  async clickAndVerifyTips(selector: string, reload?: () => Promise<unknown>): Promise<void> {
+    const $ = this.dom();
+    const form = this.find(selector).closest('form');
+    const expected = new Map<string, string>();
+    form.find('input[id$="_heimTipp"], input[id$="_gastTipp"], #tippabgabeFragen select').each((_, node) => {
+      const field = $(node);
+      const name = field.attr('name');
+      if (!name || field.attr('disabled') !== undefined) return;
+      expected.set(name, field.is('select')
+        ? field.find('option:selected').attr('value') ?? '' : field.attr('value') ?? '');
+    });
+    if (!expected.size) throw new Error('No tip fields available for submission verification.');
+    const originalUrl = this.currentUrl;
+    await this.click(selector);
+    try {
+      if (reload) await reload();
+      else await this.goto(originalUrl);
+    } catch (cause) {
+      throw new Error('Kicktipp submission could not be confirmed. Check saved tips before retrying.', { cause });
+    }
+    const current = this.dom();
+    const saved = new Map<string, string>();
+    current('input[name], select[name]').each((_, node) => {
+      const field = current(node);
+      saved.set(field.attr('name')!, field.is('select')
+        ? field.find('option:selected').attr('value') ?? '' : field.attr('value') ?? '');
+    });
+    if (this.isAuthRedirect() || this.isNotFound()
+      || [...expected].some(([name, value]) => saved.get(name) !== value)) {
+      throw new Error('Kicktipp submission could not be confirmed. Check saved tips before retrying.');
+    }
+  }
+
   /**
    * Submit the form that contains `anchorSelector`, picking the form's own
    * submit button as the submitter. Used where the button has no stable

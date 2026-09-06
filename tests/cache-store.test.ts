@@ -4,6 +4,9 @@ import os from 'os';
 import path from 'path';
 import { CacheStore, isMatchdayFinished, isMatchdayUpcoming, SCHEMA_VERSION } from '../src/cache/store.js';
 import { throughCache, OfflineCacheMiss } from '../src/cache/cached-fetch.js';
+import { fetchBets } from '../src/core.js';
+import { Page } from '../src/http/page.js';
+import { CookieJar } from '../src/http/cookie-jar.js';
 
 let tmp: string;
 let store: CacheStore;
@@ -156,6 +159,15 @@ describe('isMatchdayUpcoming', () => {
 });
 
 describe('throughCache', () => {
+  it('returns live bets even when the season namespace cannot be persisted', async () => {
+    const blocker = path.join(tmp, 'blocked');
+    fs.writeFileSync(blocker, 'not a directory');
+    const broken = new CacheStore('x', blocker);
+    const page = new Page(new CookieJar(), async () => new Response('<div id="kicktipp-content"><div class="pagetitle">Live</div></div>'));
+    await expect(fetchBets(page, 'x', 1, { store: broken })).resolves.toEqual({ title: 'Live', matches: [] });
+    expect(broken.seasonVerified).toBe(false);
+    expect(fs.readFileSync(blocker, 'utf8')).toBe('not a directory');
+  });
   it('fetches live and writes through', async () => {
     let calls = 0;
     const data = await throughCache('schedule', 3, { store }, async () => {

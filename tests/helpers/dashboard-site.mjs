@@ -5,6 +5,7 @@ export async function dashboardSite() {
   const posts = [];
   const scores = new Map();
   const answers = new Map();
+  const adminScores = new Map();
   const page = content => '<!doctype html><html><body><div id="kicktipp-content">' + content + '</div></body></html>';
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -24,6 +25,7 @@ export async function dashboardSite() {
     if (!user) return redirect('/info/profil/login');
     if (req.method === 'POST') {
       posts.push({ path: url.pathname, user, body: Object.fromEntries(body) });
+      if (url.pathname === '/family/spielleiter/tippsnachtragen') adminScores.set(user, [body.get('home'), body.get('away')]);
       if (url.pathname === '/family/tippabgabe') {
         if (body.has('bonus')) answers.set(user, body.get('bonusAnswer'));
         else scores.set(user, [body.get('home'), body.get('away')]);
@@ -38,9 +40,10 @@ export async function dashboardSite() {
       res.end(page('<table><tbody><tr><td>Anna</td><td><a href="/family/spielleiter/tippsnachtragen?tipperId=101&tippsaisonId=99">Tipps nachtragen</a></td></tr></tbody></table>')); return;
     }
     if (url.pathname === '/family/spielleiter/tippsnachtragen') {
+      const [home, away] = adminScores.get(user) || ['', ''];
       res.end(page('<form method="post" action="/family/spielleiter/tippsnachtragen"><input type="hidden" name="tipperId" value="101">'
         + '<table><tbody><tr><td>10.09.30 20:30</td><td>Bayern</td><td>Dortmund</td><td>'
-        + '<input id="admin_heimTipp" name="home"><input id="admin_gastTipp" name="away">'
+        + '<input id="admin_heimTipp" name="home" value="' + home + '"><input id="admin_gastTipp" name="away" value="' + away + '">'
         + '</td></tr></tbody></table><button name="submitbutton" type="submit">Speichern</button></form>')); return;
     }
     if (url.pathname.endsWith('/tippuebersicht')) {
