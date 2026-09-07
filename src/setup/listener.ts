@@ -217,6 +217,7 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
       try {
         await login(page, email, password);
       } catch (err) {
+        await page.close();
         const raw = err instanceof Error ? err.message : '';
         const message = /login failed/i.test(raw)
           ? t('setup.signInFailed')
@@ -229,7 +230,12 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
       await saveAuth({ email, password: store === 'password' ? password : undefined, store });
       saveReadOnly(readOnly);
 
-      const communities = await getCommunities(page);
+      let communities: string[];
+      try {
+        communities = await getCommunities(page);
+      } finally {
+        await page.close();
+      }
       if (communities.length === 0) {
         opts.onSaved?.();
         await send(res, 200, donePage());

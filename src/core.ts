@@ -1,4 +1,6 @@
 import * as cheerio from 'cheerio';
+import { AuthError } from './auth-errors.js';
+export { AuthError } from './auth-errors.js';
 import crypto from 'node:crypto';
 import type { AnyNode } from 'domhandler';
 import { Page, parseOdds, getCommunities } from './browser.js';
@@ -50,9 +52,6 @@ async function throughSeasonCache<K extends CacheKind>(
 }
 
 // ── Errors ─────────────────────────────────────────────────────────
-
-/** The session is gone or was never valid — logging in again may help. */
-export class AuthError extends Error {}
 
 /** The page does not exist — usually a wrong community name. */
 export class NotFoundError extends Error {}

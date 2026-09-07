@@ -205,6 +205,56 @@ describe('session-only storage', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
+  it('keeps rotated cookies across restores and subsequent requests', async () => {
+    const { launchBrowser: launch } = await import('../src/browser.js');
+    const { saveAuth, sessionFile } = await import('../src/config.js');
+    await saveAuth({ email: 'me@example.com', store: 'session' });
+    const file = sessionFile();
+    fs.writeFileSync(file, JSON.stringify({ cookies: [{ name: 'sid', value: '0', domain: 'www.kicktipp.com' }] }));
+    let generation = 0;
+    const { fetchImpl } = mockFetch(req => {
+      if (req.url === LOGIN) return LOGIN_FORM;
+      if (req.headers.get('cookie') !== `sid=${generation}`) return { status: 302, location: LOGIN };
+      generation++;
+      return { body: '<html>Authenticated</html>', setCookies: [`sid=${generation}; Path=/`] };
+    });
+    const first = await launch({ fetchImpl });
+    await first.goto(COMMUNITIES);
+    await first.close();
+    const second = await launch({ fetchImpl });
+    await second.close();
+    expect(generation).toBe(3);
+  });
+
+  it('automatically logs in with encrypted credentials after the session expires', async () => {
+    const { launchBrowser: launch } = await import('../src/browser.js');
+    const { saveAuth, sessionFile } = await import('../src/config.js');
+    await saveAuth({ email: EMAIL, password: PASSWORD });
+    fs.writeFileSync(sessionFile(), JSON.stringify({ cookies: [{ name: 'sid', value: 'expired', domain: 'www.kicktipp.com' }] }));
+    const { fetchImpl, calls } = mockFetch(kicktipp());
+    const page = await launch({ fetchImpl });
+    await page.close();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
+    expect(fs.readFileSync(sessionFile(), 'utf8')).toContain('valid');
+  });
+
+  it.each(['logout', 'replacement'])('does not overwrite a later %s with cookies from an old page', async action => {
+    const { launchBrowser: launch } = await import('../src/browser.js');
+    const { saveAuth, sessionFile } = await import('../src/config.js');
+    await saveAuth({ email: EMAIL, password: PASSWORD });
+    const fake = kicktipp();
+    const { fetchImpl } = mockFetch(req => req.url === `${BASE}/rotate`
+      ? { body: 'ok', setCookies: ['sid=rotated; Path=/'] } : fake(req));
+    const page = await launch({ fetchImpl });
+    const file = sessionFile();
+    if (action === 'logout') fs.unlinkSync(file);
+    else fs.writeFileSync(file, 'newer session');
+    await page.goto(`${BASE}/rotate`);
+    await page.close();
+    if (action === 'logout') expect(fs.existsSync(file)).toBe(false);
+    else expect(fs.readFileSync(file, 'utf8')).toBe('newer session');
+  });
+
   it('asks to reconnect instead of logging in again when the cookie is dead', async () => {
     const dir = path.join(home, '.config', 'kicktipp-agent');
     fs.mkdirSync(dir, { recursive: true });

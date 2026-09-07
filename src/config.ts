@@ -236,7 +236,7 @@ export function saveReadOnly(readOnly: boolean): void {
   });
 }
 
-export async function loadCredentials(): Promise<{ email: string; password: string }> {
+export async function loadCredentials(opts: { allowSessionPrompt?: boolean } = {}): Promise<{ email: string; password: string }> {
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) {
     return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
   }
@@ -250,7 +250,7 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: config.auth.email, password: decrypt(config.auth.password) };
   }
 
-  if (isSessionOnly()) throw new SessionOnlyExpiredError();
+  if (isSessionOnly() && !opts.allowSessionPrompt) throw new SessionOnlyExpiredError();
 
   if (!process.stdin.isTTY) {
     throw new Error(t('config.noCredentialsHint'));

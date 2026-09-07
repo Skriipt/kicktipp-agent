@@ -111,7 +111,7 @@ program
   .option('--web', t('cmd.login.optionWeb'))
   .action(async (opts) => {
     if (!opts.web) {
-      const page = await launchBrowser();
+      const page = await launchBrowser({ interactiveLogin: true });
       try {
         await selectCommunity(page);
       } finally {

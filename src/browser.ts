@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { AuthError } from './auth-errors.js';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
 import { urlLogin, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
@@ -25,6 +26,8 @@ export type { FetchLike } from './http/page.js';
 export interface LaunchOptions {
   /** Explicit Auth Profile. Omit to preserve interactive active-profile behavior. */
   profileId?: string;
+  /** Allow the explicit CLI login command to reconnect a cookie-only account. */
+  interactiveLogin?: boolean;
   /** Where to persist cookies. Pass null to keep the session in memory only. */
   sessionFile?: string | null;
   /** Injection point for tests. */
@@ -57,6 +60,8 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
       throw error;
     }
     if (!page.isAuthRedirect() && !page.isNotFound()) {
+      page.saveSession(file);
+      maintainProfileSession(page, file, profileId);
       statusClear();
       return page;
     }
@@ -64,9 +69,6 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
     status(t('status.sessionExpired'));
     return null;
   };
-
-  const restored = await restoreSession();
-  if (restored) return restored;
 
   return withAuthProfileMutation(profileId, async () => {
     // Another process may have refreshed this profile while we waited.
@@ -76,25 +78,45 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
     const sessionOnly = opts.profileId === undefined
       ? isSessionOnly()
       : isProfileSessionOnly(opts.profileId);
-    if (sessionOnly) {
+    if (sessionOnly && !opts.interactiveLogin) {
       statusClear();
       throw new SessionOnlyExpiredError();
     }
 
     statusClear();
     const { email, password } = opts.profileId === undefined
-      ? await loadCredentials()
+      ? await loadCredentials({ allowSessionPrompt: opts.interactiveLogin })
       : await loadProfileCredentials(opts.profileId);
     const page = new Page(new CookieJar(), opts.fetchImpl);
     await login(page, email, password);
-    if (file) page.saveSession(file);
+    if (file) {
+      page.saveSession(file);
+      maintainProfileSession(page, file, profileId);
+    }
     return page;
   });
 }
 
 /** Persist a newly authenticated interactive session through its profile lock. */
 export async function saveProfileSession(page: Page, profileId = getActiveProfile()): Promise<void> {
-  await withAuthProfileMutation(profileId, () => page.saveSession(sessionFile(profileId)));
+  await withAuthProfileMutation(profileId, () => {
+    page.saveSession(sessionFile(profileId));
+    maintainProfileSession(page, sessionFile(profileId), profileId);
+  });
+}
+
+/** Keep server-rotated cookies without overwriting a later login or logout. Call under the profile lock after saving. */
+export function maintainProfileSession(page: Page, file: string, profileId: string | null): void {
+  let expected = fs.readFileSync(file, 'utf-8');
+  page.onCookiesChanged = () => withAuthProfileMutation(profileId, () => {
+    // A different session owns the file now, or logout removed it.
+    if (!fs.existsSync(file) || fs.readFileSync(file, 'utf-8') !== expected) {
+      page.onCookiesChanged = undefined;
+      return;
+    }
+    page.saveSession(file);
+    expected = fs.readFileSync(file, 'utf-8');
+  });
 }
 
 export async function login(page: Page, username: string, password: string): Promise<void> {
@@ -150,7 +172,7 @@ export async function getCommunities(page: Page): Promise<string[]> {
   await page.goto(getCommunitiesUrl());
   if (page.isAuthRedirect()) {
     statusClear();
-    throw new Error(
+    throw new AuthError(
       t('login.notAuthenticated', { url: page.url() }),
     );
   }
@@ -172,6 +194,9 @@ export async function getPlayers(page: Page, community: string): Promise<string[
   status(t('status.fetchingPlayers'));
   await page.goto(getLeaderboardUrl(community));
   statusClear();
+  if (page.isAuthRedirect()) {
+    throw new AuthError(t('login.notAuthenticated', { url: page.url() }));
+  }
 
   const $ = cheerio.load(await page.content());
   const players: string[] = [];

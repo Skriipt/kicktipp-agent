@@ -243,7 +243,7 @@ export const en = {
   },
   setup: {
     loginTitle: 'Connect Kicktipp',
-    loginLead: 'Email and password stay on this machine. They are not sent to the assistant.',
+    loginLead: 'Email and password stay on this machine. The password is stored encrypted for automatic sign-in. Credentials are not sent to the assistant.',
     email: 'Email',
     password: 'Password',
     storeSession:

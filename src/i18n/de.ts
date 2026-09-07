@@ -244,7 +244,7 @@ export const de = {
   },
   setup: {
     loginTitle: 'Kicktipp verbinden',
-    loginLead: 'E-Mail und Passwort bleiben auf diesem Rechner. Sie gehen nicht an den Assistenten.',
+    loginLead: 'E-Mail und Passwort bleiben auf diesem Rechner. Das Passwort wird verschlüsselt gespeichert und ermöglicht die automatische Neuanmeldung. Die Zugangsdaten gehen nicht an den Assistenten.',
     email: 'E-Mail',
     password: 'Passwort',
     storeSession:

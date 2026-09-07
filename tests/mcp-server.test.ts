@@ -64,10 +64,14 @@ beforeAll(() => {
 });
 
 describe('the MCP server as a client sees it', () => {
-  it('serializes concurrent reads, settings and writes on the shared session and recovers after failure', async () => {
+  it('serializes concurrent operations and renews expired sessions without prompting', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-concurrent-'));
     fs.writeFileSync(path.join(root, 'config.ini'), '[auth]\nemail = test@example.com\npassword = test\n[community]\nname = family\n');
-    fs.writeFileSync(path.join(root, 'session.json'), '{"cookies":[]}');
+    fs.writeFileSync(path.join(root, 'session.json'), JSON.stringify({
+      cookies: [{ name: 'sid', value: '0', domain: '127.0.0.1' }],
+    }));
+    let sessionGeneration = 0;
+    const loginBodies: URLSearchParams[] = [];
     let active = 0;
     let maxActive = 0;
     const visited: string[] = [];
@@ -79,8 +83,23 @@ describe('the MCP server as a client sees it', () => {
       // Keep navigation in flight long enough for concurrent MCP requests to overlap.
       await new Promise(resolve => setTimeout(resolve, 40));
       let html: string;
-      if (url.pathname === '/info/profil/meinetipprunden') {
+      if (url.pathname === '/info/profil/login') {
+        if (req.method === 'POST') {
+          let body = '';
+          for await (const chunk of req) body += chunk.toString();
+          loginBodies.push(new URLSearchParams(body));
+          res.writeHead(302, { location: '/info/profil/meinetipprunden', 'set-cookie': `sid=${sessionGeneration}; Path=/` });
+          html = '';
+        } else {
+          html = '<form method="post"><input name="kennung"><input name="passwort" type="password"><button type="submit">Login</button></form>';
+        }
+      } else if (req.headers.cookie !== `sid=${sessionGeneration}`) {
+        res.writeHead(302, { location: '/info/profil/login' });
+        html = '';
+      } else if (url.pathname === '/info/profil/meinetipprunden') {
         html = '<a href="/family/">family</a><a href="/office/">office</a>';
+      } else if (url.pathname.endsWith('/tippuebersicht')) {
+        html = '<table id="ranking"><tbody><tr><td><div class="mg_name">Alice</div></td></tr></tbody></table>';
       } else if (url.pathname.endsWith('/tippabgabe')) {
         html = '<form><table id="tippabgabeSpiele"><tbody><tr><td>10.09.30 20:30</td><td>Bayern</td><td>Dortmund</td><td>'
           + '<input id="one_heimTipp" name="home"><input id="one_gastTipp" name="away"></td><td></td></tr></tbody></table></form>';
@@ -141,6 +160,18 @@ describe('the MCP server as a client sees it', () => {
       expect(results[5].result.structuredContent.data.title).toBe('office: Spieltag 4');
       expect(maxActive).toBe(1);
       expect(visited).toContain('/family/tippabgabe');
+
+      // Expire the cached Page twice while keeping the same MCP process alive.
+      sessionGeneration++;
+      expect((await call('get_communities')).result.structuredContent?.data).toEqual(['family', 'office']);
+      expect(loginBodies).toHaveLength(1);
+      sessionGeneration++;
+      expect((await call('get_players')).result.structuredContent?.data).toEqual(['Alice']);
+      expect(loginBodies).toHaveLength(2);
+      for (const body of loginBodies) {
+        expect(body.get('kennung')).toBe('test@example.com');
+        expect(body.get('passwort')).toBe('test');
+      }
     } finally {
       child.kill();
       await new Promise<void>(resolve => { site.close(() => resolve()); site.closeAllConnections(); });

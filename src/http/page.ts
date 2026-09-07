@@ -67,6 +67,7 @@ export class Page {
   private $dom: cheerio.CheerioAPI | null = null;
   private lastStatus = 0;
   private closed = false;
+  onCookiesChanged?: () => Promise<void>;
 
   constructor(
     readonly jar: CookieJar = new CookieJar(),
@@ -127,7 +128,9 @@ export class Page {
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
       });
+      const previousCookies = JSON.stringify(this.jar.toJSON());
       this.jar.store(currentUrl, res.headers);
+      if (JSON.stringify(this.jar.toJSON()) !== previousCookies) await this.onCookiesChanged?.();
 
       const location = res.headers.get('location');
       if (location && [301, 302, 303, 307, 308].includes(res.status)) {

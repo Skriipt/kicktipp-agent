@@ -147,6 +147,20 @@ describe('the localhost setup listener', () => {
     expect(session.cookies).toContainEqual(expect.objectContaining({ name: 'sid', value: 'valid' }));
   });
 
+  it('reuses web credentials for automatic CLI login after cookie expiry', async () => {
+    const handle = await startListener(['mycomm']);
+    await (await post(handle.url, { step: 'login', email: EMAIL, password: PASSWORD })).text();
+    expect(await handle.finished).toBe('saved');
+    const { sessionFile } = await import('../src/config.js');
+    fs.writeFileSync(sessionFile(), JSON.stringify({ cookies: [] }));
+    const { launchBrowser } = await import('../src/browser.js');
+    const { fetchImpl, calls } = mockFetch(kicktipp(['mycomm']));
+    const page = await launchBrowser({ fetchImpl });
+    await page.close();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
+    expect(fs.readFileSync(sessionFile(), 'utf8')).toContain('valid');
+  });
+
   it('lets the user pick a community when the account has more than one', async () => {
     const handle = await startListener(['alpha', 'beta']);
     const loginRes = await post(handle.url, { step: 'login', email: EMAIL, password: PASSWORD });

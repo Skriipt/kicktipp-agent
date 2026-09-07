@@ -49,7 +49,16 @@ kicktipp tui
 ```
 
 `login --web` opens a private setup page on `127.0.0.1`. Sign in, select a
-community, then return to the terminal.
+community, then return to the terminal. Use `kicktipp login` to sign in directly
+in the terminal. Both entry points share the same account and session.
+
+By default, login stores the password encrypted on this machine so expired
+sessions can be renewed automatically, without another prompt. Refreshed cookies
+are saved during use. In the dashboard, choose **Passwort für automatische
+Anmeldung speichern**. The optional cookie-only mode cannot renew an expired
+session without credentials: reconnect once with password storage enabled if
+you previously chose that mode. An explicit local logout removes the saved
+credentials and session.
 
 ### Web dashboard
 

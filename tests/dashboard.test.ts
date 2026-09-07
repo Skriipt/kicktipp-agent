@@ -99,6 +99,17 @@ describe('dashboard security and full CLI coverage', () => {
 });
 
 describe('dashboard end-to-end operations', () => {
+  it('defaults to stored credentials and renews an expired dashboard session', async () => {
+    expect((await request('snapshot', {}, 'persistent')).result.auth.store).toBe('password');
+    const login = await request('login', { email: 'persistent@example.com', password: ' secret password ', store: 'password', site: site.origin }, 'persistent', true);
+    expect(login.status).toBe('done');
+    fs.unlinkSync(path.join(home, 'data', 'session-persistent.json'));
+    const result = await request('communities', {}, 'persistent');
+    expect(result.status, JSON.stringify(result)).toBe('done');
+    expect(result.result.communities.length).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(home, 'data', 'session-persistent.json'))).toBe(true);
+  }, 30_000);
+
   it('requires a preview identity before placing tips for another member', async () => {
     await signIn();
     const payload = { command: 'admin bet', args: ['Anna', 'Bayern vs Dortmund=1:0'] };

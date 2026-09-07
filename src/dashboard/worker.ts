@@ -7,7 +7,7 @@ import { readConfig, mutateConfig, setActiveProfile, setCommunityOverride, listP
   readUiLanguage, readUiSite, readScoringOverride, readDefaultStrategy } from '../config.js';
 import { setLanguage, resolveLanguage } from '../i18n/index.js';
 import { setUrlBase, resolveBaseUrl, parseSite, urlBase } from '../url.js';
-import { launchBrowser, getCommunities, getPlayers, login, Page } from '../browser.js';
+import { launchBrowser, getCommunities, getPlayers, login, maintainProfileSession, Page } from '../browser.js';
 import { CookieJar } from '../http/cookie-jar.js';
 import { withAuthProfileMutation } from '../auth-profile-lock.js';
 import { fetchBets, fetchBonusQuestions, fetchBonusBets, placeBets, placeBonusBets, fetchMatchdayBets,
@@ -89,7 +89,7 @@ async function execute(request: DashboardRequest): Promise<unknown> {
     const notifier = readNotifierConfig();
     const { program } = await import('../index.js');
     return { version: VERSION, profiles: listProfiles(), profile: request.profile, community, player,
-      auth: { email: profile?.email ?? process.env.KICKTIPP_EMAIL ?? '', store: profile?.store ?? 'session',
+      auth: { email: profile?.email ?? process.env.KICKTIPP_EMAIL ?? '', store: profile?.store ?? 'password',
         configured: !!profile?.email || !!(process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) },
       settings: settings(), notifier: { kind: notifier.kind, configured: !!notifier.target,
         fromEnvironment: !!(process.env.KICKTIPP_NOTIFY_KIND || process.env.KICKTIPP_NOTIFY_TARGET) },
@@ -122,6 +122,7 @@ async function execute(request: DashboardRequest): Promise<unknown> {
       await withAuthProfileMutation(request.profile, async () => {
         await saveAuth({ ...input, password: input.store === 'password' ? input.password : undefined });
         page.saveSession(sessionFile(request.profile));
+        maintainProfileSession(page, sessionFile(request.profile), request.profile);
       });
       // Persist only a successfully authenticated site.
       if (input.site) mutateConfig(config => { config.ui = { ...(config.ui ?? {}), site: urlBase() }; });
