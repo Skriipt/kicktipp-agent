@@ -96,6 +96,7 @@ export class Page {
     url: string,
     body?: URLSearchParams,
     referer?: string,
+    beforePost?: () => void,
   ): Promise<void> {
     let currentUrl = url;
     let currentMethod = method;
@@ -121,6 +122,7 @@ export class Page {
         headers.set('Content-Type', 'application/x-www-form-urlencoded');
       }
 
+      if (currentMethod === 'POST') beforePost?.();
       const res = await this.fetchImpl(currentUrl, {
         method: currentMethod,
         headers,
@@ -282,6 +284,32 @@ export class Page {
       .find('button[type="submit"], input[type="submit"], button[name], button')
       .first();
     await this.submit(form, submitter);
+  }
+
+  /** Submit only explicitly selected fields. A POST redirect is never replayed. */
+  async submitSelectedForm(
+    anchorSelector: string,
+    fields: ReadonlyMap<string, string>,
+    beforeSend: () => void,
+  ): Promise<void> {
+    this.ensureOpen();
+    const form = this.find(anchorSelector).closest('form');
+    if (form.length !== 1 || form.attr('method')?.toLowerCase() !== 'post') {
+      throw new Error('Expected a single POST form.');
+    }
+    const action = this.absoluteUrl(form.attr('action') || this.currentUrl);
+    const target = new URL(action);
+    if (target.protocol !== 'https:' || target.origin !== new URL(this.currentUrl).origin
+      || !isAllowedHost(target.hostname)) throw new Error('Untrusted submission action.');
+    const body = new URLSearchParams();
+    for (const [name, value] of fields) body.append(name, value);
+    let sent = false;
+    await this.navigate('POST', action, body, this.currentUrl, () => {
+      if (sent) throw new Error('Refusing to replay a submission POST redirect.');
+      beforeSend();
+      sent = true;
+    });
+    this.assertSubmissionResponse(false);
   }
 
   private async submit(

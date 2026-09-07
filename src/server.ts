@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { fetchWorkflowFixtures } from './workflow/kicktipp.js';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
@@ -281,6 +282,28 @@ server.registerTool(
     const data = await fetchBets(page, community, matchday);
     return jsonResult({ ...data, matches: localizeMatchDates(data.matches) });
   }),
+);
+
+server.registerTool(
+  'get_workflow_fixtures',
+  {
+    description: 'Read-only exact workflow fixtures with internal form IDs and UTC kickoff. Unknown identities fail closed; season and competition are explicit operator scope.',
+    inputSchema: z.object({
+      profile: z.string().min(1), community: z.string().min(1), season: z.string().min(1),
+      competition: z.string().min(1), providerSeasonId: z.string().regex(/^[1-9]\d*$/), matchday: z.number().int().min(1).max(34).optional(),
+    }),
+    outputSchema: OUTPUT_SCHEMA,
+  },
+  async ({ matchday, ...scope }) => {
+    if (scope.profile === 'default' && getActiveProfile() !== null) throw new Error('Default profile is not active');
+    const signal = AbortSignal.timeout(30_000);
+    // Public schedule import needs no login and must never expose profile cookies.
+    const page = new Page(undefined, (url, init) => fetch(url, {
+      ...init, signal: AbortSignal.any([signal, ...(init.signal ? [init.signal] : [])]),
+    }));
+    try { return jsonResult({ fixtures: await fetchWorkflowFixtures(page, scope, matchday) }); }
+    finally { await page.close(); }
+  },
 );
 
 server.registerTool(

@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import { AuthError } from './auth-errors.js';
 import type { AnyNode } from 'domhandler';
 import fs from 'fs';
-import { urlLogin, getCommunitiesUrl, getLeaderboardUrl } from './url.js';
+import { urlLogin, getCommunitiesUrl, getPredictUrl, getLeaderboardUrl } from './url.js';
 import {
   getActiveProfile,
   sessionFile,
@@ -30,6 +30,8 @@ export interface LaunchOptions {
   interactiveLogin?: boolean;
   /** Where to persist cookies. Pass null to keep the session in memory only. */
   sessionFile?: string | null;
+  /** Community whose protected prediction page should validate restored cookies. */
+  community?: string;
   /** Injection point for tests. */
   fetchImpl?: FetchLike;
 }
@@ -54,6 +56,13 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
     }
     try {
       await page.goto(getCommunitiesUrl());
+      // The community list can remain reachable with an expired session.
+      // When a community is configured, validate the protected prediction
+      // page as well so stale cookies trigger the credential fallback.
+      const community = opts.community;
+      if (!page.isAuthRedirect() && community) {
+        await page.goto(getPredictUrl(community));
+      }
     } catch (error) {
       await page.close();
       statusClear();

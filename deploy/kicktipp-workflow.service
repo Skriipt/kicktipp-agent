@@ -1,0 +1,18 @@
+[Unit]
+Description=Kicktipp isolated research workflow (research-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/kicktipp-agent-dev-web-dashboard-2026-09-05
+Environment=PATH=/home/ubuntu/.nvm/versions/node/v24.15.0/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/.nvm/versions/node/v24.15.0/bin/node /home/ubuntu/kicktipp-agent-dev-web-dashboard-2026-09-05/dist/workflow/cli.js --config /home/ubuntu/kicktipp-agent-dev-web-dashboard-2026-09-05/config/workflow.json
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=45
+UMask=0077
+
+[Install]
+WantedBy=default.target

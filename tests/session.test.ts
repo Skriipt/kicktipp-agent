@@ -142,6 +142,36 @@ describe('launchBrowser', () => {
     await expect(getCommunities(page)).resolves.toContain('mycomm');
   });
 
+  it('does not trust a cookie when only the public community page works', async () => {
+    fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+    fs.writeFileSync(
+      sessionFile,
+      JSON.stringify({ cookies: [{ name: 'sid', value: 'expired', domain: 'www.kicktipp.com' }] }),
+    );
+    vi.stubEnv('KICKTIPP_COMMUNITY', 'mycomm');
+
+    const { fetchImpl, calls } = mockFetch((req) => {
+      const authenticated = (req.headers.get('cookie') || '').includes('sid=valid');
+      if (req.url === LOGIN) {
+        if (req.method === 'GET') return LOGIN_FORM;
+        const body = new URLSearchParams(req.body || '');
+        if (body.get('kennung') === EMAIL && body.get('passwort') === PASSWORD) {
+          return { status: 302, location: '/', setCookies: ['sid=valid; Path=/; HttpOnly'] };
+        }
+        return LOGIN_FORM;
+      }
+      if (req.url === COMMUNITIES) return COMMUNITY_LIST;
+      if (req.url === `${BASE}/mycomm/tippabgabe`) {
+        return authenticated ? htmlPage('predict') : { status: 302, location: '/info/profil/login' };
+      }
+      if (req.url === `${BASE}/`) return htmlPage('home');
+      return undefined;
+    });
+
+    await launchBrowser({ sessionFile, community: 'mycomm', fetchImpl });
+    expect(calls.some((c) => c.method === 'POST' && c.url === LOGIN)).toBe(true);
+  });
+
   it('logs in again when the stored session file is corrupt', async () => {
     fs.writeFileSync(sessionFile, 'not json at all');
 

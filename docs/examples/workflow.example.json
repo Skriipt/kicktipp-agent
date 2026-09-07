@@ -1,0 +1,13 @@
+{
+  "scope": {
+    "profile": "default",
+    "community": "toms-zockerrunde-2627",
+    "season": "2026/27",
+    "competition": "Bundesliga",
+    "providerSeasonId": "5530388"
+  },
+  "matchdays": [],
+  "store": "../data/workflow-live",
+  "pollMs": 900000,
+  "telegram": { "enabled": true, "target": "telegram" }
+}

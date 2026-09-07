@@ -34,7 +34,9 @@
     "test:docker": "bash scripts/docker-smoke.sh",
     "test:watch": "vitest",
     "pack:mcpb": "bash scripts/pack-mcpb.sh",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "workflow:demo": "node dist/workflow/demo.js",
+    "workflow": "node dist/workflow/cli.js"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

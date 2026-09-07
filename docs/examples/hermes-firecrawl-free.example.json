@@ -1,0 +1,11 @@
+{
+  "web": {
+    "backend": "firecrawl",
+    "search_backend": "firecrawl",
+    "extract_backend": "firecrawl",
+    "use_gateway": false,
+    "keyless_fallback": false,
+    "keyless_rescue": false,
+    "cache_enabled": false
+  }
+}

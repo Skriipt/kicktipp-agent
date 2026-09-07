@@ -25,6 +25,11 @@ Use [Kicktipp](https://www.kicktipp.com/) from a web dashboard, terminal, or MCP
 > This is an unofficial client. Kicktipp has no public API, so website changes
 > can break its parsers. Check tips before submitting them.
 
+The [Research & Prediction workflow foundation](docs/research-prediction-workflow.md)
+provides persistent per-match dossiers, bounded research, a local scheduler and
+submission guards. Run its safe offline example with `npm run workflow:demo`
+after building.
+
 ## Quick start
 
 Install [Node.js](https://nodejs.org/) 24.15 or newer in the 24 LTS line.
@@ -40,6 +45,7 @@ Node 22.22.2+ in the 22 LTS line and Node 26+ are also supported.
 ```bash
 git clone https://github.com/Skriipt/kicktipp-agent.git
 cd kicktipp-agent
+nvm install && nvm use # when using nvm; reads .nvmrc
 npm install
 npm run build
 npm link
@@ -387,3 +393,12 @@ Christian for the upstream project and the work this version builds on.
 The upstream project began as a fork of
 [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot) and was
 later rewritten in TypeScript.
+
+
+### Research workflow composition
+
+The isolated workflow now includes a read-only MCP schedule importer, Codex
+research, tool-free Hermes prediction, exact single-match submission and durable
+Telegram notifications. Prediction starts at T−50 minutes. The command defaults
+to research-only; no service is installed or activated automatically.
+See [configuration, commands and remaining live acceptance](docs/workflow-live.md).
