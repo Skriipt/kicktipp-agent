@@ -111,6 +111,8 @@ export class CodexResearchProvider implements ResearchProvider {
       const strict = (value: unknown): void => {
         if (!value || typeof value !== 'object') return;
         const item = value as Record<string, unknown>;
+        // Structured Outputs does not accept URI format; Zod still validates returned URLs.
+        if (item.format === 'uri') delete item.format;
         if (item.properties && typeof item.properties === 'object') {
           const props = item.properties as Record<string, unknown>;
           const required = new Set(item.required as string[] ?? []);
@@ -123,7 +125,7 @@ export class CodexResearchProvider implements ResearchProvider {
       await writeFile(schemaPath, JSON.stringify(jsonSchema), { mode: 0o600 });
       const args = [...web ? ['--search'] : [], 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only',
         '-m', 'gpt-5.6-luna', '-c', 'model_reasoning_effort="xhigh"', '-c', 'features.shell_tool=false', '-c', 'features.unified_exec=false',
-        '-c', 'features.apps=false', '-c', 'features.multi_agent=false', '-c', 'features.code_mode=false', '-c', 'features.code_mode_host=false',
+        '-c', 'features.apps=false', '-c', 'features.multi_agent=false', '-c', `features.code_mode=${web}`, '-c', `features.code_mode_host=${web}`,
         '-c', 'features.hooks=false', '-c', 'features.plugins=false', '-c', 'features.remote_plugin=false',
         '-c', 'features.browser_use=false', '-c', 'features.computer_use=false', '-c', 'features.image_generation=false', '-c', 'features.view_image=false',
         '-c', 'skills.include_instructions=false', '-c', 'orchestrator.skills.enabled=false', '-c', 'mcp_servers={}',

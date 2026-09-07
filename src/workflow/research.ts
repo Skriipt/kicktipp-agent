@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { WorkflowProcessError } from './process.js';
 import { findingProblem, evidenceGate } from './evidence.js';
 export { evidenceGate, validResearch } from './evidence.js';
 import { renderResearchPrompt } from './prompts.js';
@@ -236,8 +237,13 @@ export async function research(
       // A rejected report can be corrected in a fresh attempt; it never authorizes prediction.
       result.retryable = !result.complete;
     }, options.signal);
-  } catch {
-    result.uncertainties.push(paused ? `Research paused: ${paused.reason}` : 'Research paused: deadline, abort or provider failure.');
+  } catch (error) {
+    const reason = paused?.reason ?? (options.signal?.aborted ? 'aborted'
+      : error instanceof WorkflowProcessError ? error.message
+      : error instanceof z.ZodError ? 'provider_output_invalid'
+      : error instanceof Error && ['deadline', 'aborted'].includes(error.message) ? error.message
+      : 'provider_failure');
+    result.uncertainties.push(`Research paused: ${reason}`);
     result.complete = false;
     result.retryable = true;
   }

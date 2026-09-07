@@ -28,6 +28,7 @@ describe('isolated live model adapters (fake processes only)', () => {
       cwd = options.cwd!;
       expect(exe).toBe('codex'); expect(args).toContain('--search'); expect(args).toContain('--ephemeral');
       expect(args).toContain('features.shell_tool=false'); expect(args).toContain('mcp_servers={}');
+      expect(args).toContain('features.code_mode=true'); expect(args).toContain('features.code_mode_host=true');
       expect(args).toContain('gpt-5.6-luna'); expect(options.input).toContain('FIXED PROMPT');
       expect(options.env?.CODEX_HOME).toBe(join(cwd, 'codex')); return '';
     }) });
@@ -39,6 +40,24 @@ describe('isolated live model adapters (fake processes only)', () => {
     expect(report).toEqual({ findings: [finding], uncertainties: [] });
     await expect(access(cwd)).rejects.toThrow();
   });
+  it('sends compatible URL schemas while still rejecting malformed URL responses', async () => {
+    let sentSchema = '';
+    const provider = new CodexResearchProvider({ runner: runnerReturning({ urls: ['not a URL'] }, async (_exe, args) => {
+      sentSchema = await readFile(args[args.indexOf('--output-schema') + 1], 'utf8');
+      return '';
+    }) });
+    await expect(provider.search('query', signal())).rejects.toThrow();
+    expect(sentSchema).not.toContain('"format":"uri"');
+    expect(JSON.parse(sentSchema).properties.urls.items.type).toBe('string');
+  });
+  it('removes unsupported URI formats from the nested R1 output schema', async () => {
+    let schema: unknown;
+    const provider = new CodexResearchProvider({ runner: runnerReturning({ markdown: '# Empty', originals: [], findings: [], uncertainties: [] }, async (_exe, args) => {
+      schema = JSON.parse(await readFile(args[args.indexOf('--output-schema') + 1], 'utf8')); return '';
+    }) });
+    await provider.investigate({ fixture, phase: 'r1', prompt: 'diagnostic', categories: [] }, { search: async () => [], open: async () => source, record: async () => {} }, signal());
+    expect(JSON.stringify(schema)).not.toContain('"format":"uri"');
+  });
   it('rejects invented quotes and never checkpoints them', async () => {
     let records = 0;
     const provider = new CodexResearchProvider({ runner: runnerReturning({ markdown: '# Report', originals: [source], findings: [finding], uncertainties: [] }) });
@@ -48,7 +67,8 @@ describe('isolated live model adapters (fake processes only)', () => {
   it('derives metadata from fetched original only, never returns model-written source text', async () => {
     const { url: _url, text: _text, ...metadata } = source;
     const provider = new CodexResearchProvider({ fetch: async () => 'Actual fetched body', runner: runnerReturning(metadata, async (_exe, args, options) => {
-      expect(args).not.toContain('--search'); expect(args).toContain('web_search="disabled"'); expect(options.input).toContain('Actual fetched body'); return '';
+      expect(args).not.toContain('--search'); expect(args).toContain('web_search="disabled"');
+      expect(args).toContain('features.code_mode=false'); expect(args).toContain('features.code_mode_host=false'); expect(options.input).toContain('Actual fetched body'); return '';
     }) });
     expect(await provider.open(source.url, signal())).toEqual({ ...source, text: 'Actual fetched body' });
   });

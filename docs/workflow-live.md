@@ -79,9 +79,10 @@ sichtbar; normale Ticks und Neustarts duplizieren bestätigte Nachrichten nicht.
 ## Modell- und Prozessgrenzen
 
 Codex erhält einen privaten Arbeits-/Auth-Bereich, keine allgemeine Benutzer-
-oder Projektkonfiguration und keine geteilte Sitzung. Shell, Code-Ausführung,
-MCP-Konfiguration, Apps, Plugins und weitere nicht benötigte Tools sind deaktiviert.
-Websuche ist nur für die Research-Aufrufe freigegeben. Der Recherchebericht wird
+oder Projektkonfiguration und keine geteilte Sitzung. Shell, MCP-Konfiguration,
+Apps, Plugins und weitere nicht benötigte Tools sind deaktiviert. Für Research
+sind Websuche und der von Codex dafür benötigte Code-Mode-Host aktiviert; beim
+Metadaten-Aufruf bleiben beide deaktiviert. Der Recherchebericht wird
 in strukturierte Findings übersetzt; ein vom Modell geschriebener Seitentext wird
 nicht ungeprüft zu Evidenz.
 
@@ -234,3 +235,24 @@ sofortige Phasen vor T-5h, unveränderte Zeitstempel, Test-/Produktions-Trennung
 Nachrichten-Deduplizierung, Quellenvalidierung, bestehende Tipps und die
 Anpfiffprüfung unmittelbar vor dem POST. Der Live-End-to-End-Nachweis bleibt
 wegen des oben dokumentierten Login-Redirects offen.
+
+## Diagnose des R1-Providerstarts
+
+Der R1-Abbruch nach wenigen Sekunden wurde am 07.09.2026 mit dem tatsächlichen
+Codex-Adapter reproduziert: HTTP 400, `invalid_json_schema`, nicht unterstütztes
+`format: "uri"` unter `originals[].url`. Das an Codex gesendete Schema lässt dieses
+Format jetzt weg; die Zod-Prüfung aller zurückgegebenen URLs bleibt erhalten.
+Siehe die [unterstützten Structured-Outputs-Schemas](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas).
+
+Eine zusätzliche Live-Webprobe zeigte einen blockierten Werkzeugaufruf durch
+`features.code_mode_host=false`. Research aktiviert jetzt den Code-Mode-Host;
+ein tatsächlicher Websuchaufruf wurde danach bestätigt. Der isolierte Aufruf mit
+dem korrigierten R1-Ausgabeschema wurde ebenfalls erfolgreich abgeschlossen.
+Dies ist kein Nachweis für vollständige R1/R2-Evidenz oder eine echte Tippabgabe.
+
+Prozessfehler behalten bekannte Provider-Codes, Exit-Code und Abbruchsignal.
+Research schreibt diese sichere Diagnose in `uncertainties` des JSON-States und
+Dossiers. Unbekannte Fehler bleiben generisch; rohe stderr-Ausgaben, Auth-Daten
+und private URLs werden nicht gespeichert. Timeout, Abbruch, Ausgabelimit und
+ungültige Providerantwort werden unterschieden. Die fehlgeschlagenen ursprünglichen
+Artefakte werden nicht nachträglich umgeschrieben.
