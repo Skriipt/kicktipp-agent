@@ -172,3 +172,15 @@ describe('[ui] language and site', () => {
     expect(ini).toMatch(/site\s*=\s*de/);
   });
 });
+describe('auth profile locks', () => {
+  it('use KICKTIPP_CONFIG_DIR', async () => {
+    const configDir = path.join(home, 'mounted-config');
+    vi.stubEnv('KICKTIPP_CONFIG_DIR', configDir);
+    vi.resetModules();
+    const { withAuthProfileMutation } = await import('../src/auth-profile-lock.js');
+
+    await withAuthProfileMutation('Marvin', () => {
+      expect(fs.readdirSync(configDir).some((name) => name.startsWith('auth-'))).toBe(true);
+    });
+  });
+});
