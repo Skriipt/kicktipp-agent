@@ -8,7 +8,7 @@ import { t } from './i18n/index.js';
 import type { ScoringRules } from './rules/scoring.js';
 import { withAuthProfileMutation } from './auth-profile-lock.js';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
+const CONFIG_DIR = process.env.KICKTIPP_CONFIG_DIR ?? path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
 
 // ── Profiles ────────────────────────────────────────────────────────
