@@ -166,7 +166,9 @@ function authBlock(config: Record<string, any>): Record<string, any> | undefined
 
 export function isSessionOnly(): boolean {
   if (process.env.KICKTIPP_PASSWORD) return false;
-  const block = authBlock(readConfig());
+  const config = readConfig();
+  const profileName = getActiveProfile();
+  const block = profileName ? readProfileSection(config, profileName) : config.auth;
   return block?.store === 'session' && !block?.password;
 }
 
