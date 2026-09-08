@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
+const CONFIG_DIR = process.env.KICKTIPP_CONFIG_DIR ?? path.join(os.homedir(), '.config', 'kicktipp-agent');
 const POLL_MS = 25;
 const TIMEOUT_MS = 30_000;
 const queues = new Map<string, Promise<void>>();
