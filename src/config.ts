@@ -217,11 +217,12 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
   }
   const config = readConfig();
-  const profile = profileSection(config);
+  const profileName = getActiveProfile();
+  const profile = profileName ? readProfileSection(config, profileName) ?? {} : null;
   if (profile?.email && profile?.password) {
     return { email: profile.email, password: decrypt(profile.password) };
   }
-  if (config.auth?.email && config.auth?.password) {
+  if (!profileName && config.auth?.email && config.auth?.password) {
     const password = decrypt(config.auth.password);
     // Migrate plaintext passwords to encrypted on read
     if (!config.auth.password.startsWith('enc.')) {
@@ -231,7 +232,9 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: config.auth.email, password };
   }
 
-  if (isSessionOnly()) throw new SessionOnlyExpiredError();
+  if (!profileName || profileName in (config.profile ?? {}) || config[`profile.${profileName}`]) {
+    if (isSessionOnly()) throw new SessionOnlyExpiredError();
+  }
 
   if (!process.stdin.isTTY) {
     throw new Error(t('config.noCredentialsHint'));
@@ -270,7 +273,11 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
   rl.close();
 
   const config2 = readConfig();
-  config2.auth = { email, password: encrypt(password) };
+  if (profileName) {
+    writeProfileSection(config2, profileName, { email, password: encrypt(password), store: 'password' });
+  } else {
+    config2.auth = { email, password: encrypt(password) };
+  }
   writeConfig(config2);
   console.log(t('config.credentialsSaved'));
   return { email, password };
