@@ -193,6 +193,52 @@ describe('the MCP server as a client sees it', () => {
     expect(data.community).toBe('mycomm');
   });
 
+  it('lists and switches configured profiles', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-profiles-'));
+    const configDir = path.join(root, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'config.ini'), [
+      '[profile.Marvin]',
+      'email = marvin@example.com',
+      'password = secret-marvin',
+      'community = marvin-pool',
+      '',
+      '[profile.OrakelGPT]',
+      'email = orakel@example.com',
+      'password = secret-orakel',
+      'community = orakel-pool',
+      '',
+    ].join('\n'));
+
+    try {
+      const messages = await callServer([
+        INIT,
+        { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_profiles', arguments: {} } },
+        { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'set_profile', arguments: { name: 'OrakelGPT' } } },
+        { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'get_status', arguments: {} } },
+      ], { HOME: root, USERPROFILE: root, KICKTIPP_CONFIG_DIR: configDir });
+      const tools = messages.find((m) => m.id === 2)?.result?.tools ?? [];
+      const names = tools.map((tool: { name: string }) => tool.name);
+      expect(names).toContain('list_profiles');
+      expect(names).toContain('set_profile');
+      expect(messages.find((m) => m.id === 3)?.result?.structuredContent?.data).toMatchObject({
+        active: null,
+        profiles: ['Marvin', 'OrakelGPT'],
+      });
+      expect(messages.find((m) => m.id === 4)?.result?.structuredContent?.data).toMatchObject({
+        active: 'OrakelGPT',
+      });
+      expect(messages.find((m) => m.id === 5)?.result?.structuredContent?.data).toMatchObject({
+        profile: 'OrakelGPT',
+        credentials_saved: true,
+        community: 'orakel-pool',
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('offers the cached-data resources', async () => {
     const messages = await callServer(
       [INIT, { jsonrpc: '2.0', id: 2, method: 'resources/templates/list', params: {} }],
