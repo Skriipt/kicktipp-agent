@@ -188,6 +188,7 @@ describe('profile login storage', () => {
   it('creates the selected profile when credentials are saved', async () => {
     const config = await loadConfig('');
     config.setActiveProfile('Marvin');
+    expect(config.isSessionOnly()).toBe(false);
     await config.saveAuth({ email: 'marvin@example.com', password: 'secret' });
 
     const ini = fs.readFileSync(configFile, 'utf8');
