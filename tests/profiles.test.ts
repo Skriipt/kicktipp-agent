@@ -64,6 +64,21 @@ describe('a config with no profiles behaves exactly as before', () => {
     expect(config.listProfiles()).toEqual([]);
     expect(config.sessionFile().endsWith('session.json')).toBe(true);
   });
+
+  it('uses KICKTIPP_CONFIG_DIR as the config and session root', async () => {
+    const configDir = path.join(home, 'mounted-config');
+    const mountedConfig = path.join(configDir, 'config.ini');
+    vi.stubEnv('KICKTIPP_CONFIG_DIR', configDir);
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(mountedConfig, CLASSIC);
+    vi.resetModules();
+
+    const config = await import('../src/config.js');
+    config.saveUiLanguage('de');
+
+    expect(config.sessionFile()).toBe(path.join(configDir, 'session.json'));
+    expect(fs.readFileSync(mountedConfig, 'utf8')).toMatch(/language\\s*=\\s*de/);
+  });
 });
 
 describe('profiles', () => {
