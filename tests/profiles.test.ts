@@ -184,3 +184,15 @@ describe('auth profile locks', () => {
     });
   });
 });
+describe('profile login storage', () => {
+  it('creates the selected profile when credentials are saved', async () => {
+    const config = await loadConfig('');
+    config.setActiveProfile('Marvin');
+    await config.saveAuth({ email: 'marvin@example.com', password: 'secret' });
+
+    const ini = fs.readFileSync(configFile, 'utf8');
+    expect(ini).toMatch(/\[profile\.Marvin\]/);
+    expect(ini).toMatch(/marvin@example\.com/);
+    expect(ini).not.toContain('secret');
+  });
+});
