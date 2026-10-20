@@ -234,3 +234,39 @@ The Docker smoke uses fake encrypted credentials, an isolated network, and no
 published host ports. It checks the Compose isolation contract, authentication,
 credential identity mismatch, non-root execution, and graceful shutdown. It
 does not use real accounts or submit real predictions.
+
+## Complete dashboard data
+
+The dashboard extension adds three authenticated, fixed-profile routes:
+
+- `GET /v1/overview[?matchday=N]`: full source-ordered ranking, stable participant
+  IDs, all source columns, match context, rank changes, individual predictions
+  and awarded points, matchday/bonus/wins/total values. Empty, unpublished,
+  hidden and explicitly failed predictions remain different states. A source
+  `f` classification means zero awarded points; other missing points are null.
+- `GET /v1/form[?matchday=N]`: actual selected season and matchday, stable form
+  field IDs, existing own predictions, printed deadline converted to UTC from
+  its source time zone, and real editable-input availability.
+- `POST /v1/submissions`: strict `{season,matchday,edits,dry_run,confirm}` body.
+  Each edit is `{id,home,away,previous}`; `previous` is the loaded prediction or
+  null. Requires the explicit form context, checks current editability/deadline
+  and unchanged prior values, serializes with existing writes, then uses the
+  existing submission/audit path. No extra model is involved. An actual write
+  requires `dry_run:false,confirm:true`; a preview uses `dry_run:true`.
+
+A submission returns `outcome: preview|verified|not_verified|submission_unknown`.
+Only values independently read back from the same season/matchday are verified.
+An upstream write failure is never retried, even when its readback fails too.
+Partial matches are reported individually in `verification`; returned `form`
+contains the real saved values. HTTP 409 indicates stale or uneditable input.
+
+The overview and form defaults are resolved independently from Kicktipp's
+selected form/navigation metadata, never a fixed day, season length or calendar
+calculation. Multiple callers share per-key in-flight requests and a 45-second
+cache for form/live standings, 180 seconds for other standings. Writes invalidate
+that cache. Failures are not cached and do not manufacture empty success payloads.
+
+Expose these routes only through a HA-authenticated server-side bridge. Store
+its token and expected profile in private local configuration; never send the
+upstream token to a Lovelace card. The bridge must verify `/v1/status` against its
+configured profile before a write. All integration tests use fake transport.

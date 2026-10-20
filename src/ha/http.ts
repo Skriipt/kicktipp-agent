@@ -1,3 +1,5 @@
+import { DashboardCache, fetchDashboardOverview, fetchDashboardForm } from './dashboard.js';
+import { dashboardSlip, submitDashboard, SlipConflict } from './submission.js';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import crypto from 'node:crypto';
 import { z } from 'zod';
@@ -85,6 +87,7 @@ export function createHaServer(options: HaServerOptions): http.Server {
   });
   const tokenHash = crypto.createHash('sha256').update(`Bearer ${options.token}`).digest();
   const identity = { profile, community };
+  const dashboardCache = new DashboardCache();
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     let submitting = false;
@@ -99,16 +102,16 @@ export function createHaServer(options: HaServerOptions): http.Server {
       if (req.headers.origin !== undefined) throw new RequestError(403, 'browser_origin_forbidden');
       const url = new URL(req.url ?? '/', 'http://localhost');
       const method = req.method ?? 'GET';
-      const reads = ['/v1/health', '/v1/status', '/v1/bets', '/v1/tip-status'];
+      const reads = ['/v1/health', '/v1/status', '/v1/bets', '/v1/tip-status', '/v1/overview', '/v1/form', '/v1/submissions'];
       if (!reads.includes(url.pathname)) throw new RequestError(404, 'not_found');
-      if (method !== 'GET' && !(method === 'POST' && url.pathname === '/v1/bets')) {
+      if (method !== 'GET' && !(method === 'POST' && ['/v1/bets', '/v1/submissions'].includes(url.pathname))) {
         res.setHeader('Allow', url.pathname === '/v1/bets' ? 'GET, POST' : 'GET');
         throw new RequestError(405, 'method_not_allowed');
       }
 
       let matchday: number | undefined;
       for (const key of url.searchParams.keys()) {
-        if (method !== 'GET' || !['/v1/bets', '/v1/tip-status'].includes(url.pathname) || key !== 'matchday') {
+        if (method !== 'GET' || !['/v1/bets', '/v1/tip-status', '/v1/overview', '/v1/form'].includes(url.pathname) || key !== 'matchday') {
           throw new RequestError(400, 'unexpected_query');
         }
       }
@@ -118,6 +121,25 @@ export function createHaServer(options: HaServerOptions): http.Server {
         const parsed = matchdaySchema.safeParse(Number(values[0]));
         if (!parsed.success) throw new RequestError(400, 'invalid_matchday');
         matchday = parsed.data;
+      }
+      if (url.pathname === '/v1/submissions') {
+        if (method !== 'POST') throw new RequestError(405, 'method_not_allowed');
+        const parsed = dashboardSlip.safeParse(await readJson(req));
+        if (!parsed.success) throw new RequestError(400, 'invalid_slip');
+        if (!parsed.data.dry_run) assertWritable('HA bet submission');
+        try {
+          const result = await submitDashboard(client, parsed.data);
+          send(res, 200, { ...identity, ...result });
+        } finally { dashboardCache.clear(); }
+        return;
+      }
+      if (method === 'GET' && ['/v1/overview', '/v1/form'].includes(url.pathname)) {
+        const key = url.pathname + ':' + (matchday ?? 'current');
+        const data = await dashboardCache.read(key, () => client.read((page, pool) =>
+          url.pathname === '/v1/overview' ? fetchDashboardOverview(page, pool, matchday) : fetchDashboardForm(page, pool, matchday) as Promise<any>),
+          value => url.pathname === '/v1/form' || value.live ? 45_000 : 180_000);
+        send(res, 200, { ...identity, data });
+        return;
       }
       if (method === 'GET') {
         if (url.pathname === '/v1/health') {
@@ -150,7 +172,8 @@ export function createHaServer(options: HaServerOptions): http.Server {
     } catch (error) {
       // Do not return upstream pages, paths, credentials, or raw errors.
       res.shouldKeepAlive = false;
-      if (error instanceof RequestError) send(res, error.status, { error: error.code });
+      if (error instanceof SlipConflict) send(res, 409, { error: error.message });
+      else if (error instanceof RequestError) send(res, error.status, { error: error.code });
       else if (error instanceof ReadOnlyError) send(res, 403, { error: 'read_only' });
       else if (error instanceof ProfilePolicyError) send(res, 403, { error: 'profile_locked' });
       else send(res, 502, { error: submitting ? 'submission_unknown' : 'kicktipp_unavailable' });

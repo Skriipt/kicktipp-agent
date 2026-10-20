@@ -44,7 +44,7 @@ export class AdminRequiredError extends Error {}
 
 // ── Shared helpers ─────────────────────────────────────────────────
 
-async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
+export async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   await page.goto(url);
   assertPageResponse(page, url);
   return cheerio.load(await page.content());
@@ -73,17 +73,19 @@ function assertPageResponse(page: Page, url: string): void {
   }
 }
 
-function spieltagIndexFromPage($: cheerio.CheerioAPI): number | undefined {
+export function spieltagIndexFromPage($: cheerio.CheerioAPI): number | undefined {
   const hidden = $('input[name="spieltagIndex"]').attr('value');
   const selected =
     $('select[name="spieltagIndex"] option:selected').attr('value') ??
     $('select[name="spieltagIndex"]').attr('value');
   const titled = $('#kicktipp-content div.pagetitle')
     .text()
-    .match(/(?:Spieltag|Matchday)\s+(\d{1,2})\b/i)?.[1];
-  for (const raw of [hidden, selected, titled]) {
+    .match(/(?:Spieltag|Matchday)\s+(\d+)\b/i)?.[1] ?? $('#kicktipp-content div.pagetitle, .prevnextTitle').text().match(/(\d+)\.\s*Spieltag/i)?.[1];
+  const active = $('.spieltagsauswahl .level0.active-true:not(.bonusoption) a').attr('href');
+  const linked = active ? new URL(active, 'https://example.invalid').searchParams.get('spieltagIndex') : undefined;
+  for (const raw of [hidden, selected, linked, titled]) {
     const n = Number(raw);
-    if (Number.isInteger(n) && n >= 1 && n <= 34) return n;
+    if (Number.isInteger(n) && n >= 1 && n <= 99) return n;
   }
   return undefined;
 }
