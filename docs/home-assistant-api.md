@@ -244,8 +244,8 @@ The dashboard extension adds three authenticated, fixed-profile routes:
   and awarded points, matchday/bonus/wins/total values. Empty, unpublished,
   hidden and explicitly failed predictions remain different states. A source
   `f` classification means zero awarded points; other missing points are null.
-- `GET /v1/form[?matchday=N]`: actual selected season and matchday, stable form
-  field IDs, existing own predictions, printed deadline converted to UTC from
+- `GET /v1/form[?matchday=N]`: actual selected season and matchday, stable fixture
+  IDs (team pair within the explicit season/matchday, also after inputs close), existing own predictions, printed deadline converted to UTC from
   its source time zone, and real editable-input availability.
 - `POST /v1/submissions`: strict `{season,matchday,edits,dry_run,confirm}` body.
   Each edit is `{id,home,away,previous}`; `previous` is the loaded prediction or

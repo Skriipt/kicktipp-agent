@@ -80,7 +80,9 @@ export function parseForm(html: string, requested?: number) {
     if (cells.length < 4) return null;
     date = inheritPrintedDate($(cells[0]).text(), date);
     const cell = $(cells[3]), h = cell.find('input[id$="_heimTipp"]'), a = cell.find('input[id$="_gastTipp"]');
-    const id = (h.attr('name') || h.attr('id'))?.replace(/[_\.]heimTipp$/, '') || param($(tr).attr('data-url'), 'tippspielId') || `${text($(cells[1]).text())}|${text($(cells[2]).text())}`;
+    // Closed forms remove all input IDs. Team-pair identity within the explicit
+    // season/matchday stays stable through the deadline; duplicate pairs fail closed.
+    const id = JSON.stringify([text($(cells[1]).text()), text($(cells[2]).text())]);
     const editable = !!h.length && !!a.length && !h.is('[disabled],[readonly]') && !a.is('[disabled],[readonly]') && !cell.hasClass('nichttippbar');
     const hv = h.attr('value') ?? '', av = a.attr('value') ?? '';
     const printed = cell.clone(); printed.find('sub').remove();
@@ -110,8 +112,8 @@ export class DashboardCache {
     if (old && old.until > Date.now()) return old.data as T;
     const running = this.pending.get(key); if (running) return running as Promise<T>;
     const generation = this.generation;
-    const job = fetcher().then(data => { if (generation === this.generation) this.entries.set(key, { data, until: Date.now() + ttl(data) }); return data; }).finally(() => this.pending.delete(key));
+    const job = fetcher().then(data => { if (generation === this.generation) this.entries.set(key, { data, until: Date.now() + ttl(data) }); return data; }).finally(() => { if (this.pending.get(key) === job) this.pending.delete(key); });
     this.pending.set(key, job); return job;
   }
-  clear() { this.generation++; this.entries.clear(); }
+  clear() { this.generation++; this.entries.clear(); this.pending.clear(); }
 }
