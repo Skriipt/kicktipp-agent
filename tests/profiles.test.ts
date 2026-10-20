@@ -77,7 +77,7 @@ describe('a config with no profiles behaves exactly as before', () => {
     config.saveUiLanguage('de');
 
     expect(config.sessionFile()).toBe(path.join(configDir, 'session.json'));
-    expect(fs.readFileSync(mountedConfig, 'utf8')).toMatch(/language\\s*=\\s*de/);
+    expect(fs.readFileSync(mountedConfig, 'utf8')).toMatch(/language\s*=\s*de/);
   });
 });
 
@@ -179,7 +179,7 @@ describe('auth profile locks', () => {
     vi.resetModules();
     const { withAuthProfileMutation } = await import('../src/auth-profile-lock.js');
 
-    await withAuthProfileMutation('Marvin', () => {
+    await withAuthProfileMutation('example-account', () => {
       expect(fs.readdirSync(configDir).some((name) => name.startsWith('auth-'))).toBe(true);
     });
   });
@@ -187,13 +187,13 @@ describe('auth profile locks', () => {
 describe('profile login storage', () => {
   it('creates the selected profile when credentials are saved', async () => {
     const config = await loadConfig('');
-    config.setActiveProfile('Marvin');
+    config.setActiveProfile('example-account');
     expect(config.isSessionOnly()).toBe(false);
-    await config.saveAuth({ email: 'marvin@example.com', password: 'secret' });
+    await config.saveAuth({ email: 'profile@example.invalid', password: 'secret' });
 
     const ini = fs.readFileSync(configFile, 'utf8');
-    expect(ini).toMatch(/\[profile\.Marvin\]/);
-    expect(ini).toMatch(/marvin@example\.com/);
+    expect(ini).toMatch(/\[profile\.example-account\]/);
+    expect(ini).toMatch(/profile@example\.invalid/);
     expect(ini).not.toContain('secret');
   });
 });

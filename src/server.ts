@@ -8,6 +8,8 @@ import { applyNotifierSettings, notifierSnapshot } from './notify/backends.js';
 import { Page, getCommunities, getPlayers, launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, listProfiles, setActiveProfile, readDefaultStrategy, readUiLanguage, readUiSite } from './config.js';
 import { VERSION } from './version.js';
+import { lockedProfile, ProfilePolicyError } from './profile-policy.js';
+import { SerialQueue } from './serial-queue.js';
 import { resolveLanguage, setLanguage } from './i18n/index.js';
 import { resolveBaseUrl, setUrlBase } from './url.js';
 import { ensureSetupListener } from './setup/listener.js';
@@ -57,6 +59,7 @@ setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 let pageInstance: Page | null = null;
 
 async function setupPrompt(kind: 'missing' | 'expired'): Promise<{ url: string; text: string }> {
+  if (lockedProfile()) throw new ProfilePolicyError('Provision or reconnect the locked profile outside this process.');
   const url = await ensureSetupListener({
     keepAlive: false,
     onSaved: () => {
@@ -129,13 +132,31 @@ const OUTPUT_SCHEMA = z.object({ data: z.unknown() });
 
 
 const readOnly = isReadOnly();
+const profileLock = lockedProfile();
 
 const server = new McpServer(
   { name: 'kicktipp', version: VERSION },
-  { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on Kicktipp. Do not offer to place bets. ' : '') + 'Kicktipp football prediction game (kicktipp.com and kicktipp.de). If the user asks to set up, connect, or log in to Kicktipp, call connect_account and ask them to open the setup_url in their browser. Do not ask for a password in chat. Otherwise call get_status first. If only the community is missing, call get_communities then set_community.' },
+  { instructions: (profileLock ? 'PROFILE LOCKED: this connection can only use its pre-provisioned account. Account setup, profile switching, and admin tools are unavailable. ' : '') + (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on Kicktipp. Do not offer to place bets. ' : '') + 'Kicktipp football prediction game (kicktipp.com and kicktipp.de). Do not ask for a password in chat. Call get_status first. ' + (profileLock ? 'Ask the operator to provision or reconnect the locked profile outside this process if authentication is unavailable.' : 'If the user asks to set up, connect, or log in, call connect_account and ask them to open the setup_url in their browser. If only the community is missing, call get_communities then set_community.') },
 );
 
-server.registerTool(
+
+// All tool bodies share pageInstance and interactive selection. Hold the queue
+// through the entire operation so navigation and profile changes cannot overlap.
+const toolQueue = new SerialQueue();
+const lockedTools = new Set(['set_profile', 'connect_account', 'list_members', 'get_bets_for_member', 'place_bets_for_member']);
+
+function registerTool<Shape extends z.ZodRawShape>(
+  name: string,
+  config: { description: string; inputSchema: z.ZodObject<Shape>; outputSchema: typeof OUTPUT_SCHEMA },
+  handler: (input: z.output<z.ZodObject<Shape>>) => Promise<ReturnType<typeof jsonResult> | { content: { type: 'text'; text: string }[]; isError: boolean }>,
+): void {
+  if (profileLock && lockedTools.has(name)) return;
+  server.registerTool(name, config, (input) =>
+    toolQueue.run(() => handler(input)),
+  );
+}
+
+registerTool(
   'list_profiles',
   {
     description: 'List configured Kicktipp profiles by name and show the active profile. Credentials are never returned.',
@@ -145,7 +166,7 @@ server.registerTool(
   async () => jsonResult({ active: getActiveProfile(), profiles: listProfiles() }),
 );
 
-server.registerTool(
+registerTool(
   'set_profile',
   {
     description: 'Select one configured Kicktipp profile for this MCP server session.',
@@ -163,7 +184,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_status',
   {
     description: 'Check current configuration. Call this first for a status snapshot. If the user wants to connect or set up Kicktipp, call connect_account instead. If setup_url is set, ask the user to open that localhost page. Most tools require a community.',
@@ -176,7 +197,9 @@ server.registerTool(
     const player = loadPlayer();
     let setup_url: string | null = null;
     let setup_instructions: string | null = null;
-    if (!usable) {
+    if (!usable && profileLock) {
+      setup_instructions = 'Provision or reconnect the locked profile outside this process.';
+    } else if (!usable) {
       const prompt = await setupPrompt('missing');
       setup_url = prompt.url;
       setup_instructions = prompt.text;
@@ -198,7 +221,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_service_status',
   {
     description: 'Read summary-only Service Status from local configuration, State, and lock metadata without network requests.',
@@ -208,7 +231,7 @@ server.registerTool(
   async () => jsonResult(getServiceStatus()),
 );
 
-server.registerTool(
+registerTool(
   'get_service_health',
   {
     description: 'Read current Service Health from local persisted observations without contacting Kicktipp or Notification providers.',
@@ -218,7 +241,7 @@ server.registerTool(
   async () => jsonResult(getServiceStatus().health),
 );
 
-server.registerTool(
+registerTool(
   'list_notification_targets',
   {
     description: 'List summary-only local Notification Targets without Secret References, values, names, paths, or network requests.',
@@ -233,7 +256,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'connect_account',
   {
     description:
@@ -270,7 +293,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_today_matches',
   {
     description: "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
@@ -285,7 +308,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_bets',
   {
     description: 'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
@@ -300,7 +323,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_schedule',
   {
     description: 'Get the match schedule with results for a matchday.',
@@ -315,7 +338,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_leaderboard',
   {
     description: 'Get player rankings for a matchday. Includes matches/results and ranking table with points.',
@@ -335,7 +358,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_tip_status',
   {
     description:
@@ -359,7 +382,7 @@ server.registerTool(
     }),
 );
 
-server.registerTool(
+registerTool(
   'get_overview',
   {
     description: 'Get the season overview showing all players and their points across matchdays.',
@@ -374,7 +397,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_table',
   {
     description: 'Get the league table (standings of the actual football teams, not the prediction game).',
@@ -389,7 +412,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_rules',
   {
     description: 'Get the game rules and scoring system.',
@@ -404,7 +427,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_communities',
   {
     description: 'List all kicktipp communities the user belongs to.',
@@ -418,7 +441,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_players',
   {
     description: 'List all players in the saved community.',
@@ -434,7 +457,7 @@ server.registerTool(
 );
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'set_community',
   {
     description: 'Set the active community. Use get_communities first to see available options, then pass the exact name.',
@@ -454,7 +477,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'set_player',
   {
     description: 'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
@@ -475,7 +498,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
     'set_notify',
     {
       description:
@@ -513,7 +536,7 @@ if (!readOnly) {
   );
 }
 
-server.registerTool(
+registerTool(
   'get_bonus_questions',
   {
     description: 'Get available bonus questions with their options and current selections.',
@@ -528,7 +551,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'whatif',
   {
     description: "Replay the cached season as if the player had followed a different strategy, and compare with what they actually scored. Strategies: a fixed scoreline such as '2:1', one of " + REPLAY_STRATEGIES.join(', ') + ", or suggest:safe|ev|contrarian. Needs a synced cache. Treat final_rank as an estimate — other players are compared on recorded totals that include bonus points the replay does not model.",
@@ -562,7 +585,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_standings_scenarios',
   {
     description: "Project the whole leaderboard under hypothetical results, or search for what has to happen for a player to reach a target rank. This answers questions like 'what do I need this weekend to take first?' in one call. Matches left unspecified come back as a rank range rather than a number, and the projection is exact only when every open match is given. Check the note field: before the deadline Kicktipp hides everyone's bets and nothing can be projected.",
@@ -601,7 +624,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_bet_log',
   {
     description: 'Show what this agent has actually submitted to Kicktipp, with timestamps and which entry point did it. Use this to answer "what have you placed?" from the record rather than from memory. Records marked dry-run or intent never reached Kicktipp.',
@@ -621,7 +644,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_deadline',
   {
     description: "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Kickoff instants are parsed from Kicktipp's HTML (Central Time on .com, Berlin on .de) and shown in the time_zone field, which is this machine unless KICKTIPP_TZ is set.",
@@ -642,7 +665,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'list_members',
   {
     description:
@@ -657,7 +680,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_bets_for_member',
   {
     description:
@@ -676,7 +699,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_stats',
   {
     description: 'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
@@ -712,7 +735,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'sync_history',
   {
     description: 'Update the local season cache so get_stats has data to work with. Stops at the current matchday, skips finished and still-upcoming ones, and paces requests politely. The first run backfills holes; later runs usually cost one matchday. Pass to=34 to walk the rest of the season.',
@@ -730,7 +753,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_rival_analysis',
   {
     description: "Compare the user with another player for one matchday: the points gap, how much each remaining match can still swing it, and what has to happen to overtake them. Check the 'mode' field before answering - 'exact' means both bet sets are known, 'bounds' means the rival's bets are still hidden and the figures are best/worst limits, not predictions. Also report rules.source, since the point values may be assumed defaults rather than this community's real ones.",
@@ -763,7 +786,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'suggest_bets',
   {
     description: "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
@@ -807,7 +830,7 @@ server.registerTool(
 );
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
     'place_bets_for_member',
     {
       description:
@@ -851,7 +874,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'place_bets',
   {
     description: 'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
@@ -872,7 +895,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'place_bonus_bets',
   {
     description: 'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer". Ranking questions have several dropdowns (selects.length > 1): pass one array entry per slot in the SAME call, in order, repeating the question text. Example: ["Who will be relegated?=FC St. Pauli", "Who will be relegated?=1. FC Heidenheim", "Who will be relegated?=Holstein Kiel"]. A shorter list fills remaining empty slots instead of overwriting the first dropdown. A successful dry run still returns success=true with dry_run=true; nothing is submitted.',

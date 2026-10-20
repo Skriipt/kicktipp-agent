@@ -2,6 +2,7 @@ node_modules/
 dist/
 .session.json
 .env
+.env.*
 .claude/
 *.mcpb
 /config/

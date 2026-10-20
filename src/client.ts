@@ -1,5 +1,7 @@
 import { launchBrowser, type FetchLike, type Page } from './browser.js';
 import { AuthError } from './core.js';
+import { assertProfileAllowed } from './profile-policy.js';
+import { SerialQueue } from './serial-queue.js';
 import {
   fetchReminderCapability,
   type ReminderCapability,
@@ -17,13 +19,27 @@ export class ScopedKicktippClient {
   readonly profileId: string;
   readonly communityId: string;
   private readonly fetchImpl?: FetchLike;
+  private readonly writes = new SerialQueue();
 
   constructor(options: ScopedClientOptions) {
     if (!options.profileId.trim()) throw new Error('Auth Profile ID is required.');
     if (!options.communityId.trim()) throw new Error('Community Reference is required.');
+    assertProfileAllowed(options.profileId);
     this.profileId = options.profileId;
     this.communityId = options.communityId;
     this.fetchImpl = options.fetchImpl;
+  }
+
+  /** Each write gets its own page, is serialized, and is never retried. */
+  write<T>(operation: (page: Page, communityId: string) => Promise<T>): Promise<T> {
+    return this.writes.run(async () => {
+      const page = await launchBrowser({ profileId: this.profileId, fetchImpl: this.fetchImpl });
+      try {
+        return await operation(page, this.communityId);
+      } finally {
+        await page.close();
+      }
+    });
   }
 
   /** Run one read in an independent session, refreshing auth once if needed. */

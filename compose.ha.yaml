@@ -1,0 +1,63 @@
+name: kicktipp-ha
+
+services:
+  ha-api:
+    build: .
+    image: kicktipp-agent:ha-api
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 35s
+    # AES-GCM credential keys include hostname and OS username. Supply the
+    # identity that originally saved this profile; there is no safe default.
+    hostname: ${KICKTIPP_AUTH_HOSTNAME:?set the credential source hostname}
+    user: node
+    command: ["node", "dist/ha-server.js"]
+    environment:
+      KICKTIPP_PROFILE: ${KICKTIPP_PROFILE:?set the pre-provisioned HA profile}
+      KICKTIPP_PROFILE_LOCK: ${KICKTIPP_PROFILE:?set the pre-provisioned HA profile}
+      KICKTIPP_HA_HOST: 0.0.0.0
+      KICKTIPP_HA_PORT: "8787"
+      KICKTIPP_HA_TOKEN_FILE: /run/secrets/ha-api-token
+      KICKTIPP_READ_ONLY: ${KICKTIPP_READ_ONLY:-1}
+    ports:
+      - "${KICKTIPP_HA_BIND_ADDRESS:-127.0.0.1}:${KICKTIPP_HA_PORT:-8787}:8787"
+    volumes:
+      # Only per-profile session refresh/lock files are written by the API.
+      - auth-config:/config
+      # Keep HA audit records separate from existing MCP/reminder data.
+      - ha-data:/data
+    secrets:
+      - ha-api-token
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - >-
+          import fs from 'node:fs';
+          const token = fs.readFileSync(process.env.KICKTIPP_HA_TOKEN_FILE, 'utf8').trim();
+          const response = await fetch('http://127.0.0.1:8787/v1/health', {
+            headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(3000)
+          });
+          if (!response.ok) process.exit(1);
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  auth-config:
+    external: true
+    name: ${KICKTIPP_AUTH_CONFIG_VOLUME:?set the existing or dedicated config volume}
+  ha-data:
+
+secrets:
+  ha-api-token:
+    file: ./secrets/ha-api-token

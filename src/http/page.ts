@@ -155,6 +155,10 @@ export class Page {
     return this.closed;
   }
 
+  responseStatus(): number {
+    return this.lastStatus;
+  }
+
   /** True when the last response was Kicktipp's "page not found". */
   isNotFound(): boolean {
     return this.lastStatus === 404 || NOT_FOUND_PATTERN.test(this.html);

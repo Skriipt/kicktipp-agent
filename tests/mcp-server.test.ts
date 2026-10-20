@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import http from 'node:http';
 
 /**
  * Drives the built server over stdio, the same way a client would. This is
@@ -198,15 +199,15 @@ describe('the MCP server as a client sees it', () => {
     const configDir = path.join(root, 'config');
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(path.join(configDir, 'config.ini'), [
-      '[profile.Marvin]',
-      'email = marvin@example.com',
-      'password = secret-marvin',
-      'community = marvin-pool',
+      '[profile.ha-account]',
+      'email = ha@example.invalid',
+      'password = secret-ha',
+      'community = ha-pool',
       '',
-      '[profile.OrakelGPT]',
-      'email = orakel@example.com',
-      'password = secret-orakel',
-      'community = orakel-pool',
+      '[profile.chat-account]',
+      'email = chat@example.invalid',
+      'password = secret-chat',
+      'community = chat-pool',
       '',
     ].join('\n'));
 
@@ -215,7 +216,7 @@ describe('the MCP server as a client sees it', () => {
         INIT,
         { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
         { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_profiles', arguments: {} } },
-        { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'set_profile', arguments: { name: 'OrakelGPT' } } },
+        { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'set_profile', arguments: { name: 'chat-account' } } },
         { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'get_status', arguments: {} } },
       ], { HOME: root, USERPROFILE: root, KICKTIPP_CONFIG_DIR: configDir });
       const tools = messages.find((m) => m.id === 2)?.result?.tools ?? [];
@@ -224,17 +225,101 @@ describe('the MCP server as a client sees it', () => {
       expect(names).toContain('set_profile');
       expect(messages.find((m) => m.id === 3)?.result?.structuredContent?.data).toMatchObject({
         active: null,
-        profiles: ['Marvin', 'OrakelGPT'],
+        profiles: ['chat-account', 'ha-account'],
       });
       expect(messages.find((m) => m.id === 4)?.result?.structuredContent?.data).toMatchObject({
-        active: 'OrakelGPT',
+        active: 'chat-account',
       });
       expect(messages.find((m) => m.id === 5)?.result?.structuredContent?.data).toMatchObject({
-        profile: 'OrakelGPT',
+        profile: 'chat-account',
         credentials_saved: true,
-        community: 'orakel-pool',
+        community: 'chat-pool',
       });
     } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('hides account switching/setup/admin tools and refuses direct calls in locked mode', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-lock-'));
+    fs.writeFileSync(path.join(root, 'config.ini'), `[profile.ha-account]
+email=ha@example.invalid
+password=fake-ha
+community=ha-pool
+[profile.chat-account]
+email=chat@example.invalid
+password=fake-chat
+community=chat-pool
+`);
+    try {
+      const messages = await callServer([
+        INIT,
+        { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_profiles', arguments: {} } },
+        { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'set_profile', arguments: { name: 'ha-account' } } },
+        { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'get_status', arguments: {} } },
+      ], { HOME: root, KICKTIPP_CONFIG_DIR: root, KICKTIPP_PROFILE: 'ha-account', KICKTIPP_PROFILE_LOCK: 'chat-account' });
+      const names = messages.find((m) => m.id === 2)?.result?.tools.map((tool: { name: string }) => tool.name);
+      for (const name of ['set_profile', 'connect_account', 'list_members', 'get_bets_for_member', 'place_bets_for_member']) {
+        expect(names).not.toContain(name);
+      }
+      expect(messages.find((m) => m.id === 3)?.result?.structuredContent?.data).toEqual({ active: 'chat-account', profiles: ['chat-account'] });
+      const rejected = messages.find((m) => m.id === 4);
+      expect(!!rejected?.error || rejected?.result?.isError).toBeTruthy();
+      expect(messages.find((m) => m.id === 5)?.result?.structuredContent?.data).toMatchObject({ profile: 'chat-account', community: 'chat-pool' });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes a profile switch between concurrent reads without crossing accounts', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-concurrent-'));
+    fs.writeFileSync(path.join(root, 'config.ini'), `[profile.ha-account]
+email=ha@example.invalid
+password=fake-ha
+community=ha-pool
+[profile.chat-account]
+email=chat@example.invalid
+password=fake-chat
+community=chat-pool
+`);
+    const seen: Array<{ url: string; account: string }> = [];
+    const upstream = http.createServer(async (req, res) => {
+      const account = req.headers.cookie?.includes('sid=chat-account') ? 'chat-account' : 'ha-account';
+      if (req.url?.endsWith('/login') && req.method === 'GET') {
+        res.end('<form method="post"><input name="kennung"><input name="passwort"><button>Login</button></form>');
+      } else if (req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += String(chunk);
+        const email = new URLSearchParams(body).get('kennung');
+        res.writeHead(302, { Location: '/', 'Set-Cookie': `sid=${email?.startsWith('chat@') ? 'chat-account' : 'ha-account'}; Path=/` });
+        res.end();
+      } else if (req.url?.includes('/tippabgabe')) {
+        seen.push({ url: req.url, account });
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        res.end(`<div id="kicktipp-content"><div class="pagetitle">${account}</div><table id="tippabgabeSpiele"><tbody></tbody></table></div>`);
+      } else {
+        res.end('<div id="kicktipp-content"></div>');
+      }
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const address = upstream.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+    try {
+      const messages = await callServer([
+        INIT,
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_bets', arguments: { matchday: 1 } } },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'set_profile', arguments: { name: 'chat-account' } } },
+        { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'get_bets', arguments: { matchday: 2 } } },
+      ], { HOME: root, KICKTIPP_CONFIG_DIR: root, KICKTIPP_PROFILE: 'ha-account', KICKTIPP_PROFILE_LOCK: '', KICKTIPP_BASE_URL: `http://127.0.0.1:${address.port}` });
+      expect(messages.find((m) => m.id === 2)?.result?.structuredContent?.data).toMatchObject({ title: 'ha-account' });
+      expect(messages.find((m) => m.id === 4)?.result?.structuredContent?.data).toMatchObject({ title: 'chat-account' });
+      expect(seen).toEqual([
+        { url: '/ha-pool/tippabgabe?spieltagIndex=1', account: 'ha-account' },
+        { url: '/chat-pool/tippabgabe?spieltagIndex=2', account: 'chat-account' },
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => { upstream.close(() => resolve()); upstream.closeAllConnections(); });
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

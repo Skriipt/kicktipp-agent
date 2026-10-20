@@ -8,6 +8,7 @@ import { saveAuth, saveCommunity, saveReadOnly, saveUiLanguage, saveUiSite, type
 import { communityPage, donePage, forbiddenPage, loginPage } from './html.js';
 import { parseLanguage, setLanguage, t } from '../i18n/index.js';
 import { parseSite, setUrlBase, siteLabel } from '../url.js';
+import { assertProfileUnlocked } from '../profile-policy.js';
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -102,6 +103,7 @@ function tokenFrom(req: IncomingMessage, body: URLSearchParams | null): string |
  * form so they never enter the chat or an MCP client's JSON config.
  */
 export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupHandle> {
+  assertProfileUnlocked();
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let phase: Phase = { kind: 'login' };
   let closed = false;

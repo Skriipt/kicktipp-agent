@@ -21,6 +21,7 @@ import {
 import { escapeCssValue } from './helpers/escape-css-value.js';
 import { throughCache, type CacheOptions } from './cache/cached-fetch.js';
 import { assertWritable } from './read-only.js';
+import { assertProfileUnlocked } from './profile-policy.js';
 import {
   displayTimeZone,
   formatKickoffTime,
@@ -45,7 +46,11 @@ export class AdminRequiredError extends Error {}
 
 async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   await page.goto(url);
+  assertPageResponse(page, url);
+  return cheerio.load(await page.content());
+}
 
+function assertPageResponse(page: Page, url: string): void {
   // Kicktipp answers an invalid session with a redirect to its login page,
   // and a wrong community with a "not found" page. Keep them apart: only
   // the first one is worth throwing away the session over.
@@ -63,7 +68,9 @@ async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
     throw new NotFoundError(`Kicktipp page not found: ${url}. Check the community name.`);
   }
 
-  return cheerio.load(await page.content());
+  if (page.responseStatus() >= 400) {
+    throw new Error(`Kicktipp request failed with HTTP ${page.responseStatus()}.`);
+  }
 }
 
 function spieltagIndexFromPage($: cheerio.CheerioAPI): number | undefined {
@@ -674,7 +681,10 @@ export async function placeBets(
     return placed;
   }
 
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await submitAudited(record, async () => {
+    await page.click('button[name="submitbutton"]');
+    assertPageResponse(page, page.url());
+  });
 
   return placed;
 }
@@ -1008,6 +1018,7 @@ export interface Member {
 
 /** Read the community's member list, with the ids the admin pages need. */
 export async function fetchMembers(page: Page, community: string): Promise<Member[]> {
+  assertProfileUnlocked();
   const $ = await loadPage(page, getAdminMembersUrl(community));
   const members: Member[] = [];
 
@@ -1112,6 +1123,7 @@ export async function fetchBetsForMember(
   member: Member,
   matchday?: number,
 ): Promise<{ member: Member; matches: BetMatch[] }> {
+  assertProfileUnlocked();
   const $ = await loadPage(
     page,
     getAdminTipsUrl(community, member.tipperId, member.tippsaisonId, matchday),
@@ -1136,6 +1148,7 @@ export async function placeBetsForMember(
   source: BetSource = 'unknown',
 ): Promise<PlacedBet[]> {
   if (submit) assertWritable('Placing bets for another member');
+  assertProfileUnlocked();
 
   const $ = await loadPage(
     page,

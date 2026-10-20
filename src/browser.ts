@@ -18,6 +18,7 @@ import { CookieJar } from './http/cookie-jar.js';
 import { Page } from './http/page.js';
 import type { FetchLike } from './http/page.js';
 import { withAuthProfileMutation } from './auth-profile-lock.js';
+import { assertProfileAllowed, assertProfileUnlocked, lockedProfile, ProfilePolicyError } from './profile-policy.js';
 
 export { Page } from './http/page.js';
 export type { FetchLike } from './http/page.js';
@@ -37,7 +38,11 @@ export interface LaunchOptions {
  */
 export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
   const profileId = opts.profileId === undefined ? getActiveProfile() : opts.profileId;
+  assertProfileAllowed(profileId);
   const file = opts.sessionFile === undefined ? sessionFile(profileId) : opts.sessionFile;
+  if (lockedProfile() && file !== null && file !== sessionFile(profileId)) {
+    throw new ProfilePolicyError('A locked profile cannot use another session file.');
+  }
 
   const restoreSession = async (): Promise<Page | null> => {
     if (!file || !fs.existsSync(file)) return null;
@@ -94,6 +99,8 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
 
 /** Persist a newly authenticated interactive session through its profile lock. */
 export async function saveProfileSession(page: Page, profileId = getActiveProfile()): Promise<void> {
+  assertProfileAllowed(profileId);
+  assertProfileUnlocked();
   await withAuthProfileMutation(profileId, () => page.saveSession(sessionFile(profileId)));
 }
 

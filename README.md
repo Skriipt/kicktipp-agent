@@ -178,6 +178,22 @@ Common environment overrides include `KICKTIPP_EMAIL`, `KICKTIPP_PASSWORD`,
 `KICKTIPP_TZ`, and `KICKTIPP_READ_ONLY`. Run `kicktipp guide` for detailed
 usage and configuration help.
 
+### Home Assistant HTTP API
+
+An optional authenticated HTTP backend provides tip reads and manual match
+submissions using a required, pre-provisioned `KICKTIPP_PROFILE`. It locks that
+profile for the process; there is no default account or profile-selection API.
+See [deployment and API instructions](docs/home-assistant-api.md) for the
+separate Compose project, bearer token, credential identity, and safe previews.
+It does not require a dashboard or replace an existing MCP/Reminder deployment.
+
+Other CLI/MCP processes may opt into the same policy with
+`KICKTIPP_PROFILE_LOCK=<profile-name>`. In that mode account setup, logout,
+credential replacement, admin member actions, and selection of another profile
+are refused. Account credentials, community, and player are read only from that
+named profile, ignoring interactive environment/default-account fallbacks.
+Without this variable, existing multi-profile selection remains available.
+
 ### Docker Service
 
 The Compose example builds locally and runs the regular `kicktipp serve`

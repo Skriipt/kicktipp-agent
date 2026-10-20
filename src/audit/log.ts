@@ -11,6 +11,7 @@ export type BetSource =
   | 'mcp:place_bets'
   | 'mcp:place_bonus_bets'
   | 'mcp:place_bets_for_member'
+  | 'ha:place_bets'
   | 'unknown';
 
 export interface AuditBet {

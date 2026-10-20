@@ -7,6 +7,7 @@ import readline from 'readline';
 import { t } from './i18n/index.js';
 import type { ScoringRules } from './rules/scoring.js';
 import { withAuthProfileMutation } from './auth-profile-lock.js';
+import { assertProfileAllowed, assertProfileUnlocked, lockedProfile } from './profile-policy.js';
 
 const CONFIG_DIR = process.env.KICKTIPP_CONFIG_DIR ?? path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
@@ -22,11 +23,12 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
 let activeProfile: string | null = null;
 
 export function setActiveProfile(name: string | null): void {
+  assertProfileAllowed(name);
   activeProfile = name;
 }
 
 export function getActiveProfile(): string | null {
-  return activeProfile ?? process.env.KICKTIPP_PROFILE ?? null;
+  return lockedProfile() ?? activeProfile ?? process.env.KICKTIPP_PROFILE ?? null;
 }
 
 /** Community override for a single invocation (the --community flag). */
@@ -71,6 +73,7 @@ function profileSection(
 
 /** Session cookies are per profile so two accounts never share a jar. */
 export function sessionFile(name: string | null = getActiveProfile()): string {
+  assertProfileAllowed(name);
   return name
     ? path.join(CONFIG_DIR, `session-${name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
     : path.join(CONFIG_DIR, 'session.json');
@@ -84,7 +87,8 @@ export function listProfiles(): string[] {
     const match = key.match(/^profile\.(.+)$/);
     if (match) names.add(match[1]);
   }
-  return Array.from(names).sort();
+  const locked = lockedProfile();
+  return Array.from(names).filter((name) => !locked || name === locked).sort();
 }
 
 // ── Password encryption ────────────────────────────────────────────
@@ -165,6 +169,8 @@ function authBlock(config: Record<string, any>): Record<string, any> | undefined
 }
 
 export function isSessionOnly(): boolean {
+  const locked = lockedProfile();
+  if (locked) return isProfileSessionOnly(locked);
   if (process.env.KICKTIPP_PASSWORD) return false;
   const config = readConfig();
   const profileName = getActiveProfile();
@@ -184,6 +190,7 @@ export function hasUsableAuth(): boolean {
 }
 
 export async function saveAuth(opts: { email: string; password?: string; store?: AuthStore }): Promise<void> {
+  assertProfileUnlocked();
   const store = opts.store ?? 'password';
   const profile = getActiveProfile();
   const patch: Record<string, string> = { email: opts.email, store };
@@ -215,6 +222,8 @@ export function saveReadOnly(readOnly: boolean): void {
 }
 
 export async function loadCredentials(): Promise<{ email: string; password: string }> {
+  const locked = lockedProfile();
+  if (locked) return loadProfileCredentials(locked);
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) {
     return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
   }
@@ -289,6 +298,7 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
 export async function loadProfileCredentials(
   profileId: string,
 ): Promise<{ email: string; password: string }> {
+  assertProfileAllowed(profileId);
   let block: Record<string, any> | null;
   try {
     block = profileSection(readConfig(), profileId);
@@ -303,11 +313,13 @@ export async function loadProfileCredentials(
 }
 
 export function isProfileSessionOnly(profileId: string): boolean {
+  assertProfileAllowed(profileId);
   const block = profileSection(readConfig(), profileId);
   return block?.store === 'session' && !block?.password;
 }
 
 export function loadCommunity(): string | null {
+  if (lockedProfile()) return profileSection(readConfig())?.community || null;
   if (communityOverride) return communityOverride;
   if (process.env.KICKTIPP_COMMUNITY) return process.env.KICKTIPP_COMMUNITY;
   const config = readConfig();
@@ -323,6 +335,7 @@ export function saveCommunity(name: string): void {
 }
 
 export function loadPlayer(): string | null {
+  if (lockedProfile()) return profileSection(readConfig())?.player || null;
   if (process.env.KICKTIPP_PLAYER) return process.env.KICKTIPP_PLAYER;
   const config = readConfig();
   return profileSection(config)?.player || config.player?.name || null;
@@ -408,6 +421,10 @@ export function saveUiSite(site: string): void {
 }
 
 export function hasCredentials(): boolean {
+  if (lockedProfile()) {
+    const profile = profileSection(readConfig());
+    return !!(profile?.email && profile?.password);
+  }
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
   const config = readConfig();
   const profile = profileSection(config);
@@ -416,6 +433,7 @@ export function hasCredentials(): boolean {
 }
 
 export async function logout(): Promise<void> {
+  assertProfileUnlocked();
   const profile = getActiveProfile();
   const removed = await withAuthProfileMutation(profile, () => {
     const files: string[] = [];
