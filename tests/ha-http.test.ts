@@ -89,6 +89,30 @@ function post(body: unknown, route = '/v1/bets'): Promise<Response> {
 }
 
 describe('HA HTTP boundary', () => {
+  it('serves cached dashboard forms and verifies dashboard submissions through the fixed account', async () => {
+    upstream = async (input, init) => {
+      calls.push({url:String(input),method:init.method ?? 'GET',cookie:new Headers(init.headers).get('cookie') ?? '',body:String(init.body ?? '')});
+      return new Response(form('ha-account').replace('21.10.26', '21.10.99').replace('<form ', '<input name="spieltagIndex" value="7"><input name="tippsaisonId" value="12"><form '));
+    };
+    await start();
+    const reads = await Promise.all([request('/v1/form'), request('/v1/form')]);
+    expect(reads.every(r=>r.status===200)).toBe(true);
+    expect(calls.filter(c=>c.url.includes('/predict'))).toHaveLength(1);
+    const count = calls.length;
+    await request('/v1/form');
+    expect(calls).toHaveLength(count);
+    const data = (await reads[0].json()).data;
+    expect(data.matchday).toBe(7);
+    const slip={season:'12',matchday:7,edits:[{id:data.matches[0].id,home:0,away:1,previous:null}],dry_run:true,confirm:false};
+    expect(await (await post(slip,'/v1/submissions')).json()).toMatchObject({profile:'ha-account',outcome:'preview'});
+    expect(calls.every(c=>c.method==='GET')).toBe(true);
+    const written=await post({...slip,dry_run:false,confirm:true},'/v1/submissions');
+    expect(await written.json()).toMatchObject({outcome:'not_verified',verification:[{verified:false}]});
+    expect(calls.filter(c=>c.method==='POST')).toHaveLength(1);
+    expect(calls.every(c=>c.cookie==='sid=ha-account')).toBe(true);
+    expect((await post({...slip,profile:'other'},'/v1/submissions')).status).toBe(400);
+  });
+
   it('requires an explicit configured profile, a matching lock, and a strong bearer token', async () => {
     const { createHaServer, requiredHaProfile } = await import('../src/ha/http.js');
     vi.stubEnv('KICKTIPP_PROFILE', '');
@@ -102,7 +126,7 @@ describe('HA HTTP boundary', () => {
 
   it('authenticates every route before any upstream access, including health and unknown routes', async () => {
     await start();
-    for (const route of ['/v1/health', '/v1/status', '/v1/bets', '/v1/tip-status', '/unknown']) {
+    for (const route of ['/v1/health', '/v1/status', '/v1/bets', '/v1/tip-status', '/v1/overview', '/v1/form', '/v1/submissions', '/unknown']) {
       const response = await fetch(`${base}${route}`);
       expect(response.status).toBe(401);
       expect(response.headers.get('www-authenticate')).toBe('Bearer');
