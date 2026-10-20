@@ -12,3 +12,29 @@ describe('complete dashboard source contract',()=>{
  it('fails closed on missing context, mismatched day or missing columns instead of mixing matches',()=>{expect(()=>parseForm(form,8)).toThrow();expect(()=>parseOverview(overview().replace(nav(),'' ).replace('6. Spieltag',''))).toThrow();expect(()=>parseOverview(overview().replace('<td>1,67</td>',''))).toThrow();expect(parseOverview(overview().replaceAll('6','42')).matchday).toBe(42);});
  it('coalesces browsers, caches, invalidates and never stores failed reads',async()=>{const cache=new DashboardCache();let resolve:any;const fetcher=vi.fn(()=>new Promise(r=>resolve=r));const a=cache.read('a',fetcher,()=>10000),b=cache.read('a',fetcher,()=>10000);resolve(1);expect(await a).toBe(1);expect(await b).toBe(1);expect(fetcher).toHaveBeenCalledTimes(1);expect(await cache.read('a',fetcher,()=>10000)).toBe(1);cache.clear();await expect(cache.read('a',async()=>{throw Error('failure')},()=>10000)).rejects.toThrow();expect(await cache.read('a',async()=>2,()=>10000)).toBe(2);});
 });
+
+describe('review metadata from the selected source page',()=>{
+ it('reads only offered days in the same season, excluding bonus and sort links',()=>{
+  const links=`<div class="spieltagsauswahl">${[[1,'12',''],[6,'12',''],[42,'12',''],[7,'99',''],[8,'12','&bonus=true'],[9,'12','&sortBy=gesamtpunkte']].map(([day,season,extra])=>`<div class="level0"><a href="/pool/tippuebersicht?tippsaisonId=${season}&spieltagIndex=${day}${extra}">${day}. Spieltag</a></div>`).join('')}</div>`;
+  const data=parseOverview(overview().replace(nav(),nav()+links));
+  expect(data.availableMatchdays.map(d=>d.matchday)).toEqual([6,1,42]);expect(data.season).toBe('12');
+  expect(parseForm(form).availableMatchdays).toEqual([{matchday:7,label:'7. Spieltag'}]);
+ });
+ it('uses official selected-day winner flags, including shared and own winners, never total rank or wins',()=>{
+  const single=overview().replace('data-teilnehmer-id="c"','class="sptsieger" data-teilnehmer-id="c"');
+  expect(parseOverview(single,'Three').rows.map(r=>r.matchdayAward)).toEqual([null,null,'winner']);
+  const shared=parseOverview(single.replace('data-teilnehmer-id="b"','class="sptsieger" data-teilnehmer-id="b"'),'Three');
+  expect(shared.rows.filter(r=>r.matchdayAward==='winner').map(r=>r.id)).toEqual(['b','c']);expect(shared.rows[2].isCurrentPlayer).toBe(true);
+  expect(parseOverview(overview()).rows.every(r=>r.matchdayAward===null)).toBe(true);
+ });
+ it('marks source leaders provisionally while live and no winners before any evaluation',()=>{
+  const flagged=overview().replace('data-teilnehmer-id="a"','class="sptsieger" data-teilnehmer-id="a"');
+  const live=flagged.replace('kicktipp-abpfiff','in-progress').replace('data-live="false"','data-live="true"');
+  expect(parseOverview(live).rows[0].matchdayAward).toBe('leading');
+  expect(parseOverview(flagged.replace('kicktipp-abpfiff','not-started')).rows.every(r=>r.matchdayAward===null)).toBe(true);
+ });
+ it('preserves actual up/down/unchanged source deltas independently of points',()=>{
+  const html=overview().replace('position-icon-up">2','position-icon-down">14').replace('position-icon-up">2','position-icon-gleich">');
+  expect(parseOverview(html).rows.map(r=>r.cells[1])).toEqual([{text:'14',direction:'down'},{text:'0',direction:'same'},{text:'2',direction:'up'}]);
+ });
+});

@@ -12,7 +12,19 @@ function context($: cheerio.CheerioAPI, requested?: number) {
   if (!matchday || (requested !== undefined && requested !== matchday)) throw new Error('Unresolved or mismatched matchday');
   const season = $('input[name="tippsaisonId"]').attr('value') || param($('.spieltagsauswahl a[href*="tippsaisonId"]').first().attr('href'), 'tippsaisonId');
   if (!season) throw new Error('Missing season');
-  return { matchday, season, title: text($('#kicktipp-content .pagetitle').text()) };
+  const available = new Map<number, { matchday: number; label: string }>();
+  $('.spieltagsauswahl .level0:not(.bonusoption) a[href], #seitenmenu .dropdownitems a[href]').each((_, link) => {
+    const href = $(link).attr('href');
+    const day = Number(param(href, 'spieltagIndex'));
+    const label = text($(link).text());
+    if (param(href, 'tippsaisonId') === season && !param(href, 'bonus') && !param(href, 'sortBy') && !param(href, 'ereignisIndex')
+        && Number.isInteger(day) && day >= 1 && day <= 99 && /Spieltag|Matchday/i.test(label)) available.set(day, { matchday: day, label });
+  });
+  $('select[name="spieltagIndex"] option').each((_, option) => {
+    const day = Number($(option).attr('value'));
+    if (Number.isInteger(day) && day >= 1 && day <= 99) available.set(day, { matchday: day, label: text($(option).text()) });
+  });
+  return { matchday, season, availableMatchdays: [...available.values()], title: text($('#kicktipp-content .pagetitle').text()) };
 }
 
 /** Data only; no upstream HTML, executable attributes or inferred scoring rules. */
@@ -64,10 +76,15 @@ export function parseOverview(html: string, player: string | null = null, reques
       }
       return { text: raw || null };
     });
-    return { id, name, isCurrentPlayer: !!player && name === player, cells };
+    return { id, name, sourceMatchdayWinner: row.hasClass('sptsieger'), isCurrentPlayer: !!player && name === player, cells };
   }).get();
   if (!rows.length || new Set(rows.map(r => r.id)).size !== rows.length) throw new Error('Missing or duplicate participants');
-  return { ...ctx, columns, rows, live: columns.some(c => c.live), fetchedAt: new Date().toISOString() };
+  const matches = columns.filter(c => c.kind === 'match');
+  const evaluated = matches.some(c => c.finished || c.live) && rows.some(r => r.cells.some((cell, i) => columns[i].kind === 'match' && 'points' in cell && cell.points !== null));
+  const complete = matches.length > 0 && matches.every(c => c.finished);
+  const participants = rows.map(({ sourceMatchdayWinner, ...row }) => ({ ...row,
+    matchdayAward: sourceMatchdayWinner && evaluated ? complete ? 'winner' : 'leading' : null }));
+  return { ...ctx, columns, rows: participants, live: columns.some(c => c.live), fetchedAt: new Date().toISOString() };
 }
 
 export function parseForm(html: string, requested?: number) {
