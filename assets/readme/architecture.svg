@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">One core, three ways in</title>
+  <desc id="desc">The full-screen TUI, the scriptable CLI and the MCP server all use one shared core. The core talks to kicktipp.com or kicktipp.de over plain HTTP and keeps a local season cache and audit log. A read-only guard protects every write.</desc>
+
+  <rect width="1200" height="400" rx="26" fill="#0c1411"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono', monospace">
+    <!-- front ends -->
+    <g fill="#121d18" stroke="#243630" stroke-width="2">
+      <rect x="64" y="48" width="300" height="84" rx="14"/>
+      <rect x="64" y="158" width="300" height="84" rx="14"/>
+      <rect x="64" y="268" width="300" height="84" rx="14"/>
+    </g>
+    <g font-size="26" font-weight="700" fill="#eaf2ed">
+      <text x="88" y="84">TUI</text>
+      <text x="88" y="194">CLI</text>
+      <text x="88" y="304">MCP server</text>
+    </g>
+    <g font-size="20" fill="#8ba093">
+      <text x="88" y="114">kicktipp tui</text>
+      <text x="88" y="224">kicktipp … --json</text>
+      <text x="88" y="334">kicktipp-mcp</text>
+    </g>
+
+    <!-- arrows in -->
+    <g stroke="#3ddc7a" stroke-width="3" fill="none">
+      <path d="M364 90H440M364 200H440M364 310H440"/>
+    </g>
+    <g fill="#3ddc7a">
+      <path d="M440 82l16 8-16 8z"/>
+      <path d="M440 192l16 8-16 8z"/>
+      <path d="M440 302l16 8-16 8z"/>
+    </g>
+
+    <!-- core -->
+    <rect x="470" y="48" width="300" height="304" rx="14" fill="#14261e" stroke="#3ddc7a" stroke-width="2"/>
+    <text x="494" y="92" font-size="28" font-weight="700" fill="#3ddc7a">Shared core</text>
+    <g font-size="20" fill="#eaf2ed">
+      <text x="494" y="140">session &amp; parsers</text>
+      <text x="494" y="176">scoring rules</text>
+      <text x="494" y="212">analytics</text>
+      <text x="494" y="248">odds strategies</text>
+    </g>
+    <path d="M494 274H746" stroke="#243630" stroke-width="2"/>
+    <text x="494" y="310" font-size="20" font-weight="700" fill="#f4c430">read-only guard</text>
+    <text x="494" y="336" font-size="18" fill="#8ba093">checks every write</text>
+
+    <!-- arrows out -->
+    <g stroke="#3ddc7a" stroke-width="3" fill="none">
+      <path d="M770 118H846M770 282H846"/>
+    </g>
+    <g fill="#3ddc7a">
+      <path d="M846 110l16 8-16 8z"/>
+      <path d="M846 274l16 8-16 8z"/>
+    </g>
+
+    <!-- back ends -->
+    <g fill="#121d18" stroke="#243630" stroke-width="2">
+      <rect x="876" y="48" width="260" height="140" rx="14"/>
+      <rect x="876" y="212" width="260" height="140" rx="14"/>
+    </g>
+    <text x="900" y="92" font-size="26" font-weight="700" fill="#eaf2ed">Kicktipp</text>
+    <g font-size="20" fill="#8ba093">
+      <text x="900" y="128">kicktipp.com / .de</text>
+      <text x="900" y="160">plain HTTP</text>
+    </g>
+    <text x="900" y="256" font-size="26" font-weight="700" fill="#eaf2ed">Local data</text>
+    <g font-size="20" fill="#8ba093">
+      <text x="900" y="292">season cache</text>
+      <text x="900" y="324">audit log · undo</text>
+    </g>
+  </g>
+</svg>
