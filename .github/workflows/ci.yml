@@ -18,5 +18,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
+      # The MCP integration tests start the compiled dist/server.js.
       - run: npm run build
+      - run: npm test
