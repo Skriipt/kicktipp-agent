@@ -1,3 +1,4 @@
+import { saveForm } from './helpers/saved-form.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
@@ -21,9 +22,12 @@ const FORM = (bet = '') => {
 };
 
 function betPage(existing = '') {
-  const { fetchImpl, calls } = mockFetch((req) =>
-    req.method === 'GET' ? htmlPage(FORM(existing)) : htmlPage('saved'),
-  );
+  let stored = FORM(existing);
+  const { fetchImpl, calls } = mockFetch(req => {
+    if (req.method === 'GET') return htmlPage(stored);
+    stored = saveForm(stored, req.body);
+    return htmlPage('saved');
+  });
   return { page: new Page(new CookieJar(), fetchImpl), calls };
 }
 
@@ -128,7 +132,7 @@ describe('placeBets records every attempt', () => {
     expect(lastSubmission('c')).toBeNull();
   });
 
-  it('records a failure with its reason', async () => {
+  it('records a lost response as uncertain with its reason', async () => {
     const { fetchImpl } = mockFetch((req) => {
       if (req.method === 'GET') return htmlPage(FORM());
       throw new Error('network died');
@@ -138,7 +142,8 @@ describe('placeBets records every attempt', () => {
     await expect(placeBets(page, 'c', ['Bayern vs BVB=2:1'], 3, true, 'cli:bet')).rejects.toThrow();
     const outcomes = readAudit('c').map((r) => r.outcome);
     expect(outcomes[0]).toBe('intent');
-    expect(outcomes[1]).toMatch(/^failed:/);
+    expect(outcomes[1]).toBe('submission_unknown');
+    expect(readAudit('c')[1].detail).toContain('network died');
     expect(lastSubmission('c')).toBeNull();
   });
 

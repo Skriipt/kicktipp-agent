@@ -1,3 +1,4 @@
+import { saveForm } from './helpers/saved-form.js';
 import { describe, it, expect } from 'vitest';
 import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
@@ -23,10 +24,13 @@ const TIPS_PAGE = (bet = '') => {
 };
 
 function adminPage(existing = '') {
+  let stored = TIPS_PAGE(existing);
   const { fetchImpl, calls } = mockFetch((req) => {
     if (req.url.startsWith(`${BASE}/mycomm/spielleiter/mitgliederliste`)) return htmlPage(MEMBER_LIST);
     if (req.url.startsWith(`${BASE}/mycomm/spielleiter/tippsnachtragen`)) {
-      return req.method === 'GET' ? htmlPage(TIPS_PAGE(existing)) : htmlPage('saved');
+      if (req.method === 'GET') return htmlPage(stored);
+      stored = saveForm(stored, req.body);
+      return htmlPage('saved');
     }
     return undefined;
   });
