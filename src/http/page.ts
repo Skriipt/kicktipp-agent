@@ -65,6 +65,7 @@ export class Page {
   private html = '';
   private $dom: cheerio.CheerioAPI | null = null;
   private lastStatus = 0;
+  private directAuthRejection = false;
   private closed = false;
 
   constructor(
@@ -89,19 +90,29 @@ export class Page {
     }
   }
 
+  /** Fresh read for submission reconciliation, without host/route fallback. */
+  async reload(url: string): Promise<void> {
+    this.ensureOpen();
+    await this.navigate('GET', this.absoluteUrl(url), undefined, undefined, false, true);
+  }
+
   private async navigate(
     method: 'GET' | 'POST',
     url: string,
     body?: URLSearchParams,
     referer?: string,
+    followPostRedirects = true,
+    fresh = false,
   ): Promise<void> {
     let currentUrl = url;
     let currentMethod = method;
     let currentBody = body;
     let currentReferer = referer;
+    this.directAuthRejection = false;
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const headers = new Headers(DEFAULT_HEADERS);
+      if (fresh) headers.set('Cache-Control', 'no-cache, no-store');
       const cookie = this.jar.header(currentUrl);
       if (cookie) headers.set('Cookie', cookie);
       if (currentReferer) headers.set('Referer', currentReferer);
@@ -114,11 +125,21 @@ export class Page {
         headers,
         body: currentMethod === 'POST' ? currentBody : undefined,
         redirect: 'manual',
+        ...(fresh ? { cache: 'no-store' as const } : {}),
       });
       this.jar.store(currentUrl, res.headers);
 
       const location = res.headers.get('location');
+      if (hop === 0) {
+        this.directAuthRejection = [401, 403].includes(res.status) || Boolean(
+          location && [301, 302, 303, 307, 308].includes(res.status) &&
+          LOGIN_URL_PATTERN.test(this.absoluteUrl(location, currentUrl)),
+        );
+      }
       if (location && [301, 302, 303, 307, 308].includes(res.status)) {
+        if (currentMethod === 'POST' && [307, 308].includes(res.status) && !followPostRedirects) {
+          throw new Error(`Refusing to replay POST after HTTP ${res.status}; read-back required.`);
+        }
         currentReferer = currentUrl;
         currentUrl = this.absoluteUrl(location, currentUrl);
         // 301/302/303 turn the follow-up into a GET; 307/308 keep the method.
@@ -133,6 +154,7 @@ export class Page {
       this.lastStatus = res.status;
       this.html = await decodeBody(res);
       this.$dom = cheerio.load(this.html);
+      if (hop === 0 && res.ok && this.has('input[type="password"]')) this.directAuthRejection = true;
       return;
     }
 
@@ -150,6 +172,10 @@ export class Page {
     return this.currentUrl;
   }
 
+  status(): number {
+    return this.lastStatus;
+  }
+
   isClosed(): boolean {
     return this.closed;
   }
@@ -162,6 +188,11 @@ export class Page {
   /** True when the last response bounced us to the login page. */
   isAuthRedirect(): boolean {
     return LOGIN_URL_PATTERN.test(this.currentUrl);
+  }
+
+  /** Auth refusal of the original request, not of a redirected receipt GET. */
+  isDirectAuthRejection(): boolean {
+    return this.directAuthRejection;
   }
 
   /** True when the login bounce carried the Spielleiter-required marker. */
@@ -207,11 +238,11 @@ export class Page {
   // ── Submitting ───────────────────────────────────────────────────
 
   /** Submit the form containing `selector`, using it as the submitter. */
-  async click(selector: string): Promise<void> {
+  async click(selector: string, options: { followPostRedirects?: boolean } = {}): Promise<void> {
     this.ensureOpen();
     const submitter = this.find(selector);
     if (!submitter.length) throw new Error(`Element not found: ${selector}`);
-    await this.submit(submitter.closest('form'), submitter);
+    await this.submit(submitter.closest('form'), submitter, options.followPostRedirects);
   }
 
   /**
@@ -234,6 +265,7 @@ export class Page {
   private async submit(
     form: cheerio.Cheerio<AnyNode>,
     submitter: cheerio.Cheerio<AnyNode>,
+    followPostRedirects = true,
   ): Promise<void> {
     if (!form.length) throw new Error('Submit target is not inside a form.');
     const method = (form.attr('method') || 'get').toLowerCase();
@@ -241,7 +273,7 @@ export class Page {
     const body = this.serializeForm(form, submitter);
 
     if (method === 'post') {
-      await this.navigate('POST', action, body, this.currentUrl);
+      await this.navigate('POST', action, body, this.currentUrl, followPostRedirects);
       return;
     }
     const target = new URL(action);

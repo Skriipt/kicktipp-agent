@@ -239,6 +239,12 @@ Run `kicktipp guide` for the full usage and configuration reference.
   hostname and OS user. Session-only mode keeps a login cookie instead.
 - **Nothing submitted by accident.** Suggestions are dry runs unless you
   pass `--place`.
+- **Verified submissions.** Match, bonus, and Spielleiter bets are marked
+  `submitted` only after a fresh read confirms every requested value.
+  `rejected` records a confirmed refusal or unchanged values after a completed
+  request; `submission_unknown` covers lost responses, partial saves, or
+  unreadable/locked forms. Check the saved bets before trying again: the agent
+  never automatically repeats a bet POST, including after a 307/308 redirect.
 - **Respects Kicktipp's rules.** Other players' scores stay hidden until the
   deadline. `tip-status` only reports complete, partial, or missing.
 

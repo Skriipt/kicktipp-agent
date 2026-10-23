@@ -29,6 +29,7 @@ import {
   parseMatchDate,
 } from './helpers/match-date.js';
 import { appendAudit, submitAudited, type AuditBet, type BetSource } from './audit/log.js';
+import { submitVerified, type SubmissionTarget } from './submission.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
 
@@ -54,13 +55,17 @@ async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
       `Spielleiter (admin) rights are required for ${url}.`,
     );
   }
-  if (page.isAuthRedirect()) {
+  if (page.isAuthRedirect() || page.has('input[type="password"]')) {
     throw new AuthError(
       `Kicktipp session is not authenticated (redirected to ${page.url()}). Verify credentials.`,
     );
   }
   if (page.isNotFound()) {
     throw new NotFoundError(`Kicktipp page not found: ${url}. Check the community name.`);
+  }
+
+  if (page.status() < 200 || page.status() >= 300) {
+    throw new Error(`Kicktipp HTTP ${page.status()} while loading ${url}.`);
   }
 
   return cheerio.load(await page.content());
@@ -595,7 +600,7 @@ function fillMatchBets(
   $: cheerio.CheerioAPI,
   bets: string[],
   editable: EditableMatch[],
-): { placed: PlacedBet[]; audited: AuditBet[] } {
+): { placed: PlacedBet[]; audited: AuditBet[]; targets: SubmissionTarget[] } {
   const seen = new Set<string>();
   const parsed = bets.map((arg) => {
     const { home, away, h, g } = parseBetArg(arg);
@@ -607,6 +612,7 @@ function fillMatchBets(
 
   const placed: PlacedBet[] = [];
   const audited: AuditBet[] = [];
+  const targets: SubmissionTarget[] = [];
   for (const { entry, h, g } of parsed) {
     const homeSelector = `input[name="${escapeCssValue(entry.heimName)}"]`;
     const awaySelector = `input[name="${escapeCssValue(entry.gastName)}"]`;
@@ -614,6 +620,7 @@ function fillMatchBets(
     const previousAway = $(awaySelector).attr('value') || '';
     page.setInputValue(homeSelector, String(h));
     page.setInputValue(awaySelector, String(g));
+    targets.push({ name: entry.heimName, value: String(h) }, { name: entry.gastName, value: String(g) });
     placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
     audited.push({
       fixture: `${entry.home} vs ${entry.away}`,
@@ -621,7 +628,7 @@ function fillMatchBets(
       previous: previousHome && previousAway ? `${previousHome}:${previousAway}` : null,
     });
   }
-  return { placed, audited };
+  return { placed, audited, targets };
 }
 
 export async function placeBets(
@@ -657,7 +664,7 @@ export async function placeBets(
 
   if (!editable.length) throw new Error('No editable matches found.');
 
-  const { placed, audited } = fillMatchBets(page, $, bets, editable);
+  const { placed, audited, targets } = fillMatchBets(page, $, bets, editable);
 
   const record = {
     at: new Date().toISOString(),
@@ -674,7 +681,7 @@ export async function placeBets(
     return placed;
   }
 
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await submitAudited(record, () => submitVerified(page, targets));
 
   return placed;
 }
@@ -822,6 +829,7 @@ export async function placeBonusBets(
   }
 
   const placed: PlacedBonusBet[] = [];
+  const targets: SubmissionTarget[] = [];
 
   for (const [key, answers] of argsByQuestion) {
     const q = questions.find((qq) => qq.question.toLowerCase() === key);
@@ -854,6 +862,7 @@ export async function placeBonusBets(
       }
       usedValues.add(option.value);
       await page.selectOption(`select[name="${escapeCssValue(select.name)}"]`, option.value);
+      targets.push({ name: select.name, value: option.value });
       placed.push({ question: q.question, answer: option.text });
     }
   }
@@ -873,7 +882,7 @@ export async function placeBonusBets(
     return placed;
   }
 
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await submitAudited(record, () => submitVerified(page, targets));
 
   return placed;
 }
@@ -1146,15 +1155,20 @@ export async function placeBetsForMember(
     throw new Error(`No editable matches on the Tipps-nachtragen page for ${member.name}.`);
   }
 
-  const { placed, audited } = fillMatchBets(page, $, bets, editable);
+  const { placed, audited, targets } = fillMatchBets(page, $, bets, editable);
 
   // The submission must carry the member's id, or Kicktipp would apply these
   // bets to the admin's own entry. Rather than trust the page, check that the
   // id travels either in the form action or as a hidden field.
   if (submit) {
-    const action = $('#kicktipp-content form').attr('action') || '';
-    const hasHiddenId = $(`#kicktipp-content form input[name="tipperId"]`).length > 0;
-    if (!action.includes(`tipperId=${member.tipperId}`) && !hasHiddenId) {
+    const form = $('button[name="submitbutton"]').closest('form');
+    const action = new URL(form.attr('action') || page.url(), page.url());
+    const ids = [
+      ...action.searchParams.getAll('tipperId'),
+      ...form.find('input[type="hidden"][name="tipperId"]:not([disabled])')
+        .map((_, el) => $(el).attr('value') || '').get(),
+    ];
+    if (!ids.length || ids.some(id => id !== member.tipperId)) {
       throw new Error(
         `Refusing to submit: the Tipps-nachtragen form for ${member.name} does not carry their ` +
           'tipperId, so the bets could land on your own entry. This usually means Kicktipp ' +
@@ -1179,7 +1193,7 @@ export async function placeBetsForMember(
     return placed;
   }
 
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await submitAudited(record, () => submitVerified(page, targets));
 
   return placed;
 }

@@ -1,3 +1,4 @@
+import { saveForm } from './helpers/saved-form.js';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
@@ -49,7 +50,11 @@ describe('the core submitting functions refuse regardless of entry point', () =>
       <button type="submit" name="submitbutton" value="save">save</button></form></div>`;
 
   function betPage() {
-    const { fetchImpl, calls } = mockFetch(() => htmlPage(FORM));
+    let stored = FORM;
+    const { fetchImpl, calls } = mockFetch(req => {
+      if (req.method === 'POST') stored = saveForm(stored, req.body);
+      return htmlPage(stored);
+    });
     return { page: new Page(new CookieJar(), fetchImpl), calls };
   }
 

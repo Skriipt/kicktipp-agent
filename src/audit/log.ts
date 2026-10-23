@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { dataDir } from '../cache/paths.js';
+import { SubmissionError } from '../submission.js';
 
 /** Where a submission came from, so the log can answer "who did this?". */
 export type BetSource =
@@ -28,7 +29,9 @@ export interface AuditRecord {
   kind: 'match' | 'bonus';
   dryRun: boolean;
   bets: AuditBet[];
-  outcome: 'submitted' | 'dry-run' | 'intent' | `failed:${string}`;
+  outcome: 'submitted' | 'rejected' | 'submission_unknown' | 'dry-run' | 'intent' | `failed:${string}`;
+  /** Why a submission was rejected or could not be fully verified. */
+  detail?: string;
   /** Set when an admin placed these for somebody else. */
   onBehalfOf?: string;
 }
@@ -59,7 +62,7 @@ export function appendAudit(record: AuditRecord): void {
 
 type PendingAuditRecord = Omit<AuditRecord, 'outcome'>;
 
-/** Record intent, failure, and success around one real submission. */
+/** The callback must resolve only after saved values have been verified. */
 export async function submitAudited(
   record: PendingAuditRecord,
   submit: () => Promise<void>,
@@ -71,7 +74,8 @@ export async function submitAudited(
     appendAudit({
       ...record,
       at: new Date().toISOString(),
-      outcome: `failed:${err instanceof Error ? err.message : String(err)}`,
+      outcome: err instanceof SubmissionError ? err.outcome : `failed:${err instanceof Error ? err.message : String(err)}`,
+      ...(err instanceof SubmissionError ? { detail: err.message } : {}),
     });
     throw err;
   }
