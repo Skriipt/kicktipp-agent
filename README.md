@@ -1,8 +1,6 @@
 <div align="center">
 
-# kicktipp-agent
-
-**Your [Kicktipp](https://www.kicktipp.com/) prediction pool, from the terminal or your AI assistant.**
+<img src="assets/readme/hero.svg" width="100%" alt="kicktipp-agent: your Kicktipp prediction pool from the terminal or your AI assistant">
 
 [![GitHub release](https://img.shields.io/github/v/release/Skriipt/kicktipp-agent?style=flat-square)](https://github.com/Skriipt/kicktipp-agent/releases/latest)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -11,13 +9,20 @@
 
 [Features](#features) · [Quick start](#quick-start) · [CLI](#cli) · [MCP](#mcp-server) · [Safety](#privacy-and-safety) · [Development](#development)
 
-![Prediction grid with fixtures, score fields, suggestions, and keyboard shortcuts](docs/images/tui-prediction.jpg)
+<br>
+
+<img src="docs/images/tui-prediction.jpg" width="100%" alt="Full-screen prediction grid with fixtures, score fields, suggested scores, and keyboard shortcuts">
+
+<sub>The full-screen prediction grid: type a score or press <code>s</code> to take the suggestion.</sub>
 
 </div>
 
-`kicktipp-agent` is a local Node.js client for `kicktipp.com` and `kicktipp.de`.
-It runs on your machine and talks to Kicktipp over plain HTTP, with no browser
-automation.
+<br>
+
+`kicktipp-agent` is a local client for [Kicktipp](https://www.kicktipp.com/)
+(`kicktipp.com` and `kicktipp.de`). It runs on your machine and talks to Kicktipp
+over plain HTTP, with no browser automation. Use it as a full-screen terminal UI,
+as a scriptable CLI, or as an MCP server for Claude and other assistants.
 
 > [!IMPORTANT]
 > This is an unofficial client. Kicktipp has no public API, so website changes
@@ -36,6 +41,13 @@ automation.
 | **Audit log and undo** | Every submission is logged locally and can be rolled back. |
 | **Multi-account** | Separate profiles for accounts, communities, and players. |
 | **Community admin** | Spielleiter tools to place tips on behalf of other members. |
+
+The CLI and the MCP server share one core for data, analytics, and submission
+logic, and a read-only guard checks every write.
+
+<p align="center">
+  <img src="assets/readme/architecture.svg" width="100%" alt="The TUI, CLI, and MCP server all use one shared core. The core talks to Kicktipp over plain HTTP and keeps a local season cache and audit log. A read-only guard checks every write.">
+</p>
 
 ## Quick start
 
@@ -108,6 +120,12 @@ kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 
 ### Commands
 
+Run `kicktipp <command> --help` for options. The global flags `--community`,
+`--profile`, `--lang`, and `--site` override saved settings for a single run.
+
+<details>
+<summary><b>All commands by area</b></summary>
+
 | Area | Commands |
 | --- | --- |
 | Setup | `login` `logout` `communities` `set-community` `players` `set-player` `profiles` `set-lang` `set-site` |
@@ -117,8 +135,7 @@ kicktipp bet --bonus "Who will win the league?=FC Bayern München"
 | Automation and history | `remind` `notify` `set-notify` `log` `cache` |
 | Other | `tui` `guide` `admin` |
 
-Run `kicktipp <command> --help` for options. The global flags `--community`,
-`--profile`, `--lang`, and `--site` override saved settings for a single run.
+</details>
 
 ### Analytics
 
@@ -168,6 +185,9 @@ account. Bonus tips and Spielleiter submissions for other members are skipped.
 
 The server exposes the same data, analytics, and submission logic as the CLI.
 
+<details>
+<summary><b>All MCP tools by group</b></summary>
+
 | Group | Tools |
 | --- | --- |
 | Account | `connect_account` `get_status` `get_communities` `set_community` `get_players` `set_player` |
@@ -176,6 +196,8 @@ The server exposes the same data, analytics, and submission logic as the CLI.
 | Analytics | `sync_history` `get_stats` `get_rival_analysis` `get_standings_scenarios` `suggest_bets` |
 | Automation and history | `set_notify` `get_bet_log` |
 | Community admin | `list_members` `get_bets_for_member` `place_bets_for_member` |
+
+</details>
 
 If setup is incomplete, `connect_account` returns a private localhost URL.
 
