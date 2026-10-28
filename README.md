@@ -151,6 +151,9 @@ kicktipp whatif suggest:ev         # replay the season with another strategy
   overwrite existing tips.
 - Analytics read your community's win/draw point matrix from its rules page.
   Incomplete or unsupported schemes are rejected, never guessed.
+- Hidden predictions remain unknown in standings and rival analyses. Target
+  searches return `achievable: null` when hidden tips or the search budget
+  prevent a conclusion; `false` means the target was proved unreachable.
 
 ### Reminders
 
@@ -180,6 +183,7 @@ kicktipp log --undo   # restore the bets replaced by the latest submission
 
 Undo covers only the latest successful regular match submission of the signed-in
 account. Bonus tips and Spielleiter submissions for other members are skipped.
+History and undo are isolated by account, profile, and site.
 
 ## MCP server
 
@@ -218,6 +222,18 @@ cannot submit tips.
 Settings and sessions live in `~/.config/kicktipp-agent/`. Cache and audit data
 use the platform data directory. Manage the cache with `kicktipp cache status`
 and `kicktipp cache clear`.
+
+After upgrading from 1.3.0, run `kicktipp sync` to populate the account-scoped
+cache. Existing cache, audit logs, and session files are retained, but are not
+automatically assigned to an account or used for undo. Accounts with a saved
+password sign in again automatically; session-only accounts need to reconnect
+with `kicktipp login --web` or `connect_account`.
+
+Sync checks the opening round's fixtures and kickoff dates before reusing
+finished history. A changed opening round starts a fresh cache and archives
+the previous files; this also conservatively refreshes history after a fixture
+reschedule. If that check fails, sync reports the failure and preserves the
+existing history.
 
 | Variable | Purpose |
 | --- | --- |

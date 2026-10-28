@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { parseMatchDate } from '../helpers/match-date.js';
 import { communityDir } from './paths.js';
+import { accountScope } from '../config.js';
 import type {
   BetMatch,
   LeaderboardData,
@@ -16,7 +18,7 @@ import type {
  * Bumped when the shape of a cached payload changes. Readers ignore files
  * written by a different version and re-fetch instead of guessing.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** Payload shapes, keyed by what the cache calls them. */
 export interface CacheKinds {
@@ -41,6 +43,7 @@ const PER_MATCHDAY: ReadonlySet<CacheKind> = new Set<CacheKind>([
 
 export interface Envelope<K extends CacheKind> {
   schemaVersion: number;
+  accountScope: string;
   community: string;
   kind: K;
   matchday?: number;
@@ -50,10 +53,13 @@ export interface Envelope<K extends CacheKind> {
 
 export interface CacheMeta {
   schemaVersion: number;
+  accountScope: string;
   community: string;
   lastSync?: string;
   /** Highest matchday seen during a sync, so readers know the season length. */
   knownMatchdays?: number;
+  /** Fingerprint of the first round, excluding results and display titles. */
+  seasonAnchor?: string;
 }
 
 function matchdayFolder(matchday: number): string {
@@ -84,6 +90,7 @@ function readJson<T>(file: string): T | null {
  * keeps installs light.
  */
 export class CacheStore {
+  private readonly scope = accountScope();
   constructor(
     readonly community: string,
     private readonly root: string = communityDir(community),
@@ -106,6 +113,7 @@ export class CacheStore {
   write<K extends CacheKind>(kind: K, data: CacheKinds[K], matchday?: number): void {
     const envelope: Envelope<K> = {
       schemaVersion: SCHEMA_VERSION,
+      accountScope: this.scope,
       community: this.community,
       kind,
       matchday,
@@ -117,7 +125,9 @@ export class CacheStore {
 
   read<K extends CacheKind>(kind: K, matchday?: number): Envelope<K> | null {
     const envelope = readJson<Envelope<K>>(this.fileFor(kind, matchday));
-    if (!envelope || envelope.schemaVersion !== SCHEMA_VERSION) return null;
+    if (!envelope || envelope.schemaVersion !== SCHEMA_VERSION ||
+        envelope.accountScope !== this.scope || envelope.community !== this.community ||
+        envelope.kind !== kind || envelope.matchday !== matchday) return null;
     return envelope;
   }
 
@@ -138,13 +148,15 @@ export class CacheStore {
 
   readMeta(): CacheMeta | null {
     const meta = readJson<CacheMeta>(path.join(this.root, 'meta.json'));
-    if (!meta || meta.schemaVersion !== SCHEMA_VERSION) return null;
+    if (!meta || meta.schemaVersion !== SCHEMA_VERSION ||
+        meta.accountScope !== this.scope || meta.community !== this.community) return null;
     return meta;
   }
 
-  writeMeta(meta: Omit<CacheMeta, 'schemaVersion' | 'community'>): void {
+  writeMeta(meta: Omit<CacheMeta, 'schemaVersion' | 'community' | 'accountScope'>): void {
     writeJsonAtomic(path.join(this.root, 'meta.json'), {
       schemaVersion: SCHEMA_VERSION,
+      accountScope: this.scope,
       community: this.community,
       ...meta,
     });
@@ -152,6 +164,13 @@ export class CacheStore {
 
   clear(): void {
     fs.rmSync(this.root, { recursive: true, force: true });
+  }
+
+  /** Preserve a previous season without allowing it to satisfy current reads. */
+  archive(): void {
+    if (fs.existsSync(this.root)) {
+      fs.renameSync(this.root, `${this.root}.archive-${Date.now()}-${crypto.randomUUID()}`);
+    }
   }
 
   /** Total bytes on disk, for `kicktipp cache status`. */

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import http from 'node:http';
 
 /**
  * Drives the built server over stdio, the same way a client would. This is
@@ -63,6 +64,43 @@ beforeAll(() => {
 });
 
 describe('the MCP server as a client sees it', () => {
+  it('shares one login and keeps concurrent tool reads in separate operations', async () => {
+    let sessionChecks = 0;
+    const upstream = http.createServer((req, res) => {
+      const url = new URL(req.url!, 'http://fixture');
+      const day = url.searchParams.get('spieltagIndex');
+      if (url.pathname.includes('meinetipprunden')) sessionChecks++;
+      setTimeout(() => {
+        res.setHeader('Content-Type', 'text/html');
+        res.end(`<div id="kicktipp-content"><div class="pagetitle">Day ${day}</div><table id="tippabgabeSpiele"><tbody>
+          <tr><td>21.08.26 20:30</td><td>Home ${day}</td><td>Away</td><td><input id="x_heimTipp" value="2"><input id="x_gastTipp" value="1"></td></tr>
+          </tbody></table></div>`);
+      }, 20);
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const port = (upstream.address() as { port: number }).port;
+    const env = { HOME: home, USERPROFILE: home, KICKTIPP_BASE_URL: `http://127.0.0.1:${port}` };
+    const session = execFileSync(process.execPath, ['--input-type=module', '-e',
+      "import {sessionFile} from './dist/config.js'; process.stdout.write(sessionFile());"],
+    { env: { ...process.env, ...env }, encoding: 'utf8' });
+    fs.writeFileSync(session, '{"cookies":[]}');
+    try {
+      const messages = await callServer([INIT, ...[2, 3].map((day) => ({
+        jsonrpc: '2.0', id: day, method: 'tools/call', params: { name: 'get_bets', arguments: { matchday: day } },
+      }))], env);
+      for (const day of [2, 3]) {
+        const result = messages.find((m) => m.id === day)?.result;
+        expect(result?.isError).toBeFalsy();
+        expect(result?.structuredContent.data.title).toBe(`Day ${day}`);
+      }
+      expect(sessionChecks).toBe(1);
+    } finally {
+      upstream.closeAllConnections();
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+      fs.rmSync(session, { force: true });
+    }
+  }, 15_000);
+
   it('lists every tool with an input and output schema', async () => {
     const messages = await callServer([INIT, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }], {
       HOME: home,
@@ -145,6 +183,19 @@ describe('the MCP server as a client sees it', () => {
       expect(names).not.toContain(mutating);
     }
     expect(names).toContain('get_status');
+  });
+
+  it('rejects resources for a different community instead of relabelling the active pool', async () => {
+    const uris = ['kicktipp://another-pool/rules', 'kicktipp://another-pool/leaderboard/7', 'kicktipp://another-pool/schedule/7'];
+    const messages = await callServer([
+      INIT,
+      ...uris.map((uri, index) => ({ jsonrpc: '2.0', id: index + 2, method: 'resources/read', params: { uri } })),
+    ], { HOME: home, KICKTIPP_DATA_DIR: path.join(home, 'resource-scope') });
+    for (let index = 0; index < uris.length; index++) {
+      const contents = messages.find((m) => m.id === index + 2).result.contents;
+      expect(contents[0].uri).toBe(uris[index]);
+      expect(JSON.parse(contents[0].text)).toMatchObject({ error: 'community_mismatch' });
+    }
   });
 
   it('lets set_notify write the local [notify] section', async () => {

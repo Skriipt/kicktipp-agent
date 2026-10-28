@@ -16,7 +16,8 @@ export async function runTui(opts: LaunchOptions = {}): Promise<void> {
       'The dashboard needs an interactive terminal. Run `kicktipp tui` in a real terminal, or use the individual CLI commands.',
     );
   }
-  const app = new App(new LiveDataSource(), {
+  const source = new LiveDataSource();
+  const app = new App(source, {
     matchday: opts.matchday ?? null,
     screen: opts.screen,
   });
@@ -25,5 +26,6 @@ export async function runTui(opts: LaunchOptions = {}): Promise<void> {
     await app.run();
   } finally {
     silenceStatus(false);
+    await source.close();
   }
 }

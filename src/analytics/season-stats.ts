@@ -1,5 +1,5 @@
 import type { ScoringRules } from '../rules/scoring.js';
-import { classify, parseScore, scoreBet, tendencyOf, type HitKind } from '../rules/scoring.js';
+import { classify, multiplierFor, parseScore, scoreBet, tendencyOf, type HitKind } from '../rules/scoring.js';
 import { toNumber, type CachedMatchday, type CachedSeason } from './season.js';
 
 export interface FormPoint {
@@ -150,8 +150,8 @@ function scoredPairs(
   season: CachedSeason,
   player: string,
   ownPlayer: string | null,
-): { pairs: { bet: string; result: string }[]; matchdaysUsed: number } {
-  const pairs: { bet: string; result: string }[] = [];
+): { pairs: { bet: string; result: string; matchday: number }[]; matchdaysUsed: number } {
+  const pairs: { bet: string; result: string; matchday: number }[] = [];
   let matchdaysUsed = 0;
 
   for (const md of season.matchdays) {
@@ -163,7 +163,7 @@ function scoredPairs(
       row.bets.forEach((bet, i) => {
         const match = grid.matches[i];
         if (!match || !parseScore(bet) || !parseScore(match.result)) return;
-        pairs.push({ bet, result: match.result });
+        pairs.push({ bet, result: match.result, matchday: md.matchday });
         used = true;
       });
       if (used) matchdaysUsed++;
@@ -176,7 +176,7 @@ function scoredPairs(
       const match = md.schedule.find((s) => s.home === bet.home && s.away === bet.away);
       if (!match) continue;
       if (!parseScore(bet.bet) || !parseScore(match.result)) continue;
-      pairs.push({ bet: bet.bet, result: match.result });
+      pairs.push({ bet: bet.bet, result: match.result, matchday: md.matchday });
       used = true;
     }
     if (used) matchdaysUsed++;
@@ -186,18 +186,18 @@ function scoredPairs(
 }
 
 function buildBreakdown(
-  pairs: { bet: string; result: string }[],
+  pairs: { bet: string; result: string; matchday: number }[],
   rules: ScoringRules,
 ): Breakdown {
   const counts: Record<HitKind, number> = { exact: 0, goalDiff: 0, tendency: 0, miss: 0 };
   let points = 0;
 
-  for (const { bet, result } of pairs) {
+  for (const { bet, result, matchday } of pairs) {
     const b = parseScore(bet)!;
     const r = parseScore(result)!;
     const kind = classify(b, r);
     counts[kind]++;
-    points += scoreBet(b, r, rules);
+    points += scoreBet(b, r, rules) * multiplierFor(matchday, rules);
   }
 
   return { ...counts, scored: pairs.length, points };

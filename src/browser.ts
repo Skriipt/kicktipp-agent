@@ -9,6 +9,7 @@ import { normalizeSlug } from './helpers/normalize-slug.js';
 import { CookieJar } from './http/cookie-jar.js';
 import { Page } from './http/page.js';
 import type { FetchLike } from './http/page.js';
+import { assertReadable, AuthError, NotFoundError } from './http/response.js';
 
 export { Page } from './http/page.js';
 export type { FetchLike } from './http/page.js';
@@ -29,17 +30,26 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
 
   if (file && fs.existsSync(file)) {
     status(t('status.restoringSession'));
+    let restored: Page | null = null;
     try {
       const stored = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      const page = new Page(CookieJar.fromJSON(stored), opts.fetchImpl);
-      await page.goto(getCommunitiesUrl());
-      if (!page.isAuthRedirect() && !page.isNotFound()) {
-        statusClear();
-        return page;
-      }
+      restored = new Page(CookieJar.fromJSON(stored), opts.fetchImpl);
     } catch {
       // An unreadable or outdated session file is not worth reporting —
       // logging in again produces a good one.
+    }
+    if (restored) {
+      try {
+        await getCommunities(restored);
+        statusClear();
+        return restored;
+      } catch (error) {
+        await restored.close();
+        statusClear();
+        // A transient server/transport failure is not evidence of an expired
+        // login, and must not cause a credential POST or an empty success.
+        if (!(error instanceof AuthError) && !(error instanceof NotFoundError)) throw error;
+      }
     }
     status(t('status.sessionExpired'));
   }
@@ -53,13 +63,24 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Page> {
   const { email, password } = await loadCredentials();
   const page = new Page(new CookieJar(), opts.fetchImpl);
   await login(page, email, password);
-  if (file) page.saveSession(file);
+  // Interactive credential entry can change the account storage scope.
+  const saveFile = opts.sessionFile === undefined ? sessionFile() : opts.sessionFile;
+  if (saveFile) page.saveSession(saveFile);
   return page;
 }
 
 export async function login(page: Page, username: string, password: string): Promise<void> {
+  return page.runExclusive(() => loginUnlocked(page, username, password));
+}
+
+async function loginUnlocked(page: Page, username: string, password: string): Promise<void> {
   status(t('status.loggingIn'));
   await page.goto(urlLogin());
+
+  if (page.status() < 200 || page.status() >= 300) {
+    statusClear();
+    throw new Error(`Kicktipp HTTP ${page.status()} while loading the login form.`);
+  }
 
   if (!page.has('input[name="kennung"]')) {
     statusClear();
@@ -71,10 +92,11 @@ export async function login(page: Page, username: string, password: string): Pro
   await page.submitForm('input[name="kennung"]');
 
   // A failed login lands back on the login page.
-  if (page.isAuthRedirect()) {
+  if (page.isAuthRedirect() || page.has('input[type="password"]')) {
     statusClear();
     throw new Error(t('login.failed'));
   }
+  assertReadable(page, page.url());
   statusClear();
 }
 
@@ -106,18 +128,15 @@ export function parseCommunitiesHtml(html: string): string[] {
 }
 
 export async function getCommunities(page: Page): Promise<string[]> {
+  return page.runExclusive(async () => {
   status(t('status.fetchingCommunities'));
   await page.goto(getCommunitiesUrl());
-  if (page.isAuthRedirect()) {
-    statusClear();
-    throw new Error(
-      t('login.notAuthenticated', { url: page.url() }),
-    );
-  }
+  assertReadable(page, getCommunitiesUrl());
 
   const communities = parseCommunitiesHtml(await page.content());
   statusClear();
   return communities;
+  });
 }
 
 export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, string] {
@@ -129,8 +148,10 @@ export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, 
 }
 
 export async function getPlayers(page: Page, community: string): Promise<string[]> {
+  return page.runExclusive(async () => {
   status(t('status.fetchingPlayers'));
   await page.goto(getLeaderboardUrl(community));
+  assertReadable(page, getLeaderboardUrl(community));
   statusClear();
 
   const $ = cheerio.load(await page.content());
@@ -140,4 +161,5 @@ export async function getPlayers(page: Page, community: string): Promise<string[
     if (name) players.push(name);
   });
   return players;
+  });
 }

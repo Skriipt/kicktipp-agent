@@ -67,6 +67,22 @@ export class Page {
   private lastStatus = 0;
   private directAuthRejection = false;
   private closed = false;
+  private closing = false;
+  private operations: Promise<void> = Promise.resolve();
+
+  /** Serialize a complete navigation/read or fill/submit/read-back transaction.
+   * Callers must not nest this non-reentrant queue; low-level Page methods are
+   * deliberately unlocked so one transaction can make several HTTP requests.
+   */
+  runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing || this.closed) return Promise.reject(new Error('Kicktipp session is closed.'));
+    const result = this.operations.then(() => {
+      this.ensureOpen();
+      return operation();
+    });
+    this.operations = result.then(() => {}, () => {});
+    return result;
+  }
 
   constructor(
     readonly jar: CookieJar = new CookieJar(),
@@ -177,7 +193,7 @@ export class Page {
   }
 
   isClosed(): boolean {
-    return this.closed;
+    return this.closed || this.closing;
   }
 
   /** True when the last response was Kicktipp's "page not found". */
@@ -205,6 +221,8 @@ export class Page {
   }
 
   async close(): Promise<void> {
+    this.closing = true;
+    await this.operations;
     this.closed = true;
   }
 

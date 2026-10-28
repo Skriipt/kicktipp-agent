@@ -14,7 +14,9 @@ function checkCommand(opts: ArtifactOptions): string {
 }
 
 function notifyCommand(opts: ArtifactOptions): string {
-  return `${opts.binary ?? 'kicktipp'} notify`;
+  const parts = [opts.binary ?? 'kicktipp', 'notify'];
+  if (opts.warnHours !== undefined) parts.push('--warn-hours', String(opts.warnHours));
+  return parts.join(' ');
 }
 
 /**

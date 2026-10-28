@@ -152,7 +152,8 @@ describe('findTargetCombinations', () => {
 
   it('reports an unknown player instead of searching', () => {
     const search = findTargetCombinations(grid(), LEADERBOARD, RULES, 'Nobody', 1);
-    expect(search.achievable).toBe(false);
+    expect(search.achievable).toBeNull();
+    expect(search.complete).toBe(false);
     expect(search.note).toMatch(/no published bets/);
   });
 

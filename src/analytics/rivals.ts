@@ -1,32 +1,11 @@
 import type { MatchdayBets, ScheduleMatch } from '../core.js';
 import {
   parseScore,
-  scoreBet,
+  multiplierFor,
   type ScoringRules,
-  type Score,
 } from '../rules/scoring.js';
 
-/**
- * Representative scorelines standing in for the ways a match can end.
- *
- * Scenarios are about outcome classes, not exact scores: what matters is
- * whether each side's prediction lands as exact, right difference, right
- * tendency or nothing. This set is enough to expose every distinction the
- * scoring rules can make, while keeping the search space tiny.
- */
-const OUTCOME_SAMPLES: Score[] = [
-  { home: 1, away: 0 },
-  { home: 2, away: 0 },
-  { home: 2, away: 1 },
-  { home: 3, away: 1 },
-  { home: 0, away: 0 },
-  { home: 1, away: 1 },
-  { home: 2, away: 2 },
-  { home: 0, away: 1 },
-  { home: 0, away: 2 },
-  { home: 1, away: 2 },
-  { home: 1, away: 3 },
-];
+import { isUnknownBet, pointRange, resultRepresentatives } from '../rules/outcomes.js';
 
 export type Outcome = 'home' | 'draw' | 'away';
 
@@ -61,16 +40,6 @@ export interface RivalAnalysis {
   note?: string;
 }
 
-function outcomeOf(score: Score): Outcome {
-  if (score.home > score.away) return 'home';
-  if (score.home < score.away) return 'away';
-  return 'draw';
-}
-
-function pointsAgainst(bet: Score | null, result: Score, rules: ScoringRules): number {
-  return bet ? scoreBet(bet, result, rules) : 0;
-}
-
 /**
  * How much this match can move the gap, per outcome class and overall.
  *
@@ -85,20 +54,22 @@ export function matchSwing(
   rules: ScoringRules,
   rivalKnown: boolean,
 ): MatchSwing {
-  const mine = parseScore(myBet);
-  const theirs = parseScore(rivalBet);
+  // Legacy callers use null with rivalKnown=true for a confirmed missing tip.
+  // The grid caller below supplies '-:-' for unknown player rows instead.
+  const mine = myBet ?? (rivalKnown ? '' : '-:-');
+  const theirs = rivalBet ?? (rivalKnown ? '' : '-:-');
+  const known = !isUnknownBet(mine) && !isUnknownBet(theirs);
   const settledResult = parseScore(match.result);
 
   if (settledResult) {
-    const delta = pointsAgainst(mine, settledResult, rules) - pointsAgainst(theirs, settledResult, rules);
+    const myPoints = pointRange(mine, settledResult, rules);
+    const rivalPoints = pointRange(theirs, settledResult, rules);
+    const best = myPoints.best - rivalPoints.worst;
+    const worst = myPoints.worst - rivalPoints.best;
     return {
-      home: match.home,
-      away: match.away,
-      myBet,
-      rivalBet,
-      bestForMe: delta,
-      worstForMe: delta,
-      settled: delta,
+      home: match.home, away: match.away, myBet, rivalBet,
+      bestForMe: best, worstForMe: worst,
+      ...(best === worst ? { settled: best } : {}),
     };
   }
 
@@ -107,27 +78,20 @@ export function matchSwing(
     draw: { best: -Infinity, worst: Infinity },
     away: { best: -Infinity, worst: Infinity },
   };
-
-  for (const sample of OUTCOME_SAMPLES) {
-    const myPoints = pointsAgainst(mine, sample, rules);
-    // Without the rival's bet, bound their score by what any bet could earn.
-    const rivalPoints = rivalKnown ? pointsAgainst(theirs, sample, rules) : scoreBet(sample, sample, rules);
-    const rivalFloor = rivalKnown ? rivalPoints : 0;
-
-    const outcome = outcomeOf(sample);
-    byOutcome[outcome].best = Math.max(byOutcome[outcome].best, myPoints - rivalFloor);
-    byOutcome[outcome].worst = Math.min(byOutcome[outcome].worst, myPoints - rivalPoints);
+  for (const sample of resultRepresentatives([mine, theirs])) {
+    const myPoints = pointRange(mine, sample, rules);
+    const rivalPoints = pointRange(theirs, sample, rules);
+    const outcome = sample.home > sample.away ? 'home' : sample.home < sample.away ? 'away' : 'draw';
+    byOutcome[outcome].best = Math.max(byOutcome[outcome].best, myPoints.best - rivalPoints.worst);
+    byOutcome[outcome].worst = Math.min(byOutcome[outcome].worst, myPoints.worst - rivalPoints.best);
   }
 
   const all = Object.values(byOutcome);
   return {
-    home: match.home,
-    away: match.away,
-    myBet,
-    rivalBet,
+    home: match.home, away: match.away, myBet, rivalBet,
     bestForMe: Math.max(...all.map((o) => o.best)),
     worstForMe: Math.min(...all.map((o) => o.worst)),
-    byOutcome: rivalKnown ? byOutcome : undefined,
+    byOutcome: known ? byOutcome : undefined,
   };
 }
 
@@ -179,28 +143,41 @@ export function analyseRival(
 ): RivalAnalysis {
   const mine = grid.players.find((p) => p.player === player);
   const theirs = grid.players.find((p) => p.player === rival);
-  const rivalKnown = Boolean(mine && theirs);
+  const rivalKnown = Boolean(mine && theirs) && grid.matches.every((_, i) =>
+    !isUnknownBet(mine?.bets[i]) && !isUnknownBet(theirs?.bets[i]));
   const mode: RivalMode = rivalKnown ? 'exact' : 'bounds';
+  const multiplier = multiplierFor(grid.matchday, rules);
 
-  const perMatch = grid.matches.map((match, i) =>
-    matchSwing(match, mine?.bets[i] ?? null, theirs?.bets[i] ?? null, rules, rivalKnown),
-  );
+  const perMatch = grid.matches.map((match, i) => {
+    const swing = matchSwing(match, mine?.bets[i] ?? '-:-', theirs?.bets[i] ?? '-:-', rules, rivalKnown);
+    return {
+      ...swing,
+      bestForMe: swing.bestForMe * multiplier,
+      worstForMe: swing.worstForMe * multiplier,
+      settled: swing.settled === undefined ? undefined : swing.settled * multiplier,
+      byOutcome: swing.byOutcome ? {
+        home: { best: swing.byOutcome.home.best * multiplier, worst: swing.byOutcome.home.worst * multiplier },
+        draw: { best: swing.byOutcome.draw.best * multiplier, worst: swing.byOutcome.draw.worst * multiplier },
+        away: { best: swing.byOutcome.away.best * multiplier, worst: swing.byOutcome.away.worst * multiplier },
+      } : undefined,
+    };
+  });
 
-  const open = perMatch.filter((m) => m.settled === undefined);
-  const settledDelta = perMatch
-    .filter((m) => m.settled !== undefined)
-    .reduce((sum, m) => sum + (m.settled as number), 0);
-
+  const open = perMatch.filter((_, i) => !parseScore(grid.matches[i].result));
+  const finished = perMatch.filter((_, i) => parseScore(grid.matches[i].result));
+  const uncertainFinished = finished.some((m) => m.settled === undefined);
+  const settledDelta = finished.reduce((sum, m) => sum + (m.settled ?? 0), 0);
   const swingRange = {
     best: open.reduce((sum, m) => sum + m.bestForMe, 0),
     worst: open.reduce((sum, m) => sum + m.worstForMe, 0),
   };
-
-  const startingGap = gapBefore === null ? null : gapBefore + settledDelta;
-  const anyTip = perMatch.some((m) => m.myBet || m.rivalBet);
+  const startingGap = gapBefore === null || uncertainFinished ? null : gapBefore + settledDelta;
+  const anyTip = Boolean(mine || theirs) && perMatch.some((m) => m.myBet || m.rivalBet);
   const conditions: string[] = [];
 
-  if (!anyTip) {
+  if (uncertainFinished) {
+    conditions.push('Some already-played predictions are hidden, so the current points gap is unknown.');
+  } else if (!anyTip) {
     conditions.push(describeWithoutTips(rival, startingGap));
   } else if (open.length === 0) {
     conditions.push(describeFinished(rival, startingGap));
@@ -216,7 +193,9 @@ export function analyseRival(
     conditions.push(
       swingRange.best > 0
         ? `You are level; out-scoring ${rival} by 1 would take the lead, and up to ${swingRange.best} is available.`
-        : `You are level, and the remaining matches cannot change that.`,
+        : swingRange.worst < 0
+          ? `You are level; a lead is out of reach, but you can still fall behind ${rival}.`
+          : `You are level, and the remaining matches cannot change that.`,
     );
   } else {
     const needed = -startingGap;
