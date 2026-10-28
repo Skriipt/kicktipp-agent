@@ -1,171 +1,129 @@
-import { spawn } from 'child_process';
-import { readConfig, saveNotifySection } from '../config.js';
+/** Notification destinations are configured locally, never by remote MCP calls. */
+export type NotificationChannel =
+  | { id: string; kind: 'webhook'; url: string }
+  | { id: string; kind: 'discord'; url: string }
+  | { id: string; kind: 'telegram'; botToken: string; chatId: string };
 
-export const NOTIFIER_KINDS = ['desktop', 'webhook', 'command'] as const;
-export type NotifierKind = (typeof NOTIFIER_KINDS)[number];
-
-export interface NotifierConfig {
-  kind: NotifierKind;
-  /** webhook: the URL to POST to. command: the program to run. */
-  target?: string;
+export interface NotificationPayload {
+  summary: string;
+  [key: string]: unknown;
 }
 
-function isNotifierKind(value: string): value is NotifierKind {
-  return (NOTIFIER_KINDS as readonly string[]).includes(value);
-}
-
-/**
- * Validate a kind/target pair the way the CLI and MCP both accept it.
- * Desktop ignores a leftover target; webhook and command require one.
- */
-export function parseNotifierSettings(kindRaw: string, targetRaw?: string): NotifierConfig {
-  const kind = kindRaw.trim().toLowerCase();
-  if (!isNotifierKind(kind)) {
-    throw new Error(`Unknown notifier '${kindRaw}'. Use desktop, webhook or command.`);
+export class NotificationError extends Error {
+  constructor(message: string, readonly retryAfterMs?: number) {
+    super(message);
+    this.name = 'NotificationError';
   }
-  const target = targetRaw?.trim() || undefined;
-  if (kind === 'desktop') return { kind: 'desktop' };
-  if (!target) {
-    throw new Error(
-      kind === 'webhook'
-        ? 'The webhook notifier needs a URL (for example https://ntfy.sh/your-topic).'
-        : 'The command notifier needs an executable path.',
-    );
+}
+
+function required(value: unknown, message: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(message);
+  return value.trim();
+}
+
+/** Errors deliberately exclude URLs and bot tokens, which are credentials. */
+export function validateChannel(value: unknown): NotificationChannel {
+  if (!value || typeof value !== 'object') throw new Error('Notification channel must be an object.');
+  const row = value as Record<string, unknown>;
+  const id = required(row.id, 'Notification channel needs an id.');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(id)) {
+    throw new Error('Notification channel id must use 1–64 letters, digits, underscores or hyphens.');
   }
-  if (kind === 'webhook' && !/^https?:\/\//i.test(target)) {
-    throw new Error('Webhook target must be an http(s) URL.');
+  if (row.kind === 'telegram') {
+    const botToken = required(row.botToken, 'Telegram needs a bot token from BotFather.');
+    if (!/^\d+:[A-Za-z0-9_-]+$/.test(botToken)) throw new Error('Telegram bot token has an invalid format.');
+    const chatId = required(row.chatId, 'Telegram needs a chat id. Start a conversation with your bot first.');
+    if (!/^(?:-?\d+|@[A-Za-z0-9_]+)$/.test(chatId)) throw new Error('Telegram chat id has an invalid format.');
+    return { id, kind: 'telegram', botToken, chatId };
   }
-  return { kind, target };
-}
-
-export function applyNotifierSettings(kind: string, target?: string): NotifierConfig {
-  const parsed = parseNotifierSettings(kind, target);
-  saveNotifySection(parsed);
-  return parsed;
-}
-
-/**
- * Which notifier to use, from the [notify] config section:
- *
- *   [notify]
- *   kind = webhook
- *   target = https://ntfy.sh/my-topic
- *
- * There is deliberately no default endpoint — a webhook only ever goes
- * somewhere the user named themselves.
- */
-export function readNotifierConfig(): NotifierConfig {
-  const notify = readConfig().notify ?? {};
-  const kindRaw = String(process.env.KICKTIPP_NOTIFY_KIND || notify.kind || 'desktop');
-  const kind: NotifierKind = isNotifierKind(kindRaw) ? kindRaw : 'desktop';
-  const target = process.env.KICKTIPP_NOTIFY_TARGET || notify.target;
-  return { kind, target };
-}
-
-/** Effective notifier plus whether env vars are shadowing the ini file. */
-export function notifierSnapshot(): {
-  kind: NotifierKind;
-  target: string | null;
-  from_env: boolean;
-} {
-  const cfg = readNotifierConfig();
-  return {
-    kind: cfg.kind,
-    target: cfg.target ?? null,
-    from_env: !!(process.env.KICKTIPP_NOTIFY_KIND || process.env.KICKTIPP_NOTIFY_TARGET),
-  };
-}
-
-function run(command: string, args: string[], input?: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr?.on('data', (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on('error', (err) => reject(new Error(`Could not run '${command}': ${err.message}`)));
-    child.on('close', (code) =>
-      code === 0
-        ? resolve()
-        : reject(new Error(`'${command}' exited with ${code}${stderr ? `: ${stderr.trim()}` : ''}`)),
-    );
-    // A command that ignores stdin may exit before we finish writing; that
-    // is not a failure of the notification, so the broken pipe is ignored.
-    child.stdin?.on('error', () => {});
-    child.stdin?.end(input ?? '');
-  });
-}
-
-async function desktop(title: string, body: string): Promise<void> {
-  if (process.platform === 'darwin') {
-    const escape = (s: string) => s.replace(/["\\]/g, '\\$&');
-    // A silent `display notification` is often filed only in Notification
-    // Center. A system sound makes macOS treat it as a real banner. The
-    // short delay keeps osascript alive until that banner is posted.
-    await run('osascript', [
-      '-e',
-      `display notification "${escape(body)}" with title "${escape(title)}" sound name "Glass"`,
-      '-e',
-      'delay 1',
-    ]);
-    return;
+  if (row.kind !== 'webhook' && row.kind !== 'discord') {
+    throw new Error('Notification kind must be webhook, discord or telegram.');
   }
-  if (process.platform === 'linux') {
-    await run('notify-send', [title, body]);
-    return;
+  const address = required(row.url, 'Notification channel needs a URL.');
+  let url: URL;
+  try { url = new URL(address); } catch { throw new Error('Notification URL must be an absolute HTTP(S) URL.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) {
+    throw new Error('Notification URL must use HTTP(S), without user information or a fragment.');
   }
-  throw new Error(
-    `No desktop notifier for ${process.platform}. Use the webhook or command backend instead.`,
-  );
+  if (row.kind === 'discord' && (
+    url.protocol !== 'https:' ||
+    !['discord.com', 'discordapp.com', 'canary.discord.com', 'ptb.discord.com'].includes(url.hostname) ||
+    !/^\/api(?:\/v\d+)?\/webhooks\/\d+\/[A-Za-z0-9_-]+\/?$/.test(url.pathname)
+  )) {
+    throw new Error('Discord needs the webhook URL copied from channel settings → Integrations → Webhooks.');
+  }
+  return { id, kind: row.kind, url: url.href };
 }
 
-async function webhook(target: string, payload: unknown): Promise<void> {
-  const res = await fetch(target, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`Webhook ${target} answered ${res.status} ${res.statusText}.`);
+function limitedText(text: string, limit: number): string {
+  const chars = Array.from(text);
+  return chars.length <= limit ? text : chars.slice(0, limit - 1).join('') + '…';
 }
 
-/**
- * Deliver a notification. The payload is the deadline report plus a human
- * `summary`, documented as a stable shape so webhook consumers can rely
- * on it.
- */
-export async function notify(
-  config: NotifierConfig,
-  summary: string,
-  payload: unknown,
-  deps: { fetchImpl?: typeof fetch } = {},
+/** One POST per attempt. The scheduler decides when a failed channel is retried. */
+export async function sendNotification(
+  channel: NotificationChannel,
+  payload: NotificationPayload,
+  deps: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<void> {
-  switch (config.kind) {
-    case 'desktop':
-      return desktop('kicktipp', summary);
-    case 'webhook': {
-      if (!config.target) {
-        throw new Error('The webhook notifier needs a target URL ([notify] target = ...).');
+  const validated = validateChannel(channel);
+  let target: string;
+  let body: unknown;
+  if (validated.kind === 'telegram') {
+    target = `https://api.telegram.org/bot${validated.botToken}/sendMessage`;
+    body = {
+      chat_id: validated.chatId,
+      text: limitedText(payload.summary, 4096),
+      link_preview_options: { is_disabled: true },
+    };
+  } else if (validated.kind === 'discord') {
+    const url = new URL(validated.url);
+    // Without wait, Discord may return 204 even when a message was not saved.
+    url.searchParams.set('wait', 'true');
+    target = url.href;
+    body = { content: limitedText(payload.summary, 2000), allowed_mentions: { parse: [] } };
+  } else {
+    target = validated.url;
+    body = payload;
+  }
+
+  try {
+    const response = await (deps.fetchImpl ?? fetch)(target, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      redirect: 'error',
+      signal: AbortSignal.timeout(deps.timeoutMs ?? 15_000),
+    });
+    if (!response.ok) {
+      let seconds = Number(response.headers.get('retry-after'));
+      if (validated.kind === 'telegram') {
+        // Telegram normally places its rate-limit delay in the JSON envelope.
+        const data = await response.json().catch(() => null) as { parameters?: { retry_after?: number } } | null;
+        if (typeof data?.parameters?.retry_after === 'number') seconds = data.parameters.retry_after;
+      } else {
+        await response.body?.cancel();
       }
-      const body = { summary, ...(payload as object) };
-      if (deps.fetchImpl) {
-        const res = await deps.fetchImpl(config.target, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error(`Webhook ${config.target} answered ${res.status}.`);
-        return;
-      }
-      return webhook(config.target, body);
+      throw new NotificationError(
+        `${validated.kind} delivery failed (HTTP ${response.status}).`,
+        Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 86_400_000) : undefined,
+      );
     }
-    case 'command':
-      if (!config.target) {
-        throw new Error('The command notifier needs a command ([notify] target = ...).');
+    if (validated.kind === 'telegram') {
+      const data = await response.json() as { ok?: boolean; parameters?: { retry_after?: number } };
+      if (data.ok !== true) {
+        throw new NotificationError('Telegram did not confirm delivery.',
+          typeof data.parameters?.retry_after === 'number'
+            ? Math.min(Math.max(data.parameters.retry_after, 0) * 1000, 86_400_000)
+            : undefined);
       }
-      // Summary as argv, full payload on stdin, so a simple script can use
-      // either without parsing.
-      return run(config.target, [summary], JSON.stringify(payload));
-    default:
-      throw new Error(`Unknown notifier '${config.kind}'. Use desktop, webhook or command.`);
+    } else {
+      await response.body?.cancel();
+    }
+  } catch (error) {
+    if (error instanceof NotificationError) throw error;
+    // fetch errors can contain the complete URL, including a bot/webhook token.
+    const timedOut = error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name);
+    throw new NotificationError(`${validated.kind} delivery ${timedOut ? 'timed out' : 'failed; check connectivity and channel settings'}.`);
   }
 }

@@ -1,297 +1,276 @@
-<div align="center">
+# kicktipp-agent
 
-<img src="assets/readme/hero.svg" width="100%" alt="kicktipp-agent: your Kicktipp prediction pool from the terminal or your AI assistant">
+A self-hosted Kicktipp service for your AI assistant, with automatic reminders through **Discord, Telegram and webhooks**. Start it with Docker Compose, connect your agent over MCP, and let the service check for missing tips even when no agent is connected.
 
-[![GitHub release](https://img.shields.io/github/v/release/Skriipt/kicktipp-agent?style=flat-square)](https://github.com/Skriipt/kicktipp-agent/releases/latest)
-[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Release](https://img.shields.io/github/actions/workflow/status/Skriipt/kicktipp-agent/release-mcpb.yml?style=flat-square&label=release)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/release-mcpb.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![CI](https://github.com/Skriipt/kicktipp-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Features](#features) · [Quick start](#quick-start) · [CLI](#cli) · [MCP](#mcp-server) · [Safety](#privacy-and-safety) · [Development](#development)
+[Quick start](#quick-start) · [Notifications](#notifications) · [Connect your agent](#connect-your-agent) · [CLI](#cli) · [Operations](#operations)
 
-<br>
-
-<img src="docs/images/tui-prediction.jpg" width="100%" alt="Full-screen prediction grid with fixtures, score fields, suggested scores, and keyboard shortcuts">
-
-<sub>The full-screen prediction grid: type a score or press <code>s</code> to take the suggestion.</sub>
-
-</div>
-
-<br>
-
-`kicktipp-agent` is a local client for [Kicktipp](https://www.kicktipp.com/)
-(`kicktipp.com` and `kicktipp.de`). It runs on your machine and talks to Kicktipp
-over plain HTTP, with no browser automation. Use it as a full-screen terminal UI,
-as a scriptable CLI, or as an MCP server for Claude and other assistants.
-
-> [!IMPORTANT]
-> This is an unofficial client. Kicktipp has no public API, so website changes
-> can break its parsers. Review your tips before submitting them.
-
-## Features
-
-| | |
-| --- | --- |
-| **Full-screen TUI** | Browse fixtures and place tips with the keyboard. |
-| **Scriptable CLI** | Schedules, standings, rules, deadlines, and tipping, with `--json` output. |
-| **MCP server** | Lets Claude and other MCP clients read your pool and place tips. |
-| **Odds-based suggestions** | `safe`, `ev`, and `contrarian` strategies built on Kicktipp's published odds. |
-| **Season analytics** | Stats, rival analysis, standings scenarios, and strategy replays from a local cache. |
-| **Reminders** | Desktop, webhook, or command notifications, plus systemd, cron, and `.ics` output. |
-| **Audit log and undo** | Every submission is logged locally and can be rolled back. |
-| **Multi-account** | Separate profiles for accounts, communities, and players. |
-| **Community admin** | Spielleiter tools to place tips on behalf of other members. |
-
-The CLI and the MCP server share one core for data, analytics, and submission
-logic, and a read-only guard checks every write.
-
-<p align="center">
-  <img src="assets/readme/architecture.svg" width="100%" alt="The TUI, CLI, and MCP server all use one shared core. The core talks to Kicktipp over plain HTTP and keeps a local season cache and audit log. A read-only guard checks every write.">
-</p>
+The service supports [kicktipp.de](https://www.kicktipp.de/) and [kicktipp.com](https://www.kicktipp.com/). It reads the website over HTTP without browser automation. This is an unofficial client; website changes can require parser updates.
 
 ## Quick start
 
-Requires [Node.js](https://nodejs.org/) 20 or newer.
-
-> [!NOTE]
-> This fork is not published on npm. The unscoped `kicktipp-agent` package
-> belongs to the upstream project, so build from source or use the Claude
-> Desktop bundle.
-
-<details open>
-<summary><b>Terminal</b></summary>
+Install Docker with the Compose plugin, then run:
 
 ```bash
 git clone https://github.com/Skriipt/kicktipp-agent.git
 cd kicktipp-agent
-npm install && npm run build && npm link
-
-kicktipp login --web   # private setup page on 127.0.0.1
-kicktipp tui           # open the full-screen UI
+docker compose build
+docker compose run --rm kicktipp setup
+docker compose up -d
 ```
 
-</details>
+The terminal wizard walks you through:
 
-<details>
-<summary><b>Claude Desktop</b></summary>
+1. Entering your Kicktipp email and password. Secret input is hidden.
+2. Verifying the login and choosing from your existing tipprunden.
+3. Choosing whether your agent may submit tips. **Read-only is the default.**
+4. Adding Discord, Telegram or webhook destinations, with an optional test message for each.
+5. Choosing reminder times and a check interval. Defaults: **24, 6 and 1 hour before kickoff**, checked every **15 minutes**.
 
-1. Download [`kicktipp.mcpb`](https://github.com/Skriipt/kicktipp-agent/releases/latest/download/kicktipp.mcpb) from the [latest release](https://github.com/Skriipt/kicktipp-agent/releases/latest).
-2. Open it with Claude Desktop and fill in the settings form.
-3. Restart Claude Desktop and start a new chat.
-4. Ask: *"What is my Kicktipp status?"*
+Setup reads your account and communities; it never submits tips. You can skip notifications initially and add them later. The wizard prints the MCP URL and an automatically generated access token. There is no web setup page or extra database to install.
 
-The bundle runs locally. It is not a hosted service.
-
-</details>
-
-<details>
-<summary><b>Claude Code and other MCP clients</b></summary>
-
-Build the repository as shown above, then register the server:
+Check the service:
 
 ```bash
-claude mcp add kicktipp -- node /absolute/path/to/kicktipp-agent/dist/server.js
+docker compose ps
+docker compose logs --tail=50 kicktipp
+docker compose exec kicktipp node dist/service/main.js status
 ```
 
-Any MCP client can run the same command over stdio. Ask the assistant to set up
-your account, then open the localhost URL it returns. Never paste your password
-into the chat.
+This fork is not published to npm. The unscoped npm package belongs to the upstream project; build this repository to use this version.
 
-</details>
+## What it does
+
+- Reads matches, schedules, results, your tips, deadlines and other players' tip-completeness status.
+- Retrieves rankings, season overviews, league tables and community scoring rules.
+- Submits regular and bonus tips when write access is enabled, then verifies the saved values.
+- Keeps Spielleiter tools for listing members and reading or submitting their tips, with the existing member confirmation safeguards.
+- Provides season synchronization, statistics and odds-based suggestions (`safe`, `ev`, `contrarian`, `auto`). Suggestions do not submit anything themselves.
+- Keeps a local cache and submission audit log, with CLI undo for the latest eligible submission.
+- Sends missing-tip reminders independently of MCP clients and reports account/connectivity problems.
+
+No language model is bundled. Your agent connects when needed; reminder checks do not require an LLM.
+
+## Notifications
+
+All configured channels use the same reminder windows and check interval. You can enable several destinations at once. A reminder is sent only for a missing tip with a known, future kickoff. Existing tips and games that have started are skipped.
+
+Change channels or timing at any time:
+
+```bash
+docker compose run --rm kicktipp setup --notifications
+docker compose restart kicktipp
+```
+
+The wizard lets you retain existing channels or replace them. It can send a test before saving a new destination. To test all saved destinations without contacting Kicktipp:
+
+```bash
+docker compose run --rm kicktipp notify --test
+```
+
+### Discord
+
+1. Open the Discord text channel's settings.
+2. Choose **Integrations → Webhooks → New Webhook** and copy its URL. You need permission to manage webhooks in that server.
+3. Choose **discord** in the wizard and paste the URL.
+4. Accept the test message and check the channel.
+
+The service formats the message for Discord automatically. It disables mentions, so a team or community name cannot trigger an `@everyone` ping. No Discord bot or custom message template is needed. Forum channels may require a webhook URL with the appropriate `thread_id` query parameter.
+
+### Telegram
+
+1. Open [@BotFather](https://t.me/BotFather), send `/newbot`, and follow the prompts.
+2. Copy the bot token into the wizard's hidden token prompt.
+3. Open your new bot and send `/start`.
+4. Leave **Chat-ID** empty to discover your chat and select it from the list.
+5. Accept the test message.
+
+For a group, add the bot and send `/start@YourBotUsername` in that group before discovery. You can also enter a known chat ID directly. Existing bots that use a Telegram webhook or have another consumer reading their updates may need manual chat-ID entry; setup does not remove their webhook or consume updates. The bot needs permission to post in the destination.
+
+### Generic webhook
+
+Choose **webhook** and paste your receiver's HTTP(S) URL. It receives a JSON `POST`; the receiver must accept that format. The service does not follow redirects. A normal scheduled reminder looks like this:
+
+```json
+{
+  "event": "missing_tips",
+  "summary": "Kicktipp (my-pool): 1 Tipp fehlen. …",
+  "community": "my-pool",
+  "matchday": null,
+  "timeZone": "Europe/Berlin",
+  "checkedAt": "2026-10-28T12:00:00.000Z",
+  "warnHours": 6,
+  "matches": [
+    {
+      "home": "Home team",
+      "away": "Away team",
+      "kickoff": "2026-10-28T16:00:00.000Z",
+      "bet": null,
+      "needsBet": true,
+      "closed": false,
+      "urgent": true
+    }
+  ]
+}
+```
+
+Test messages have `event: "test"` and `summary`. Operational alerts have `event: "service_error"`, a `code` (`auth_required` or `check_failed`) and `summary`. `matchday` can be `null` when checking the current matchday.
+
+### Delivery behavior
+
+Successful reminders are remembered separately for each match, kickoff, warning window and destination. Restarting normally does not resend them. A failed destination retries with backoff without repeating messages to destinations that succeeded. If the service first starts 30 minutes before kickoff, it sends the most urgent crossed window rather than all three reminders at once.
+
+Login or check failures produce an operational alert, at most once per destination every six hours during the same outage. Check time is approximate: with a 15-minute interval, a reminder can arrive up to about 15 minutes after its configured threshold, plus network time. Changing the schedule or a destination requires restarting the service.
+
+External delivery and a local checkpoint cannot be atomic. If a process crashes after a provider accepts a message but before the checkpoint is saved, a later retry can duplicate it. Missing-tip reminders are never permission to submit a tip automatically.
+
+## Connect your agent
+
+Use an MCP client that supports **Streamable HTTP** and a bearer-token header:
+
+| Setting | Value |
+| --- | --- |
+| MCP URL | `http://127.0.0.1:8787/mcp` |
+| Transport | Streamable HTTP |
+| Header name | `Authorization` |
+| Header value | `Bearer YOUR_ACCESS_TOKEN` |
+
+The wizard prints the token. To display it again on your own terminal:
+
+```bash
+docker compose run --rm kicktipp connection
+```
+
+Keep it in your client's secret configuration. Do not put Kicktipp credentials or the access token into agent prompts. Ask your agent to call `get_status` first, then try “Which upcoming games still need a tip?”
+
+The Compose service has a fixed account and community. To change them or enable tip submission, rerun the full setup and restart:
+
+```bash
+docker compose run --rm kicktipp setup
+docker compose restart kicktipp
+```
+
+Read-only mode hides submission tools and enforces the restriction in the shared core. Notification settings and account setup remain local administrator operations; remote MCP calls cannot replace your channel credentials.
+
+### Agent on another computer
+
+Compose publishes port 8787 on the server's loopback interface only. From the computer running your agent, an SSH tunnel can make that endpoint available locally:
+
+```bash
+ssh -N -L 8787:127.0.0.1:8787 your-server
+```
+
+Keep the tunnel open and use the same localhost URL and token. Alternatively, put an authenticated HTTPS reverse proxy in front of the loopback endpoint, preserving the `Authorization` header. Browser-based clients also need their exact origin added to `server.allowedOrigins` in the service configuration; the default allows no browser origins. Forwarding the port alone does not add HTTPS.
+
+### Optional stdio clients
+
+For a client that can only launch an MCP subprocess, run this command from the repository directory:
+
+```bash
+docker compose run --rm -T kicktipp mcp-stdio
+```
+
+This launches a separate stdio process; it does not connect to the running HTTP service. Use one Kicktipp process at a time for that data volume. HTTP MCP is the intended way to share the daemon and its reminder scheduler. Webhook notification URLs are outbound destinations and are unrelated to the MCP endpoint.
 
 ## CLI
 
-```bash
-kicktipp today          # today's matches and open tips
-kicktipp deadline       # time until kickoff, tips still missing
-kicktipp leaderboard    # current standings
-kicktipp bet            # interactive prediction grid
-```
-
-Place tips directly, including bonus questions:
+The scriptable CLI remains available inside the image:
 
 ```bash
-kicktipp bet "FC Bayern München vs Borussia Dortmund=2:1"
-kicktipp bet --bonus "Who will win the league?=FC Bayern München"
+docker compose run --rm kicktipp --help
+docker compose run --rm kicktipp today
+docker compose run --rm kicktipp bets --json
+docker compose run --rm kicktipp leaderboard
+docker compose run --rm kicktipp suggest --strategy ev
+docker compose run --rm kicktipp admin members
+docker compose run --rm kicktipp log
 ```
 
-**Prediction grid keys:** `↑↓←→` move · `0-9` enter score · `s` suggest one ·
-`a` fill empty rows · `w` submit · `q` quit without submitting.
-
-### Commands
-
-Run `kicktipp <command> --help` for options. The global flags `--community`,
-`--profile`, `--lang`, and `--site` override saved settings for a single run.
-
-<details>
-<summary><b>All commands by area</b></summary>
+Use HTTP MCP while the daemon is running. For standalone Kicktipp CLI work, stop the daemon first and start it afterward, so separate processes cannot race on the same account and files. `notify --test` only tests external destinations and needs no Kicktipp session.
 
 | Area | Commands |
 | --- | --- |
-| Setup | `login` `logout` `communities` `set-community` `players` `set-player` `profiles` `set-lang` `set-site` |
-| Matches and tips | `today` `schedule` `bets` `bet` `tip-status` `deadline` |
-| Rankings and rules | `leaderboard` `overview` `table` `rules` |
-| Analytics | `sync` `stats` `rival` `suggest` `scenario` `whatif` |
-| Automation and history | `remind` `notify` `set-notify` `log` `cache` |
-| Other | `tui` `guide` `admin` |
+| Matches and tips | `today`, `schedule`, `bets`, `bet`, `tip-status`, `deadline` |
+| Rankings and rules | `leaderboard`, `overview`, `table`, `rules` |
+| Data and suggestions | `sync`, `stats`, `suggest`, `cache` |
+| History and administration | `log`, `admin members`, `admin bets`, `admin bet` |
+| Setup and help | `setup`, `notify`, `guide`, plus standalone account/profile commands |
 
-</details>
+`bet` now requires explicit arguments such as `"Home vs Away=2:1"`; there is no terminal grid. Bonus tips use `bet --bonus "Question=Answer"`. Write access must be enabled first. `suggest` previews a slip; `--place` submits it, and `--replace` permits replacing existing tips.
 
-### Analytics
+`log --undo` restores replaced tips from the latest successful regular submission by the signed-in account. It does not undo bonus tips, Spielleiter submissions, newly added tips without a previous value, or games whose deadline has passed.
 
-```bash
-kicktipp sync                      # fill the local season cache
-kicktipp stats                     # your season statistics
-kicktipp rival Papa                # what it takes to overtake a rival
-kicktipp suggest --strategy ev     # print a slip, submit nothing
-kicktipp whatif suggest:ev         # replay the season with another strategy
-```
+## Operations
 
-- `suggest` only prints a slip. Add `--place` to submit it and `--replace` to
-  overwrite existing tips.
-- Analytics read your community's win/draw point matrix from its rules page.
-  Incomplete or unsupported schemes are rejected, never guessed.
-- Hidden predictions remain unknown in standings and rival analyses. Target
-  searches return `achievable: null` when hidden tips or the search budget
-  prevent a conclusion; `false` means the target was proved unreachable.
+### Health and status
 
-### Reminders
+- `GET /health` is an unauthenticated liveness check used by Docker. It says that the HTTP process is responding, not that Kicktipp login or notification delivery succeeded.
+- `GET /status`, with the same bearer token as MCP, reports the last check, last successful Kicktipp read, next check, failed channels and error category. MCP `get_status` includes this service status too.
+- `docker compose logs kicktipp` shows startup and process errors. Channel secrets and provider response bodies are excluded from notification errors.
 
-```bash
-kicktipp set-notify desktop        # or: webhook <url> | command <path>
-kicktipp remind --install          # systemd user timer (Linux)
-kicktipp remind --print cron       # crontab line
-kicktipp remind --ics season.ics   # calendar alarms for every kickoff
-```
+`auth_required` means the Kicktipp login needs attention; rerun setup. `delivery_failed` means one or more channels need attention or are waiting for retry. `check_failed` can mean connectivity or changed Kicktipp markup. `state_failed` means the reminder history could not be written. Fix the underlying problem before deleting history, since deleting it permits reminders to be sent again.
 
-Desktop notifications support macOS and Linux. On Windows, use the webhook or
-command backend with Task Scheduler, or import the `.ics` file.
+### Persistent data and backups
 
-### Profiles
+Compose creates a named `kicktipp-data` volume mounted at `/data`. It contains:
+
+- `/data/service.json`: account, MCP and notification settings, including secrets in **plain text**, restricted to the file owner (`0600`). This is not encrypted storage.
+- Account-scoped session cookies, local cache, audit records and reminder-delivery history under `/data/accounts/`.
+
+Keep the entire volume private and include it in encrypted backups. Stop the service while taking a consistent backup. Never commit its contents or copy them into your image. Normal `docker compose down` preserves the volume; `docker compose down -v` deletes it.
+
+Use one service instance per volume and account. Multiple replicas sharing the same volume are not supported. For a separate account, use a separate Compose project and host port:
 
 ```bash
-kicktipp -c another-pool schedule   # one-off community
-kicktipp -p work stats              # separate account and session
+docker compose -p kicktipp-second run --rm kicktipp setup
+KICKTIPP_PORT=8788 docker compose -p kicktipp-second up -d
 ```
 
-### History and undo
+Use port 8788 in that instance's client URL. Keep the same project name and port setting for subsequent commands.
+
+### Updating
 
 ```bash
-kicktipp log          # what was submitted, and when
-kicktipp log --undo   # restore the bets replaced by the latest submission
+git pull
+docker compose build
+docker compose up -d
 ```
 
-Undo covers only the latest successful regular match submission of the signed-in
-account. Bonus tips and Spielleiter submissions for other members are skipped.
-History and undo are isolated by account, profile, and site.
+Your configuration and delivery history remain in the volume. Shutdown allows in-flight work to finish; avoid force-killing a process while it is submitting a tip.
 
-## MCP server
+### Submission guarantees
 
-The server exposes the same data, analytics, and submission logic as the CLI.
+Match, bonus and Spielleiter submissions are marked `submitted` only after a fresh read confirms every requested value. A confirmed refusal or unchanged values after a completed request can be `rejected`; lost responses, partial saves or unreadable forms produce `submission_unknown`.
 
-<details>
-<summary><b>All MCP tools by group</b></summary>
+After `submission_unknown`, read the saved tips before trying again. The client does not automatically repeat a bet POST, including after a 307/308 redirect. Other players' predictions remain hidden until Kicktipp reveals them; tip-completeness checks do not expose their scores.
 
-| Group | Tools |
-| --- | --- |
-| Account | `connect_account` `get_status` `get_communities` `set_community` `get_players` `set_player` |
-| Matches and tips | `get_today_matches` `get_schedule` `get_bets` `get_deadline` `get_tip_status` `place_bets` `place_bonus_bets` `get_bonus_questions` |
-| Rankings and rules | `get_leaderboard` `get_overview` `get_table` `get_rules` |
-| Analytics | `sync_history` `get_stats` `get_rival_analysis` `get_standings_scenarios` `suggest_bets` |
-| Automation and history | `set_notify` `get_bet_log` |
-| Community admin | `list_members` `get_bets_for_member` `place_bets_for_member` |
+## Migrating from the desktop version
 
-</details>
+Run the new setup once to configure the Compose volume. TUI and interactive prediction screens, desktop/command notifications, systemd/cron/ICS generation, the localhost web setup, Claude Desktop `.mcpb` packaging, and `rival`/`scenario`/`whatif` have been removed. Existing Kicktipp reads, submissions, Spielleiter functions, statistics and suggestions remain.
 
-If setup is incomplete, `connect_account` returns a private localhost URL.
+Standalone CLI profiles still use the INI configuration. Newly saved encrypted CLI passwords use a random `credentials.key` stored alongside it; back up both files. Older machine-bound passwords migrate on a successful read on their original machine. If moved before migration, reconnect on the new machine. The Compose service uses its separate portable `service.json` file instead.
 
-### Read-only mode
-
-```bash
-KICKTIPP_READ_ONLY=1 node /absolute/path/to/kicktipp-agent/dist/server.js
-```
-
-Read-only mode removes every tool that changes Kicktipp or local settings. It
-can also be enabled on the setup page. The CLI and core submission logic reject
-writes as well, so safety does not depend on the MCP client behaving correctly.
-`connect_account` stays available to save credentials and configuration, but it
-cannot submit tips.
-
-## Configuration
-
-Settings and sessions live in `~/.config/kicktipp-agent/`. Cache and audit data
-use the platform data directory. Manage the cache with `kicktipp cache status`
-and `kicktipp cache clear`.
-
-After upgrading from 1.3.0, run `kicktipp sync` to populate the account-scoped
-cache. Existing cache, audit logs, and session files are retained, but are not
-automatically assigned to an account or used for undo. Accounts with a saved
-password sign in again automatically; session-only accounts need to reconnect
-with `kicktipp login --web` or `connect_account`.
-
-Sync checks the opening round's fixtures and kickoff dates before reusing
-finished history. A changed opening round starts a fresh cache and archives
-the previous files; this also conservatively refreshes history after a fixture
-reschedule. If that check fails, sync reports the failure and preserves the
-existing history.
-
-| Variable | Purpose |
-| --- | --- |
-| `KICKTIPP_EMAIL` `KICKTIPP_PASSWORD` | Login credentials |
-| `KICKTIPP_COMMUNITY` `KICKTIPP_PROFILE` | Default community and profile |
-| `KICKTIPP_SITE` `KICKTIPP_LANG` | Site (`de` or `com`) and interface language (`en` or `de`) |
-| `KICKTIPP_TZ` | Display time zone (IANA name) for kickoff times |
-| `KICKTIPP_READ_ONLY` | Disable all write actions |
-
-Run `kicktipp guide` for the full usage and configuration reference.
-
-## Privacy and safety
-
-- **Local only.** Credentials go solely to the configured Kicktipp base URL. Treat
-  a custom `KICKTIPP_BASE_URL` as trusted.
-- **No passwords in prompts.** The localhost setup page keeps them out of
-  terminal history and chat transcripts.
-- **Encrypted storage.** Stored passwords use AES-256-GCM, bound to the local
-  hostname and OS user. Session-only mode keeps a login cookie instead.
-- **Nothing submitted by accident.** Suggestions are dry runs unless you
-  pass `--place`.
-- **Verified submissions.** Match, bonus, and Spielleiter bets are marked
-  `submitted` only after a fresh read confirms every requested value.
-  `rejected` records a confirmed refusal or unchanged values after a completed
-  request; `submission_unknown` covers lost responses, partial saves, or
-  unreadable/locked forms. Check the saved bets before trying again: the agent
-  never automatically repeats a bet POST, including after a 307/308 redirect.
-- **Respects Kicktipp's rules.** Other players' scores stay hidden until the
-  deadline. `tip-status` only reports complete, partial, or missing.
-
-## Troubleshooting
-
-| Problem | Fix |
-| --- | --- |
-| `node` or `npm` not found | Install Node.js 20+ and reopen the terminal. |
-| Setup page does not open | Copy the printed `127.0.0.1` URL into a local browser. |
-| Changes not picked up after `git pull` | Run `npm run build`. Clients execute `dist/server.js`. |
-| Parsing fails | Retry with `--site de` or `--site com`, then open a sanitized [issue](https://github.com/Skriipt/kicktipp-agent/issues). |
+Legacy cache, session and audit files without verified account ownership remain untouched and are not automatically used for the new account scope. Reconnect and run `sync` to populate fresh history. Season synchronization checks the opening fixtures before reusing finished history; a changed opening round archives the old cache, while a failed check preserves it.
 
 ## Development
 
+For local development, use a supported Node.js version (the container uses Node.js 24):
+
 ```bash
-npm install
-npm run build        # compile TypeScript to dist/
-npm test             # run the test suite (Vitest)
-npm run pack:mcpb    # build kicktipp.mcpb for Claude Desktop
+npm ci
+npm run build
+npm test
+npm run test:container  # requires Docker; builds and checks an isolated fixture stack
+npm run setup
+npm start
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+Build before testing: the MCP integration tests execute the compiled server. Tests use fixtures and local HTTP endpoints; they do not prove that your real Kicktipp account, Discord webhook or Telegram bot is configured correctly. The setup wizard's opt-in test messages verify your own notification destinations.
 
-## Credits
+See [CHANGELOG.md](CHANGELOG.md) and [the architecture notes](docs/CLAUDE.md).
 
-This repository is a fork of Christian Heidorn's
-[kicktipp-agent](https://github.com/christianheidorn/kicktipp-agent). Thanks to
-Christian for the upstream project this version builds on. That project began as
-a fork of [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot)
-and was later rewritten in TypeScript.
+## Credits and license
 
-## License
-
-[MIT](LICENSE)
+This project is a fork of Christian Heidorn's [kicktipp-agent](https://github.com/christianheidorn/kicktipp-agent), which began as a fork of [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot). Licensed under [MIT](LICENSE).

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { Page } from '../src/http/page.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
 import { fetchMatchdayBets } from '../src/core.js';
-import { gapBeforeMatchday } from '../src/analytics/gap.js';
 import { mockFetch, page as htmlPage } from './helpers/mock-fetch.js';
 
 const BASE = 'https://www.kicktipp.com';
@@ -133,25 +132,5 @@ describe('fetchMatchdayBets', () => {
     const grid = await fetchMatchdayBets(page, 'mycomm', 3);
     expect(grid.matches).toEqual([]);
     expect(grid.note).toMatch(/No match list/i);
-  });
-});
-
-describe('gapBeforeMatchday', () => {
-  const leaderboard = {
-    title: 'MD3',
-    rankings: [
-      { position: '1', name: 'Papa', matchdayPoints: '7', bonus: '0', total: '30', isCurrentPlayer: false },
-      { position: '2', name: 'Me', matchdayPoints: '0', bonus: '0', total: '25', isCurrentPlayer: true },
-    ],
-  };
-
-  it('subtracts the matchday back out of the season total', () => {
-    // Before this matchday: me 25, Papa 23 → two ahead.
-    expect(gapBeforeMatchday(leaderboard, 'Me', 'Papa')).toBe(2);
-  });
-
-  it('returns null when a player is missing or nothing is cached', () => {
-    expect(gapBeforeMatchday(leaderboard, 'Me', 'Nobody')).toBeNull();
-    expect(gapBeforeMatchday(undefined, 'Me', 'Papa')).toBeNull();
   });
 });

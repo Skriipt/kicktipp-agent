@@ -94,7 +94,7 @@ async function loginUnlocked(page: Page, username: string, password: string): Pr
   // A failed login lands back on the login page.
   if (page.isAuthRedirect() || page.has('input[type="password"]')) {
     statusClear();
-    throw new Error(t('login.failed'));
+    throw new AuthError(t('login.failed'));
   }
   assertReadable(page, page.url());
   statusClear();

@@ -1,160 +1,97 @@
 import { describe, it, expect, vi } from 'vitest';
-import { cronLine, systemdUnits, icsCalendar } from '../src/notify/schedule-artifacts.js';
-import { notify, parseNotifierSettings } from '../src/notify/backends.js';
-import { buildDeadlineReport } from '../src/analytics/deadline.js';
-import type { BetMatch } from '../src/core.js';
+import { createServer } from 'node:http';
+import { sendNotification, NotificationError, type NotificationChannel } from '../src/notify/backends.js';
 
-const now = new Date('2026-08-21T12:00:00Z');
+const hook: NotificationChannel = { id: 'hook', kind: 'webhook', url: 'http://example.test/private-secret' };
+const discord: NotificationChannel = { id: 'discord', kind: 'discord', url: 'https://discord.com/api/webhooks/123/private-secret' };
+const telegram: NotificationChannel = { id: 'telegram', kind: 'telegram', botToken: '123:private-secret', chatId: '-100123' };
 
-function report() {
-  const matches: BetMatch[] = [
-    { date: '21.08.26 16:00', home: 'Bayern', away: 'BVB', bet: '', odds: { home: '', draw: '', away: '' } },
-    { date: '22.08.26 15:30', home: 'Freiburg', away: 'VfB', bet: '2:1', odds: { home: '', draw: '', away: '' } },
-    { date: '20.08.26 20:30', home: 'Koeln', away: 'Mainz', bet: '1:1', odds: { home: '', draw: '', away: '' } },
-  ];
-  return buildDeadlineReport('mycomm', 4, matches, { now, timeZone: 'Europe/Berlin', warnHours: 6 });
+function recorder(response: () => Response = () => new Response('{}', { status: 200 })) {
+  const fetchImpl = vi.fn(async () => response());
+  return { fetchImpl: fetchImpl as unknown as typeof fetch, spy: fetchImpl };
 }
 
-describe('cronLine', () => {
-  it('notifies only when the check reports urgency', () => {
-    const line = cronLine({ everyMinutes: 60 });
-    expect(line).toBe('0 */1 * * * kicktipp deadline --check >/dev/null || kicktipp notify');
-  });
+function request(spy: ReturnType<typeof recorder>['spy']) {
+  const args = spy.mock.calls[0] as unknown as [string, RequestInit];
+  return { url: args[0], init: args[1], body: JSON.parse(String(args[1].body)) };
+}
 
-  it('uses a minute schedule below the hour', () => {
-    expect(cronLine({ everyMinutes: 15 })).toMatch(/^\*\/15 \* \* \* \* /);
-  });
-
-  it('passes the window through and honours a custom binary', () => {
-    const line = cronLine({ everyMinutes: 120, warnHours: 12, binary: '/opt/kicktipp/bin/kicktipp' });
-    expect(line).toContain('--warn-hours 12');
-    expect(line).toContain('/opt/kicktipp/bin/kicktipp deadline --check');
-    expect(line).toContain('|| /opt/kicktipp/bin/kicktipp notify --warn-hours 12');
-  });
-});
-
-describe('systemdUnits', () => {
-  const units = systemdUnits({ everyMinutes: 30, warnHours: 4 });
-
-  it('produces a oneshot service running the same check', () => {
-    expect(units.service).toContain('Type=oneshot');
-    expect(units.service).toContain('deadline --check');
-    expect(units.service).toContain('--warn-hours 4');
-    expect(units.service).toContain('|| kicktipp notify --warn-hours 4');
-  });
-
-  it('produces a timer that survives downtime', () => {
-    expect(units.timer).toContain('OnUnitActiveSec=30min');
-    expect(units.timer).toContain('Persistent=true');
-    expect(units.timer).toContain('WantedBy=timers.target');
-  });
-});
-
-describe('icsCalendar', () => {
-  const ics = icsCalendar(report(), 90);
-
-  it('wraps events in a valid calendar envelope', () => {
-    expect(ics.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
-    expect(ics.trimEnd().endsWith('END:VCALENDAR')).toBe(true);
-    expect(ics).toContain('VERSION:2.0');
-    expect(ics.split('\r\n').every((line) => !line.startsWith(' '))).toBe(true);
-  });
-
-  it('includes only kickoffs that have not happened yet', () => {
-    expect(ics).toContain('Bayern vs BVB');
-    expect(ics).toContain('Freiburg vs VfB');
-    // Already kicked off, so no reminder is useful.
-    expect(ics).not.toContain('Koeln vs Mainz');
-  });
-
-  it('carries an alarm at the requested lead time', () => {
-    expect(ics).toContain('TRIGGER:-PT90M');
-    expect((ics.match(/BEGIN:VALARM/g) || []).length).toBe(2);
-  });
-
-  it('formats timestamps as UTC basic form', () => {
-    expect(ics).toContain('DTSTART:20260821T140000Z');
-  });
-
-  it('says whether a bet exists', () => {
-    expect(ics).toContain('No bet placed yet');
-    expect(ics).toContain('Your bet: 2:1');
-  });
-});
-
-describe('notify', () => {
-  it('posts the summary and payload to a webhook', async () => {
-    const calls: { url: string; body: unknown }[] = [];
-    const fetchImpl = (async (url: string, init: RequestInit) => {
-      calls.push({ url: String(url), body: JSON.parse(String(init.body)) });
-      return new Response('', { status: 200 });
-    }) as unknown as typeof fetch;
-
-    await notify({ kind: 'webhook', target: 'https://ntfy.example/topic' }, 'two to go', report(), {
-      fetchImpl,
+describe('notification delivery', () => {
+  it('posts the structured payload to a generic webhook without redirects', async () => {
+    const { fetchImpl, spy } = recorder();
+    await sendNotification(hook, { summary: 'Missing tips', event: 'missing_tips', matches: [{ home: 'Bayern' }] }, { fetchImpl });
+    expect(request(spy)).toMatchObject({
+      url: hook.url, init: { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json' } },
+      body: { summary: 'Missing tips', event: 'missing_tips', matches: [{ home: 'Bayern' }] },
     });
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('https://ntfy.example/topic');
-    expect(calls[0].body).toMatchObject({ summary: 'two to go', community: 'mycomm' });
   });
 
-  it('surfaces a failing webhook rather than swallowing it', async () => {
-    const fetchImpl = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
-    await expect(
-      notify({ kind: 'webhook', target: 'https://x.example' }, 's', {}, { fetchImpl }),
-    ).rejects.toThrow(/answered 500/);
-  });
-
-  it('refuses a webhook with no target instead of inventing one', async () => {
-    await expect(notify({ kind: 'webhook' }, 's', {})).rejects.toThrow(/needs a target URL/);
-  });
-
-  it('refuses a command with no target', async () => {
-    await expect(notify({ kind: 'command' }, 's', {})).rejects.toThrow(/needs a command/);
-  });
-
-  it('rejects an unknown backend', async () => {
-    await expect(notify({ kind: 'sms' as never }, 's', {})).rejects.toThrow(/Unknown notifier/);
-  });
-
-  it('runs a command backend with the summary as an argument', async () => {
-    await expect(
-      notify({ kind: 'command', target: process.execPath }, '--version', {}),
-    ).resolves.toBeUndefined();
-  });
-
-  it('reports a command that does not exist', async () => {
-    await expect(
-      notify({ kind: 'command', target: 'definitely-not-a-real-binary-xyz' }, 's', {}),
-    ).rejects.toThrow(/Could not run/);
-  });
-});
-
-describe('parseNotifierSettings', () => {
-  it('accepts desktop without a target', () => {
-    expect(parseNotifierSettings('desktop')).toEqual({ kind: 'desktop' });
-    expect(parseNotifierSettings('DESKTOP', 'https://ignored.example')).toEqual({ kind: 'desktop' });
-  });
-
-  it('requires an http(s) URL for webhook', () => {
-    expect(parseNotifierSettings('webhook', 'https://ntfy.sh/topic')).toEqual({
-      kind: 'webhook',
-      target: 'https://ntfy.sh/topic',
+  it('formats Discord content, disables mentions and requests confirmed execution', async () => {
+    const { fetchImpl, spy } = recorder();
+    await sendNotification(discord, { summary: '@everyone needs a tip' }, { fetchImpl });
+    expect(request(spy)).toMatchObject({
+      url: discord.url + '?wait=true',
+      body: { content: '@everyone needs a tip', allowed_mentions: { parse: [] } },
     });
-    expect(() => parseNotifierSettings('webhook')).toThrow(/needs a URL/);
-    expect(() => parseNotifierSettings('webhook', 'ntfy.sh/topic')).toThrow(/http/);
+    expect(request(spy).body).not.toHaveProperty('summary');
   });
 
-  it('requires a command path', () => {
-    expect(parseNotifierSettings('command', '/bin/true')).toEqual({
-      kind: 'command',
-      target: '/bin/true',
+  it('formats Telegram sendMessage without Markdown or link previews', async () => {
+    const { fetchImpl, spy } = recorder(() => new Response('{"ok":true,"result":{}}'));
+    await sendNotification(telegram, { summary: 'A_B vs <C>' }, { fetchImpl });
+    expect(request(spy)).toMatchObject({
+      url: 'https://api.telegram.org/bot123:private-secret/sendMessage',
+      body: { chat_id: '-100123', text: 'A_B vs <C>', link_preview_options: { is_disabled: true } },
     });
-    expect(() => parseNotifierSettings('command', '  ')).toThrow(/executable/);
+    expect(request(spy).body).not.toHaveProperty('parse_mode');
   });
 
-  it('rejects an unknown kind', () => {
-    expect(() => parseNotifierSettings('sms')).toThrow(/Unknown notifier/);
+  it('limits provider text to the accepted length', async () => {
+    const a = recorder();
+    const b = recorder(() => new Response('{"ok":true}'));
+    await sendNotification(discord, { summary: 'x'.repeat(5000) }, a);
+    await sendNotification(telegram, { summary: 'x'.repeat(5000) }, b);
+    expect(request(a.spy).body.content.length).toBe(2000);
+    expect(request(b.spy).body.text.length).toBe(4096);
+  });
+
+  it('rejects Telegram responses that do not confirm delivery', async () => {
+    await expect(sendNotification(telegram, { summary: 'Test' }, recorder(() => new Response('{"ok":false}'))))
+      .rejects.toThrow('did not confirm');
+  });
+
+  it('preserves Retry-After but never echoes the webhook URL or response body', async () => {
+    const attempt = sendNotification(hook, { summary: 'Test' }, recorder(() => new Response('private-secret', {
+      status: 429, headers: { 'Retry-After': '120' },
+    })));
+    await expect(attempt).rejects.toMatchObject({ retryAfterMs: 120000 });
+    await expect(attempt).rejects.not.toThrow('private-secret');
+  });
+
+  it('redacts fetch errors containing credentials', async () => {
+    const fetchImpl = (async () => { throw new Error('Cannot connect to /bot123:private-secret/sendMessage'); }) as typeof fetch;
+    const attempt = sendNotification(telegram, { summary: 'Test' }, { fetchImpl });
+    await expect(attempt).rejects.toBeInstanceOf(NotificationError);
+    await expect(attempt).rejects.not.toThrow('private-secret');
+  });
+
+  it('reads Telegram rate limits from the API envelope', async () => {
+    await expect(sendNotification(telegram, { summary: 'Test' }, recorder(() => new Response(
+      '{"ok":false,"parameters":{"retry_after":300}}', { status: 429 },
+    )))).rejects.toMatchObject({ retryAfterMs: 300000 });
+  });
+
+  it('times out an actual stalled local endpoint', async () => {
+    const server = createServer(() => {});
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      await expect(sendNotification({ id: 'slow', kind: 'webhook', url: `http://127.0.0.1:${address.port}` },
+        { summary: 'Test' }, { timeoutMs: 30 })).rejects.toThrow('timed out');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

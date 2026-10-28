@@ -1,0 +1,21 @@
+services:
+  kicktipp:
+    build: .
+    image: kicktipp-agent:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:${KICKTIPP_PORT:-8787}:8787"
+    volumes:
+      - kicktipp-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 2m
+
+volumes:
+  kicktipp-data:

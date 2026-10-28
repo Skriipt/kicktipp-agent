@@ -8,8 +8,10 @@ import { t } from './i18n/index.js';
 import type { ScoringRules } from './rules/scoring.js';
 import { urlBase } from './url.js';
 
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
+function configDir(): string {
+  return process.env.KICKTIPP_CONFIG_DIR || path.join(os.homedir(), '.config', 'kicktipp-agent');
+}
+function configFile(): string { return path.join(configDir(), 'config.ini'); }
 
 // ── Profiles ────────────────────────────────────────────────────────
 
@@ -83,7 +85,7 @@ function profileSection(config: Record<string, any>): Record<string, any> | null
 
 /** Old profile-only jars remain untouched; their account cannot be verified. */
 export function sessionFile(): string {
-  return path.join(CONFIG_DIR, `session-${accountScope()}.json`);
+  return path.join(configDir(), `session-${accountScope()}.json`);
 }
 
 export function listProfiles(): string[] {
@@ -101,9 +103,22 @@ export function listProfiles(): string[] {
 
 const CIPHER_ALGO = 'aes-256-gcm';
 
-function deriveKey(): Buffer {
+function legacyKey(): Buffer {
   const material = `kicktipp-agent:${os.hostname()}:${os.userInfo().username}`;
   return crypto.createHash('sha256').update(material).digest();
+}
+
+/** The key lives alongside the config so backups and container recreation stay portable. */
+function deriveKey(): Buffer {
+  const file = path.join(configDir(), 'credentials.key');
+  fs.mkdirSync(configDir(), { recursive: true, mode: 0o700 });
+  if (!fs.existsSync(file)) {
+    try { fs.writeFileSync(file, crypto.randomBytes(32), { mode: 0o600, flag: 'wx' }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+  }
+  const key = fs.readFileSync(file);
+  if (key.length !== 32) throw new Error('Invalid credentials.key. Restore the config backup or run setup.');
+  return key;
 }
 
 function encrypt(text: string): string {
@@ -113,16 +128,17 @@ function encrypt(text: string): string {
   const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
   const packed = Buffer.concat([iv, authTag, encrypted]);
-  return `enc.${packed.toString('base64')}`;
+  return `enc.v2.${packed.toString('base64')}`;
 }
 
 function decrypt(encoded: string): string {
   if (!encoded.startsWith('enc.')) return encoded; // backward compat: plaintext
-  const packed = Buffer.from(encoded.slice(4), 'base64');
+  const portable = encoded.startsWith('enc.v2.');
+  const packed = Buffer.from(encoded.slice(portable ? 7 : 4), 'base64');
   const iv = packed.subarray(0, 16);
   const authTag = packed.subarray(16, 32);
   const ciphertext = packed.subarray(32);
-  const key = deriveKey();
+  const key = portable ? deriveKey() : legacyKey();
   const decipher = crypto.createDecipheriv(CIPHER_ALGO, key, iv);
   decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
@@ -131,16 +147,16 @@ function decrypt(encoded: string): string {
 // ── Config I/O ──────────────────────────────────────────────────────
 
 export function readConfig(): Record<string, any> {
-  if (!fs.existsSync(CONFIG_FILE)) return {};
-  return ini.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+  if (!fs.existsSync(configFile())) return {};
+  return ini.parse(fs.readFileSync(configFile(), 'utf-8'));
 }
 
 function writeConfig(config: Record<string, any>): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  const tmpFile = CONFIG_FILE + '.tmp';
+  fs.mkdirSync(configDir(), { recursive: true });
+  const tmpFile = configFile() + '.tmp';
   fs.writeFileSync(tmpFile, ini.stringify(config));
   fs.chmodSync(tmpFile, 0o600);
-  fs.renameSync(tmpFile, CONFIG_FILE);
+  fs.renameSync(tmpFile, configFile());
 }
 
 // ── Credentials ─────────────────────────────────────────────────────
@@ -217,12 +233,17 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
   const config = readConfig();
   const profile = profileSection(config);
   if (profile?.email && profile?.password) {
-    return { email: profile.email, password: decrypt(profile.password) };
+    const password = decrypt(profile.password);
+    if (!profile.password.startsWith('enc.v2.')) {
+      profile.password = encrypt(password);
+      writeConfig(config);
+    }
+    return { email: profile.email, password };
   }
   if (config.auth?.email && config.auth?.password) {
     const password = decrypt(config.auth.password);
-    // Migrate plaintext passwords to encrypted on read
-    if (!config.auth.password.startsWith('enc.')) {
+    // Migrate legacy machine-bound and plaintext credentials on successful read
+    if (!config.auth.password.startsWith('enc.v2.')) {
       config.auth.password = encrypt(password);
       writeConfig(config);
     }
@@ -384,7 +405,7 @@ export function hasCredentials(): boolean {
 
 export function logout(): void {
   const removed: string[] = [];
-  for (const p of [CONFIG_FILE, sessionFile()]) {
+  for (const p of [configFile(), sessionFile()]) {
     if (fs.existsSync(p)) {
       fs.unlinkSync(p);
       removed.push(path.basename(p));

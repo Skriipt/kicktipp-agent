@@ -1,43 +1,61 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import http from 'node:http';
+import { createServer } from 'node:http';
 
 /**
  * Drives the built server over stdio, the same way a client would. This is
  * the regression test for tool registration: a schema mistake shows up here
  * and nowhere else.
  */
-function callServer(requests: object[], env: Record<string, string> = {}): Promise<any[]> {
+function callServer(requests: object[], env: Record<string, string> = {}, entry = 'dist/server.js'): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const childEnv = { ...process.env, ...env };
     if (env.HOME && env.USERPROFILE === undefined) childEnv.USERPROFILE = env.HOME;
-    const child = spawn('node', ['dist/server.js'], {
+    const child = spawn('node', [entry], {
       env: childEnv,
       stdio: ['pipe', 'pipe', 'ignore'],
     });
-    let out = '';
+    const pending = new Set(requests.flatMap((request) => 'id' in request ? [request.id] : []));
+    const messages: any[] = [];
+    let buffer = '';
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`MCP server timed out waiting for response IDs: ${[...pending].join(', ')}`));
+    }, 4_000);
     child.stdout.on('data', (chunk) => {
-      out += String(chunk);
+      buffer += String(chunk);
+      let newline: number;
+      while ((newline = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        let message: any;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          clearTimeout(timeout);
+          child.kill('SIGKILL');
+          reject(new Error('MCP server wrote non-JSON output to stdout.'));
+          return;
+        }
+        messages.push(message);
+        if ('id' in message) pending.delete(message.id);
+      }
+      // EOF closes the SDK transport. Keep it open until asynchronous network
+      // tools have responded, just as an MCP client would.
+      if (!pending.size) child.stdin.end();
     });
-    child.on('error', reject);
+    child.on('error', (error) => { clearTimeout(timeout); reject(error); });
     child.on('close', () => {
-      const messages = out
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
-      resolve(messages);
+      clearTimeout(timeout);
+      if (pending.size) reject(new Error(`MCP server exited before response IDs: ${[...pending].join(', ')}`));
+      else resolve(messages);
     });
-    child.stdin.end(requests.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    child.stdin.write(requests.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    if (!pending.size) child.stdin.end();
   });
 }
 
@@ -64,9 +82,48 @@ beforeAll(() => {
 });
 
 describe('the MCP server as a client sees it', () => {
+  it('starts through an npm-style symlink and lists configured tools without contacting Kicktipp', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-linked-'));
+    let requests = 0;
+    const fixture = createServer((_request, response) => { requests++; response.writeHead(500).end(); });
+    await new Promise<void>((resolve) => fixture.listen(0, '127.0.0.1', resolve));
+    try {
+      const link = path.join(directory, 'kicktipp-mcp');
+      fs.symlinkSync(path.resolve('dist/server.js'), link);
+      const config = path.join(directory, 'service.json');
+      fs.writeFileSync(config, JSON.stringify({
+        version: 1,
+        account: { email: 'fixture@example.invalid', password: 'fixture-password', community: 'linked-community', site: 'de' },
+        server: { token: 'x'.repeat(32), host: '127.0.0.1', port: 8787, readOnly: false, allowedOrigins: [] },
+        notifications: { channels: [], warnHours: [6], everyMinutes: 15 },
+        timeZone: 'Europe/Berlin',
+      }));
+      const address = fixture.address();
+      if (!address || typeof address === 'string') throw new Error('Missing fixture address.');
+      const messages = await callServer([
+        INIT,
+        { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_status', arguments: {} } },
+      ], {
+        HOME: directory, KICKTIPP_SERVICE_CONFIG: config, KICKTIPP_DATA_DIR: directory,
+        KICKTIPP_BASE_URL: `http://127.0.0.1:${address.port}`,
+      }, link);
+      expect(messages.find((message) => message.id === 1)?.result.serverInfo.name).toBe('kicktipp');
+      const names = messages.find((message) => message.id === 2)?.result.tools.map((tool: { name: string }) => tool.name);
+      expect(names).toContain('place_bets_for_member');
+      expect(names).not.toContain('set_community');
+      expect(names).not.toContain('set_player');
+      expect(messages.find((message) => message.id === 3)?.result.structuredContent.data.community).toBe('linked-community');
+      expect(requests).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => fixture.close(() => resolve()));
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('shares one login and keeps concurrent tool reads in separate operations', async () => {
     let sessionChecks = 0;
-    const upstream = http.createServer((req, res) => {
+    const upstream = createServer((req, res) => {
       const url = new URL(req.url!, 'http://fixture');
       const day = url.searchParams.get('spieltagIndex');
       if (url.pathname.includes('meinetipprunden')) sessionChecks++;
@@ -91,7 +148,7 @@ describe('the MCP server as a client sees it', () => {
       for (const day of [2, 3]) {
         const result = messages.find((m) => m.id === day)?.result;
         expect(result?.isError).toBeFalsy();
-        expect(result?.structuredContent.data.title).toBe(`Day ${day}`);
+        expect(result?.structuredContent.data.title, JSON.stringify(messages)).toBe(`Day ${day}`);
       }
       expect(sessionChecks).toBe(1);
     } finally {
@@ -107,6 +164,9 @@ describe('the MCP server as a client sees it', () => {
     });
     const tools = messages.find((m) => m.id === 2)?.result?.tools ?? [];
     expect(tools.length).toBeGreaterThan(20);
+    const names = tools.map((tool: { name: string }) => tool.name);
+    for (const removed of ['connect_account', 'set_notify', 'whatif', 'get_standings_scenarios', 'get_rival_analysis']) expect(names).not.toContain(removed);
+    for (const retained of ['list_members', 'get_bets_for_member', 'place_bets_for_member', 'suggest_bets', 'get_stats', 'place_bonus_bets']) expect(names).toContain(retained);
     for (const tool of tools) {
       expect(tool, `${tool.name} input`).toHaveProperty('inputSchema');
       expect(tool, `${tool.name} output`).toHaveProperty('outputSchema');
@@ -125,20 +185,10 @@ describe('the MCP server as a client sees it', () => {
     // Text stays parseable on its own for clients that ignore structure.
     expect(() => JSON.parse(result.content[0].text)).not.toThrow();
     expect(result.structuredContent.data).toMatchObject({ community: 'mycomm', player: 'Me' });
-    expect(result.structuredContent.data.notify).toMatchObject({ kind: 'desktop' });
-    expect(result.structuredContent.data.setup_url).toBeNull();
+    expect(result.structuredContent.data.service).toBeNull();
+    expect(result.structuredContent.data.setup_instructions).toBeNull();
+    expect(result.structuredContent.data).not.toHaveProperty('setup_url');
     expect(result.structuredContent.data).not.toHaveProperty('password');
-  });
-
-  it('connect_account reports already connected when credentials exist', async () => {
-    const messages = await callServer(
-      [INIT, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'connect_account', arguments: {} } }],
-      { HOME: home },
-    );
-    const data = messages.find((m) => m.id === 2)?.result?.structuredContent?.data;
-    expect(data.connected).toBe(true);
-    expect(data.setup_url).toBeNull();
-    expect(data.community).toBe('mycomm');
   });
 
   it('offers the cached-data resources', async () => {
@@ -198,35 +248,7 @@ describe('the MCP server as a client sees it', () => {
     }
   });
 
-  it('lets set_notify write the local [notify] section', async () => {
-    const messages = await callServer(
-      [
-        INIT,
-        {
-          jsonrpc: '2.0',
-          id: 2,
-          method: 'tools/call',
-          params: {
-            name: 'set_notify',
-            arguments: { kind: 'webhook', target: 'https://ntfy.sh/kicktipp-tests' },
-          },
-        },
-      ],
-      { HOME: home },
-    );
-    const result = messages.find((m) => m.id === 2)?.result;
-    expect(result.isError).toBeFalsy();
-    expect(result.structuredContent.data).toMatchObject({
-      success: true,
-      kind: 'webhook',
-      target: 'https://ntfy.sh/kicktipp-tests',
-    });
-    const ini = fs.readFileSync(path.join(home, '.config', 'kicktipp-agent', 'config.ini'), 'utf8');
-    expect(ini).toMatch(/kind\s*=\s*webhook/);
-    expect(ini).toMatch(/kicktipp-tests/);
-  });
-
-  it('returns a localhost setup link when nothing is configured', async () => {
+  it('returns local setup instructions without a web listener when unconfigured', async () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-empty-'));
     try {
       const messages = await callServer(
@@ -242,43 +264,14 @@ describe('the MCP server as a client sees it', () => {
       const result = messages.find((m) => m.id === 2)?.result;
       expect(result.isError).toBeFalsy();
       const data = result.structuredContent.data;
-      expect(data.setup_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/setup\?token=[0-9a-f]+$/);
+      expect(data).not.toHaveProperty('setup_url');
+      expect(data.setup_instructions).toContain('docker compose run --rm kicktipp setup');
       expect(data.setup_needed).toBe(true);
       expect(JSON.stringify(data)).not.toMatch(/"password"/);
     } finally {
       fs.rmSync(empty, { recursive: true, force: true });
     }
   });
-
-  it('connect_account is the setup tool and stays available in read-only mode', async () => {
-    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-connect-'));
-    try {
-      const listed = await callServer([INIT, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }], {
-        HOME: empty,
-        USERPROFILE: empty,
-        KICKTIPP_EMAIL: '',
-        KICKTIPP_PASSWORD: '',
-        KICKTIPP_READ_ONLY: '1',
-      });
-      const names = (listed.find((m) => m.id === 2)?.result?.tools ?? []).map((t: { name: string }) => t.name);
-      expect(names).toContain('connect_account');
-
-      const called = await callServer(
-        [INIT, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'connect_account', arguments: {} } }],
-        {
-          HOME: empty,
-          USERPROFILE: empty,
-          KICKTIPP_EMAIL: '',
-          KICKTIPP_PASSWORD: '',
-          KICKTIPP_COMMUNITY: '',
-        },
-      );
-      const data = called.find((m) => m.id === 2)?.result?.structuredContent?.data;
-      expect(data.connected).toBe(false);
-      expect(data.setup_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/setup\?token=[0-9a-f]+$/);
-      expect(data.message).toMatch(/open/i);
-    } finally {
-      fs.rmSync(empty, { recursive: true, force: true });
-    }
-  });
 });
+
+afterAll(() => fs.rmSync(home, { recursive: true, force: true }));

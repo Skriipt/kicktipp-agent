@@ -2,123 +2,71 @@ import { Command } from 'commander';
 import { t } from '../i18n/index.js';
 
 export function getGuideText(): string {
-  return `# kicktipp CLI — Agent Guide
+  return `# Kicktipp service and CLI
 
-kicktipp is a CLI for Kicktipp, a football prediction game.
-Players bet on match scores each matchday (1-34 per season). Points are
-awarded based on accuracy. Bonus questions (e.g. "Who will win the league?")
-are answered once before the season starts.
+## Setup
 
-## Prerequisites
+  docker compose run --rm kicktipp setup
+  docker compose up -d
 
-A community must be set before most commands work. On first run the CLI
-prompts for Kicktipp credentials (stored in ~/.config/kicktipp-agent/).
+The setup wizard configures your account, community, MCP access and notification
+channels. Use setup --notifications to change Discord, Telegram or webhook
+delivery and reminder times. Restart the service after changing its settings.
 
-  kicktipp set-community          # interactive picker (prompts for number)
-  kicktipp set-player             # interactive — identifies you in leaderboards
-  kicktipp set-notify             # interactive — desktop, webhook, or command
-  kicktipp set-lang de            # keep German UI chrome (or en)
-  kicktipp set-site de            # start on kicktipp.de (or com)
+  kicktipp setup
+  kicktipp setup --notifications
+  kicktipp notify --test          # test all configured channels; no Kicktipp call
 
-These are interactive commands that require stdin. Run them once during setup.
-Non-interactive forms (safe for agents):
+## Reading Kicktipp
 
-  kicktipp set-notify desktop
-  kicktipp set-notify webhook https://ntfy.sh/your-topic
-  kicktipp set-notify command /path/to/hook
+  kicktipp today                  # today's matches and missing tips
+  kicktipp bets --matchday 5      # exact fixture names, odds and existing tips
+  kicktipp schedule              # fixtures and results
+  kicktipp leaderboard           # community ranking
+  kicktipp overview              # season overview
+  kicktipp table                 # league standings
+  kicktipp rules --verify        # scoring rules and verification
+  kicktipp tip-status            # complete, partial or missing tips
+  kicktipp deadline              # upcoming deadlines
+  kicktipp sync                  # update the season cache
+  kicktipp stats                 # season statistics
 
-## Non-interactive commands (safe for automation)
+Most read commands accept --json; use <command> --help for supported options.
+The client uses HTTP directly. No browser is required.
 
-### Gathering information
+## Submitting tips
 
-  kicktipp today                  # matches happening today + bet status
-  kicktipp bets                   # all bets for current matchday
-  kicktipp bets --matchday 5      # bets for specific matchday
-  kicktipp schedule               # full match schedule for current matchday
-  kicktipp schedule --matchday 5  # schedule for specific matchday
-  kicktipp leaderboard            # player rankings for current matchday
-  kicktipp leaderboard --matchday 5
-  kicktipp leaderboard --bonus    # bonus question rankings
-  kicktipp tip-status             # full/partial/missing tips by player
-  kicktipp tip-status --matchday 5
-  kicktipp overview               # season overview (matchday points)
-  kicktipp overview --view standings
-  kicktipp overview --view standings-diff
-  kicktipp overview --view matchday-standings
-  kicktipp overview --view points-from-leader
-  kicktipp table                  # league table
-  kicktipp table --home           # home-only table
-  kicktipp table --away           # away-only table
-  kicktipp rules                  # game rules and scoring system
-  kicktipp communities            # list all communities user belongs to
-  kicktipp players                # list players in saved community
-
-### Placing bets by fixture name
-
-  kicktipp bet "Home vs Away=H:G"
-
-  Team names must match exactly (case-insensitive) as shown by \`kicktipp bets\`.
-  Multiple bets can be passed as separate arguments:
-
-  kicktipp bet "FC Bayern München vs Borussia Dortmund=2:1" "RB Leipzig vs Bayer 04 Leverkusen=0:0"
-
-  Use --matchday N to target a specific matchday:
-
-  kicktipp bet --matchday 5 "Team A vs Team B=1:0"
-
-### Placing bonus bets
-
+  kicktipp bet "Home vs Away=2:1" "Another Home vs Another Away=0:0"
   kicktipp bet --bonus "Question text=Answer"
 
-  Question and answer must match exactly (case-insensitive) as shown on the
-  bonus page. Multiple answers for the same question (ranking / relegation):
-  repeat the question once per dropdown in a single command, in slot order.
+Use exact fixture names from bets. For bonus ranking questions, repeat the same
+question once per dropdown in a single call, in slot order.
 
-  kicktipp bet --bonus "Who will be champion?=FC Bayern München" "Who will be champion?=Borussia Dortmund"
+  kicktipp suggest --strategy ev # prints suggestions without submitting
+  kicktipp suggest --place       # submits after confirmation
+  kicktipp log                   # verified submissions
+  kicktipp log --all             # also include dry runs and failed/unknown writes
+  kicktipp log --undo            # restore previous values of the last match write
 
-## Interactive commands (require stdin)
+Read-only mode rejects submissions. A submitted result means a fresh read
+confirmed the requested values. For submission_unknown, check the saved tips
+before trying again; never automatically repeat an uncertain submission.
 
-  kicktipp bet                    # prompts per match: enter "2:1" or skip
-  kicktipp bet --bonus            # prompts per bonus question with numbered options
-  kicktipp set-community          # pick community from numbered list
-  kicktipp set-player             # pick player from numbered list
-  kicktipp set-notify             # pick a notifier backend
+## Spielleiter
 
-## Common workflows
+  kicktipp admin members
+  kicktipp admin bets <member>
+  kicktipp admin bet <member> "Home vs Away=2:1"
 
-### "Place bets for today's games"
-  1. kicktipp today               # see which games need bets
-  2. kicktipp bet "Team A vs Team B=2:1" "Team C vs Team D=1:1"
+These commands require the account's Spielleiter rights. Use --help for
+confirmation and preview options.
 
-### "Check how I'm doing"
-  kicktipp leaderboard            # current matchday rankings
-  kicktipp overview               # full season at a glance
+## MCP
 
-### "Check who still needs to tip"
-  kicktipp tip-status             # read-only; no admin rights required
-
-### "See what bets I've placed"
-  kicktipp bets                   # shows all matches with your bets and odds
-
-### "Get the exact team names for placing bets"
-  kicktipp bets                   # team names shown here are the exact strings
-                                  # to use in "Home vs Away=H:G" format
-
-## Output format
-
-All commands print plain text to stdout. Errors go to stderr.
-Exit code 0 on success, 1 on error.
-
-## Notes
-
-- kicktipp.de and German page routes are used by default.
-- Set KICKTIPP_BASE_URL=https://www.kicktipp.com to prefer the English host.
-- Each command launches a headless browser, so expect ~2-5 seconds startup.
-- Session cookies are cached; re-login happens automatically if expired.
-- The --matchday option accepts 1-34 (one Bundesliga season).
-- Bet format is always H:G (home goals colon away goals).
-- Fixture format is always "Home vs Away=H:G" (with " vs " separator).
-- Bonus format is always "Question text=Answer" (last = sign splits them).
+The Compose service provides authenticated HTTP MCP at /mcp. Configure the
+endpoint and Bearer token shown by setup in your MCP client. The service keeps
+checking reminders even when no agent is connected. Local clients can still
+start node dist/server.js using stdio.
 `;
 }
 
@@ -126,7 +74,5 @@ export function registerGuideCommand(program: Command): void {
   program
     .command('guide')
     .description(t('cmd.guide.description'))
-    .action(() => {
-      console.log(getGuideText());
-    });
+    .action(() => console.log(getGuideText()));
 }
