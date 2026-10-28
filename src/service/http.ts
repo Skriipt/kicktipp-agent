@@ -3,14 +3,16 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { once } from 'node:events';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { createMcpServer, discardSession } from '../server.js';
-import { kicktippQueue } from './queue.js';
+import { kicktippQueue, SerialQueue } from './queue.js';
+import { createWebHandler, type WebAdminOptions } from './web-http.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
 export interface HttpServiceOptions {
   host: string;
   port: number;
-  token: string;
+  token: string | (() => string | null);
+  web?: WebAdminOptions;
   allowedOrigins?: string[];
   /** Must contain operational status only, never configuration secrets. */
   status: () => unknown;
@@ -56,10 +58,12 @@ function readBody(request: IncomingMessage): Promise<Buffer> {
  * there are no client sessions to accumulate in the daemon.
  */
 export async function startHttpService(options: HttpServiceOptions): Promise<HttpService> {
-  if (options.token.length < 32 || /\s/.test(options.token)) {
+  const initialToken = typeof options.token === 'function' ? options.token() : options.token;
+  if (initialToken !== null && (initialToken.length < 32 || /\s/.test(initialToken))) {
     throw new Error('The MCP access token must contain at least 32 non-whitespace characters. Run setup.');
   }
-  const expectedToken = digest(options.token);
+  const gate = new SerialQueue();
+  const web = options.web ? createWebHandler(options.web, gate) : undefined;
   const origins = new Set(options.allowedOrigins ?? []);
   const handler = createMcpHandler(
     () => createMcpServer({ lockedConfiguration: true, serviceStatus: options.status }),
@@ -83,6 +87,12 @@ export async function startHttpService(options: HttpServiceOptions): Promise<Htt
       json(response, 503, { error: 'stopping' });
       return;
     }
+    if (!request.url?.startsWith('/')) {
+      json(response, 400, { error: 'invalid_path' });
+      return;
+    }
+    const pathname = new URL(request.url, 'http://localhost').pathname;
+    if (web && await web(request, response, pathname)) return;
     const origin = request.headers.origin;
     if (origin !== undefined && !origins.has(origin)) {
       json(response, 403, { error: 'origin_not_allowed' });
@@ -94,11 +104,6 @@ export async function startHttpService(options: HttpServiceOptions): Promise<Htt
       response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version');
       response.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     }
-    if (!request.url?.startsWith('/')) {
-      json(response, 400, { error: 'invalid_path' });
-      return;
-    }
-    const pathname = new URL(request.url, 'http://localhost').pathname;
     if (pathname === '/health' && request.method === 'GET') {
       json(response, 200, { status: 'ok' });
       return;
@@ -108,6 +113,9 @@ export async function startHttpService(options: HttpServiceOptions): Promise<Htt
       response.end();
       return;
     }
+    const currentToken = typeof options.token === 'function' ? options.token() : options.token;
+    if (!currentToken) { json(response, 503, { error: 'setup_required' }); return; }
+    const expectedToken = digest(currentToken);
     const token = /^Bearer[ \t]+(\S+)$/i.exec(request.headers.authorization ?? '')?.[1];
     if (!token || !timingSafeEqual(expectedToken, digest(token))) {
       response.setHeader('WWW-Authenticate', 'Bearer realm="kicktipp"');
@@ -155,28 +163,30 @@ export async function startHttpService(options: HttpServiceOptions): Promise<Htt
     };
     response.on('close', abort);
     try {
-      const reply = await handler.fetch(new Request('http://localhost/mcp', {
-        method: 'POST', headers, body: new Uint8Array(body), signal: controller.signal,
-      }));
-      response.statusCode = reply.status;
-      reply.headers.forEach((value, key) => response.setHeader(key, value));
-      response.setHeader('Cache-Control', 'no-store');
-      if (stopping) response.setHeader('Connection', 'close');
-      // Legacy clients receive a finite SSE response. Stream it without
-      // buffering; backpressure prevents slow clients from growing memory.
-      if (reply.body) {
-        const reader = reply.body.getReader();
-        try {
-          while (!response.destroyed) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (!response.write(value)) await once(response, 'drain', { signal: controller.signal });
+      await gate.run(async () => {
+        const reply = await handler.fetch(new Request('http://localhost/mcp', {
+          method: 'POST', headers, body: new Uint8Array(body), signal: controller.signal,
+        }));
+        response.statusCode = reply.status;
+        reply.headers.forEach((value, key) => response.setHeader(key, value));
+        response.setHeader('Cache-Control', 'no-store');
+        if (stopping) response.setHeader('Connection', 'close');
+        // Legacy clients receive a finite SSE response. Stream it without
+        // buffering; backpressure prevents slow clients from growing memory.
+        if (reply.body) {
+          const reader = reply.body.getReader();
+          try {
+            while (!response.destroyed) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (!response.write(value)) await once(response, 'drain', { signal: controller.signal });
+            }
+          } finally {
+            await reader.cancel().catch(() => undefined);
           }
-        } finally {
-          await reader.cancel().catch(() => undefined);
         }
-      }
-      response.end();
+        response.end();
+      });
     } finally {
       response.off('close', abort);
     }

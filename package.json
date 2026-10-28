@@ -26,7 +26,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc && node scripts/copy-web-assets.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build && npm test",

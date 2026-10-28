@@ -27,9 +27,11 @@ const schema = z.object({
   }).strict(),
   notifications: z.object({
     channels: z.array(z.unknown()).max(20),
-    warnHours: z.array(z.number().positive().max(168)).min(1).max(10),
+    warnHours: z.array(z.number().positive().max(168)).max(10),
     everyMinutes: z.number().min(1).max(1440),
-  }).strict(),
+  }).strict().refine((value) => !value.channels.length || value.warnHours.length > 0, {
+    path: ['warnHours'], message: 'Notification channels require at least one reminder time.',
+  }),
   timeZone: z.string().refine((value) => {
     try { new Intl.DateTimeFormat('de', { timeZone: value }); return true; } catch { return false; }
   }),

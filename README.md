@@ -5,7 +5,7 @@ A self-hosted Kicktipp service for your AI assistant, with automatic reminders t
 [![CI](https://github.com/Skriipt/kicktipp-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Quick start](#quick-start) · [Notifications](#notifications) · [Connect your agent](#connect-your-agent) · [CLI](#cli) · [Operations](#operations)
+[Quick start](#quick-start) · [Local website](#local-website) · [Notifications](#notifications) · [Connect your agent](#connect-your-agent) · [CLI](#cli) · [Operations](#operations)
 
 The service supports [kicktipp.de](https://www.kicktipp.de/) and [kicktipp.com](https://www.kicktipp.com/). It reads the website over HTTP without browser automation. This is an unofficial client; website changes can require parser updates.
 
@@ -16,20 +16,13 @@ Install Docker with the Compose plugin, then run:
 ```bash
 git clone https://github.com/Skriipt/kicktipp-agent.git
 cd kicktipp-agent
-docker compose build
-docker compose run --rm kicktipp setup
-docker compose up -d
+docker compose up -d --build
+docker compose exec kicktipp node dist/service/main.js web-token
 ```
 
-The terminal wizard walks you through:
+Open **http://localhost:8787** and enter the web access token printed by the command. Add your Kicktipp account, check the login, choose your prediction pool and save. The website starts in English; use **EN / DE** to switch languages.
 
-1. Entering your Kicktipp email and password. Secret input is hidden.
-2. Verifying the login and choosing from your existing tipprunden.
-3. Choosing whether your agent may submit tips. **Read-only is the default.**
-4. Adding Discord, Telegram or webhook destinations, with an optional test message for each.
-5. Choosing reminder times and a check interval. Defaults: **24, 6 and 1 hour before kickoff**, checked every **15 minutes**.
-
-Setup reads your account and communities; it never submits tips. You can skip notifications initially and add them later. The wizard prints the MCP URL and an automatically generated access token. There is no web setup page or extra database to install.
+You can also use the terminal wizard: `docker compose run --rm kicktipp setup`, followed by `docker compose restart kicktipp`. The terminal wizard retains its existing reminder defaults. The website starts with no notification channels or prescribed reminder times.
 
 Check the service:
 
@@ -53,11 +46,32 @@ This fork is not published to npm. The unscoped npm package belongs to the upstr
 
 No language model is bundled. Your agent connects when needed; reminder checks do not require an LLM.
 
+## Local website
+
+The local website and MCP share port 8787. No additional container, database or hosted frontend is needed. Compose binds the port to this computer's loopback interface.
+
+- **Overview:** upcoming matches, missing predictions, last successful check, next scheduled check and notification delivery problems. “Check again” reads Kicktipp; it does not submit predictions or send reminders.
+- **Notifications:** add, edit, test or remove Discord, Telegram and webhook destinations. Choose your own reminder times, including fractions such as `2.5` hours (`2,5` also works in the form). Use up to ten values greater than zero and at most 168 hours; the times apply to every channel. No preset times are required. With no channels, reminders can stay unconfigured.
+- **Account:** update credentials, check the login and choose a pool. One account and one pool are active per instance.
+- **Connect agent:** view the MCP address, explicitly reveal its token and control whether the agent may submit or edit predictions. Read-only is the default.
+
+**Save applies changes immediately.** Active Kicktipp operations finish before account settings change. A stale browser cannot overwrite a newer save: reload the configuration after a conflict. Configurations edited through the terminal still require a service restart.
+
+The website uses a separate **administrator token**, stored at `/data/web-admin-token` with mode `0600`. An MCP token cannot administer the service. Retrieve the administrator token again with:
+
+```bash
+docker compose exec kicktipp node dist/service/main.js web-token
+```
+
+The browser keeps this token only in memory; reload or sign out to lock the page. Only the chosen interface language is remembered in browser storage. Saved account passwords and notification credentials are never returned to the form; leave their replacement fields empty to retain them. “Send test message” makes a real delivery attempt to the selected destination.
+
+For a remote Docker host, use the [SSH tunnel](#agent-on-another-computer) and open localhost through it. An authenticated HTTPS reverse proxy can use an exact origin listed in `server.allowedOrigins`; preserve the Host header. Arbitrary Host values, cross-origin admin requests and embedding in another website are rejected.
+
 ## Notifications
 
 All configured channels use the same reminder windows and check interval. You can enable several destinations at once. A reminder is sent only for a missing tip with a known, future kickoff. Existing tips and games that have started are skipped.
 
-Change channels or timing at any time:
+Use **Notifications** in the local website to edit channels and times without restarting. The terminal alternative is:
 
 ```bash
 docker compose run --rm kicktipp setup --notifications
@@ -122,7 +136,7 @@ Test messages have `event: "test"` and `summary`. Operational alerts have `event
 
 Successful reminders are remembered separately for each match, kickoff, warning window and destination. Restarting normally does not resend them. A failed destination retries with backoff without repeating messages to destinations that succeeded. If the service first starts 30 minutes before kickoff, it sends the most urgent crossed window rather than all three reminders at once.
 
-Login or check failures produce an operational alert, at most once per destination every six hours during the same outage. Check time is approximate: with a 15-minute interval, a reminder can arrive up to about 15 minutes after its configured threshold, plus network time. Changing the schedule or a destination requires restarting the service.
+Login or check failures produce an operational alert, at most once per destination every six hours during the same outage. Check time is approximate: with a 15-minute interval, a reminder can arrive up to about 15 minutes after its configured threshold, plus network time. Changes made in the local website apply immediately; changes made through the terminal require a restart.
 
 External delivery and a local checkpoint cannot be atomic. If a process crashes after a provider accepts a message but before the checkpoint is saved, a later retry can duplicate it. Missing-tip reminders are never permission to submit a tip automatically.
 
@@ -145,7 +159,7 @@ docker compose run --rm kicktipp connection
 
 Keep it in your client's secret configuration. Do not put Kicktipp credentials or the access token into agent prompts. Ask your agent to call `get_status` first, then try “Which upcoming games still need a tip?”
 
-The Compose service has a fixed account and community. To change them or enable tip submission, rerun the full setup and restart:
+The Compose service uses one active account and community. Change them or enable submission in the local website. The terminal alternative is to rerun setup and restart:
 
 ```bash
 docker compose run --rm kicktipp setup
@@ -210,13 +224,14 @@ Use HTTP MCP while the daemon is running. For standalone Kicktipp CLI work, stop
 - `GET /status`, with the same bearer token as MCP, reports the last check, last successful Kicktipp read, next check, failed channels and error category. MCP `get_status` includes this service status too.
 - `docker compose logs kicktipp` shows startup and process errors. Channel secrets and provider response bodies are excluded from notification errors.
 
-`auth_required` means the Kicktipp login needs attention; rerun setup. `delivery_failed` means one or more channels need attention or are waiting for retry. `check_failed` can mean connectivity or changed Kicktipp markup. `state_failed` means the reminder history could not be written. Fix the underlying problem before deleting history, since deleting it permits reminders to be sent again.
+`auth_required` means the Kicktipp login needs attention; check the Account page or rerun setup. `delivery_failed` means one or more channels need attention or are waiting for retry. `check_failed` can mean connectivity or changed Kicktipp markup. `state_failed` means the reminder history could not be written. Fix the underlying problem before deleting history, since deleting it permits reminders to be sent again.
 
 ### Persistent data and backups
 
 Compose creates a named `kicktipp-data` volume mounted at `/data`. It contains:
 
 - `/data/service.json`: account, MCP and notification settings, including secrets in **plain text**, restricted to the file owner (`0600`). This is not encrypted storage.
+- `/data/web-admin-token`: the separate local administrator credential (`0600`).
 - Account-scoped session cookies, local cache, audit records and reminder-delivery history under `/data/accounts/`.
 
 Keep the entire volume private and include it in encrypted backups. Stop the service while taking a consistent backup. Never commit its contents or copy them into your image. Normal `docker compose down` preserves the volume; `docker compose down -v` deletes it.
@@ -248,7 +263,7 @@ After `submission_unknown`, read the saved tips before trying again. The client 
 
 ## Migrating from the desktop version
 
-Run the new setup once to configure the Compose volume. TUI and interactive prediction screens, desktop/command notifications, systemd/cron/ICS generation, the localhost web setup, Claude Desktop `.mcpb` packaging, and `rival`/`scenario`/`whatif` have been removed. Existing Kicktipp reads, submissions, Spielleiter functions, statistics and suggestions remain.
+Use the new local website or terminal setup once to configure the Compose volume. TUI and interactive prediction screens, desktop/command notifications, systemd/cron/ICS generation, the old desktop web setup, Claude Desktop `.mcpb` packaging, and `rival`/`scenario`/`whatif` have been removed. Existing Kicktipp reads, submissions, Spielleiter functions, statistics and suggestions remain.
 
 Standalone CLI profiles still use the INI configuration. Newly saved encrypted CLI passwords use a random `credentials.key` stored alongside it; back up both files. Older machine-bound passwords migrate on a successful read on their original machine. If moved before migration, reconnect on the new machine. The Compose service uses its separate portable `service.json` file instead.
 
@@ -263,11 +278,12 @@ npm ci
 npm run build
 npm test
 npm run test:container  # requires Docker; builds and checks an isolated fixture stack
-npm run setup
 npm start
+# In another terminal, retrieve the local website token:
+node dist/service/main.js web-token
 ```
 
-Build before testing: the MCP integration tests execute the compiled server. Tests use fixtures and local HTTP endpoints; they do not prove that your real Kicktipp account, Discord webhook or Telegram bot is configured correctly. The setup wizard's opt-in test messages verify your own notification destinations.
+Build before testing: the MCP integration tests execute the compiled server. Tests use fixtures and local HTTP endpoints; they do not prove that your real Kicktipp account, Discord webhook or Telegram bot is configured correctly. The website and setup wizard provide explicit test-message actions for your own notification destinations.
 
 See [CHANGELOG.md](CHANGELOG.md) and [the architecture notes](docs/CLAUDE.md).
 

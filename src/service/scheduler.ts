@@ -111,7 +111,7 @@ export class DeadlineScheduler {
     if (!Number.isFinite(options.everyMinutes) || options.everyMinutes < 1 || options.everyMinutes > 1440) {
       throw new Error('Reminder check interval must be between 1 and 1440 minutes.');
     }
-    if (!options.warnHours.length || options.warnHours.some((n) => !Number.isFinite(n) || n <= 0 || n > 168)) {
+    if ((!options.warnHours.length && this.channels.length > 0) || options.warnHours.some((n) => !Number.isFinite(n) || n <= 0 || n > 168)) {
       throw new Error('Reminder windows must be greater than zero and at most 168 hours.');
     }
     this.windows = [...new Set(options.warnHours)].sort((a, b) => a - b);
