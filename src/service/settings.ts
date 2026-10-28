@@ -7,19 +7,24 @@ import { validateChannel, type NotificationChannel } from '../notify/backends.js
 
 export interface ServiceConfig {
   version: 1;
-  account: { email: string; password: string; community: string; player?: string; site: 'de' | 'com' };
+  account: { email: string; password: string; community: string; communities?: string[]; player?: string; site: 'de' | 'com' };
   server: { token: string; host: string; port: number; readOnly: boolean; allowedOrigins: string[] };
   notifications: { channels: NotificationChannel[]; warnHours: number[]; everyMinutes: number };
   timeZone: string;
 }
 
+const communitySchema = z.string().trim().regex(/^[\p{L}\p{N}_-]+$/u);
+
 const schema = z.object({
   version: z.literal(1),
   account: z.object({
     email: z.string().trim().email(), password: z.string().min(1),
-    community: z.string().trim().regex(/^[\p{L}\p{N}_-]+$/u),
+    community: communitySchema,
+    communities: z.array(communitySchema).min(1).max(50).optional(),
     player: z.string().trim().min(1).optional(), site: z.enum(['de', 'com']),
-  }).strict(),
+  }).strict().refine((account) => account.communities === undefined || (
+    new Set(account.communities).size === account.communities.length && account.communities.includes(account.community)
+  ), { path: ['communities'], message: 'Tracked communities must be unique and include the primary community.' }),
   server: z.object({
     token: z.string().min(32).regex(/^[A-Za-z0-9_-]+$/),
     host: z.string().min(1), port: z.number().int().min(1).max(65535),
@@ -39,6 +44,11 @@ const schema = z.object({
 
 export function serviceConfigFile(): string {
   return path.resolve(process.env.KICKTIPP_SERVICE_CONFIG || path.join(dataDir(), 'service.json'));
+}
+
+/** Legacy single-community files remain valid without rewriting them on read. */
+export function configuredCommunities(config: ServiceConfig): string[] {
+  return [...(config.account.communities ?? [config.account.community])];
 }
 
 export function validateServiceConfig(value: unknown): ServiceConfig {

@@ -118,8 +118,8 @@ export function parseCommunitiesHtml(html: string): string[] {
     const menuDiv = $(el).find('div.menu-title-mit-tippglocke');
     if (
       normalizeSlug(slug) === normalizeSlug($(el).text().trim()) ||
-      (menuDiv.length &&
-        normalizeSlug(menuDiv.text().trim()) === normalizeSlug(slug))
+      // Membership cards keep their URL when the displayed pool name changes.
+      menuDiv.length > 0
     ) {
       communities.add(slug);
     }

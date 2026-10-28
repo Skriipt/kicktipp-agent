@@ -1,12 +1,19 @@
 (async()=>{
 const results=[];function assert(name,value){results.push({name,pass:!!value});if(!value)throw Error(name)}
-const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve()};
+const flush=async()=>{for(let n=0;n<100;n++)await Promise.resolve()};
 assert('default English',document.documentElement.lang==='en');
 $('#admin-token').value='fixture-admin-token';$('#login-form').requestSubmit();await flush();
 assert('first setup opens account',!$('#authenticated').hidden&&!$('#account').hidden);
 $('#email').value='person@example.com';$('#password').value='fixture-password';$('#check-account').click();await flush();
-assert('account discovery',document.querySelectorAll('#communities option').length===1&&$('#community').value==='friends');
-$('#account-form').requestSubmit();await flush();
+assert('account discovery offers Add buttons',document.querySelectorAll('#pool-list [data-add-pool]').length===3&&$('#pool-list').textContent.includes('friends'));
+$('[data-add-pool="friends"]').click();await flush();
+assert('first Add persists group immediately',fixtureConfig.account.community==='friends'&&fixtureConfig.account.communities.join(',')==='friends');
+$('[data-add-pool="league"]').click();await flush();
+assert('second Add retains first group and default',fixtureConfig.account.communities.join(',')==='friends,league'&&fixtureConfig.account.community==='friends');
+assert('already added groups cannot be added twice',!$('[data-add-pool="friends"]')&&!$('[data-add-pool="league"]'));
+$('[aria-label="Remove league"]').click();await flush();
+assert('removal preserves default and last group',fixtureConfig.account.communities.join(',')==='friends'&&$('[aria-label="Remove friends"]').disabled);
+
 assert('first save no fixed windows',fixtureConfig.notifications.warnHours.length===0);
 assert('account secret cleared after save',$('#password').value==='');
 document.querySelector('[data-page=notifications]').click();$('#add-channel').click();
@@ -33,7 +40,7 @@ assert('German feedback',$('#read-mode').textContent==='Der Agent darf Tipps abg
 
 document.querySelector('[data-page=notifications]').click();$('#custom-hours').value='7';$('#add-time').click();
 document.querySelector('[data-page=agent]').click();$('#permission').checked=false;$('#permission').dispatchEvent(new Event('change'));
-document.querySelector('[data-page=account]').click();$('#email').value='next@example.com';$('#email').dispatchEvent(new Event('input'));$('#password').value='new-fixture-password';
+document.querySelector('[data-page=account]').click();$('#email').value='next@example.com';$('#email').dispatchEvent(new Event('input'));$('#password').value='new-fixture-password';$('#community').value='friends';
 assert('account switch warns about draft reset',!$('#account-change-note').hidden);
 let releaseSave;fixtureDelay=new Promise(resolve=>releaseSave=resolve);$('#account-form').requestSubmit();await flush();
 assert('pending save freezes inputs',$('#email').disabled&&$('#account').inert);
@@ -56,9 +63,27 @@ document.querySelector('[data-page=overview]').click();await flush();
 document.querySelector('[data-page=account]').click();$('#community').value='new-pool';$('#account-form').requestSubmit();await flush();
 fixtureOverviewDelay=null;releaseOverview();await flush();
 assert('late previous-pool response ignored',!overview.report&&$('#matches').children.length===0&&config.account.community==='new-pool');
+// Discovery must never attach stale membership results to a changed account draft.
+let releaseDiscovery;fixtureAccountDelay=new Promise(resolve=>releaseDiscovery=resolve);
+$('#check-account').click();await flush();
+$('#email').value='changed@example.com';$('#email').dispatchEvent(new Event('input'));
+fixtureAccountDelay=null;releaseDiscovery();await flush();
+assert('late account discovery discarded',!$('#pool-list [data-add-pool]')&&$('#community').value==='');
+$('#email').value=config.account.email;$('#email').dispatchEvent(new Event('input'));$('#community').value=config.account.community;
+// Multiple groups and partial bonus answers are visible together.
+fixtureReports=[{...fixtureReport(),community:'friends',bonusQuestions:[{id:'bonus-1',question:'Who wins?',deadline:null,missingAnswers:2,editable:true}]},{community:'league',now:'2026-10-28T14:00:00Z',matches:[],readError:'check_failed'}];
+document.querySelector('[data-page=overview]').click();await flush();
+assert('multi-group overview shows successful rows alongside failed group',$('#matches .match')&&$('#matches .group-error')&&$('#matches').textContent.includes('league'));
+assert('partial bonus answers and unknown deadlines are visible',$('#bonus-questions').textContent.includes('2 answers missing')&&$('#bonus-questions').textContent.includes('Deadline unknown'));
+assert('unknown or failed bonus data never claims all complete',$('#match-title').textContent!=='All predictions submitted');
+fixtureReports=[{...fixtureReport(),matches:[],needsBetCount:0,bonusCheckFailed:true}];
+document.querySelector('[data-page=overview]').click();await flush();
+assert('failed bonus check shown explicitly',!$('#bonus-section').hidden&&$('#bonus-questions').textContent.includes('could not be checked')&&$('#match-title').textContent!=='All predictions submitted');
+fixtureReports=null;
 $('#logout').click();assert('logout clears tokens',$('#mcp-token').value===''&&$('#admin-token').value===''&&$('#authenticated').hidden);
 $('#admin-token').value='fixture-admin-token';$('#login-form').requestSubmit();await flush();document.querySelector('[data-language=en]').click();document.querySelector('[data-page=overview]').click();await flush();
+assert('saved-account login discovers memberships automatically',$('#pool-list').textContent.includes('league'));
 assert('localized match status',$('#matches .tag').textContent==='Missing');
 assert('no horizontal overflow',document.documentElement.scrollWidth<=innerWidth);
-console.log('WEB_UI_CHECKS '+results.length+' passed, '+results.filter(x=>!x.pass).length+' failed');
+console.log('WEB_UI_CHECKS '+results.length+' passed, '+results.filter(x=>!x.pass).length+' failed, viewport '+innerWidth+'px');
 })();

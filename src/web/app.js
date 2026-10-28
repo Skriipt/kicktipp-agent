@@ -83,8 +83,8 @@ const messages = {
     "en": "Not configured"
   },
   "reminderCaption": {
-    "de": "Vor Anstoß, nur wenn dein Tipp noch fehlt.",
-    "en": "Before kickoff, only for missing predictions."
+    "de": "Vor Anstoß oder Bonus-Abgabefrist, nur für fehlende Tipps.",
+    "en": "Before kickoff or bonus deadlines, only for missing predictions."
   },
   "channels": {
     "de": "Kanäle",
@@ -103,12 +103,12 @@ const messages = {
     "en": "Send test message"
   },
   "beforeKickoff": {
-    "de": "Vor Anstoß erinnern",
-    "en": "Remind me before kickoff"
+    "de": "Vor Abgabe erinnern",
+    "en": "Remind me before the deadline"
   },
   "sharedTimes": {
-    "de": "Diese Zeiten gelten für alle Kanäle. Bereits getippte Spiele werden übersprungen.",
-    "en": "These times apply to every channel. Games with a prediction are skipped."
+    "de": "Diese Zeiten gelten für alle Gruppen und Kanäle, vor Anstoß und vor Bonus-Abgabefristen. Vollständige Tipps werden übersprungen.",
+    "en": "These times apply to all pools and channels, before kickoff and bonus deadlines. Completed predictions are skipped."
   },
   "interval": {
     "de": "Prüfintervall",
@@ -135,16 +135,16 @@ const messages = {
     "en": "Kicktipp site"
   },
   "pool": {
-    "de": "Tipprunde",
-    "en": "Prediction pool"
+    "de": "Standardgruppe für den Agenten",
+    "en": "Default pool for your agent"
   },
   "singlePool": {
-    "de": "Der Dienst verwendet ein Konto und eine Tipprunde.",
-    "en": "The service uses one account and one prediction pool."
+    "de": "Erinnerungen gelten für alle hinzugefügten Tipprunden. Die Standardgruppe wird für Agent und CLI verwendet.",
+    "en": "Reminders cover all added pools. The default pool is used by your agent and CLI."
   },
   "checkLogin": {
-    "de": "Anmeldung prüfen",
-    "en": "Check login"
+    "de": "Anmelden und Gruppen laden",
+    "en": "Sign in and load pools"
   },
   "mcpAddress": {
     "de": "MCP-Adresse",
@@ -171,8 +171,8 @@ const messages = {
     "en": "Off. The agent can only read."
   },
   "hoursLabel": {
-    "de": "Stunden vor Anstoß",
-    "en": "Hours before kickoff"
+    "de": "Stunden vor Abgabe",
+    "en": "Hours before the deadline"
   },
   "hoursPlaceholder": {
     "de": "z. B. 2,5",
@@ -459,8 +459,8 @@ const messages = {
     "de": "Gib für dieses Konto das Passwort erneut ein."
   },
   "poolHelp": {
-    "en": "Use the pool name from its Kicktipp URL, or check your login to load your pools.",
-    "de": "Nutze den Rundennamen aus der Kicktipp-URL oder lade deine Runden über „Anmeldung prüfen“."
+    "en": "The first pool you add becomes the default. You can choose another added pool here.",
+    "de": "Die erste hinzugefügte Gruppe wird Standard. Hier kannst du eine andere hinzugefügte Gruppe wählen."
   },
   "player": {
     "en": "Player name (optional)",
@@ -601,7 +601,27 @@ const messages = {
   "accountChanged": {
     "en": "Account saved. Unsaved notification and access edits were discarded.",
     "de": "Konto gespeichert. Ungespeicherte Änderungen an Benachrichtigungen und Zugriffsrechten wurden verworfen."
-  }
+  },
+  "yourPools": { "en": "Your prediction pools", "de": "Deine Tippgruppen" },
+  "poolsIntro": { "en": "Sign in above, then add each pool you want to follow. Changes take effect immediately.", "de": "Melde dich an und füge die gewünschten Gruppen hinzu. Änderungen werden sofort übernommen." },
+  "loadingPools": { "en": "Finding your pools…", "de": "Deine Gruppen werden geladen …" },
+  "addPool": { "en": "Add", "de": "Hinzufügen" },
+  "poolAdded": { "en": "Added", "de": "Hinzugefügt" },
+  "removePool": { "en": "Remove", "de": "Entfernen" },
+  "removePoolLabel": { "en": "Remove {name}", "de": "{name} entfernen" },
+  "addPoolLabel": { "en": "Add {name}", "de": "{name} hinzufügen" },
+  "lastPool": { "en": "Keep at least one pool.", "de": "Mindestens eine Gruppe bleibt hinzugefügt." },
+  "defaultPool": { "en": "Default", "de": "Standard" },
+  "error_community_not_found": { "en": "This pool is not listed for this account. Reload your pools and try again.", "de": "Diese Gruppe gehört nicht zu diesem Konto. Lade deine Gruppen erneut." },
+  "bonusTitle": { "en": "Bonus questions", "de": "Bonusfragen" },
+  "bonusMissing": { "en": "{count} answers missing", "de": "{count} Antworten fehlen" },
+  "bonusAnswered": { "en": "Answered", "de": "Beantwortet" },
+  "bonusDeadline": { "en": "Deadline: {time}", "de": "Abgabefrist: {time}" },
+  "bonusUnknown": { "en": "Deadline unknown — check on Kicktipp. No timed reminder can be sent.", "de": "Frist unbekannt – bitte auf Kicktipp prüfen. Eine zeitgenaue Erinnerung ist nicht möglich." },
+  "bonusUnavailable": { "en": "Bonus questions could not be checked. Match predictions remain available.", "de": "Bonusfragen konnten nicht geprüft werden. Die Spieltipps sind weiterhin sichtbar." },
+  "predictionsOpen": { "en": "{matches} matches · {bonus} bonus questions open", "de": "{matches} Spiele · {bonus} Bonusfragen offen" },
+  "groupUnavailable": { "en": "This pool could not be checked. Try again shortly.", "de": "Diese Gruppe konnte nicht geprüft werden. Versuche es gleich erneut." }
+
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -621,6 +641,90 @@ let channelSequence = 0;
 const dirty = new Set();
 let loadingOverview = false;
 let overviewRequest = 0;
+let discoveredPools = [];
+let discoveredKey = null;
+let discoveryRequest = 0;
+let loadingPools = false;
+
+function accountKey() {
+  return JSON.stringify([$('#email').value.trim().toLowerCase(), $('#site').value, $('#password').value]);
+}
+function matchesSavedIdentity() {
+  return !!config && config.account.email.trim().toLowerCase() === $('#email').value.trim().toLowerCase() && config.account.site === $('#site').value;
+}
+function savedPools() {
+  return matchesSavedIdentity() ? [...(config.account.communities || [config.account.community])] : [];
+}
+function invalidatePools() {
+  discoveryRequest++;
+  discoveredKey = null;
+  discoveredPools = [];
+  loadingPools = false;
+  renderPools();
+}
+function renderPools() {
+  const container = $('#pool-list');
+  container.replaceChildren();
+  const saved = savedPools();
+  const available = discoveredKey === accountKey() ? discoveredPools : [];
+  const names = [...new Set([...saved, ...available])];
+  $('#pools-loading').hidden = !loadingPools;
+  $('#pools-empty').hidden = loadingPools || names.length > 0 || discoveredKey !== accountKey();
+  $('#communities').replaceChildren();
+  for (const name of names) {
+    const option = document.createElement('option'); option.value = name; $('#communities').append(option);
+    const row = document.createElement('li'); row.className = 'pool-row';
+    const label = document.createElement('div'); label.className = 'pool-name'; label.textContent = name;
+    const controls = document.createElement('div'); controls.className = 'pool-actions';
+    if (saved.includes(name)) {
+      const added = document.createElement('span'); added.className = 'tag ok';
+      added.textContent = t('poolAdded'); controls.append(added);
+      if (config.account.community === name) { const primary = document.createElement('small'); primary.textContent = t('defaultPool'); label.append(primary); }
+      const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = t('removePool');
+      remove.setAttribute('aria-label', t('removePoolLabel', { name })); remove.disabled = saved.length <= 1;
+      if (remove.disabled) remove.title = t('lastPool');
+      remove.addEventListener('click', () => void action(remove, $('#account-feedback'), async () => {
+        const account = accountPayload(false); if (!account) return;
+        const remaining = savedPools().filter(pool => pool !== name);
+        if (!remaining.length) return;
+        await saveConfig({ account: { ...account, communities: remaining,
+          community: config.account.community === name ? remaining[0] : config.account.community,
+          player: $('#player').value.trim() } }, 'account', $('#account-feedback'));
+      })); controls.append(remove);
+    } else {
+      const add = document.createElement('button'); add.type = 'button'; add.className = 'primary';
+      add.textContent = t('addPool'); add.dataset.addPool = name;
+      add.setAttribute('aria-label', t('addPoolLabel', { name }));
+      add.addEventListener('click', () => void action(add, $('#account-feedback'), async () => {
+        if (discoveredKey !== accountKey() || !discoveredPools.includes(name)) return;
+        const account = accountPayload(false); if (!account) return;
+        const previous = savedPools();
+        await saveConfig({ account: { ...account, communities: [...new Set([...previous, name])],
+          community: previous.length ? config.account.community : name,
+          player: $('#player').value.trim() } }, 'account', $('#account-feedback'));
+      })); controls.append(add);
+    }
+    row.append(label, controls); container.append(row);
+  }
+}
+async function discoverPools() {
+  const account = accountPayload(false); if (!account) return;
+  const request = ++discoveryRequest;
+  const key = accountKey();
+  loadingPools = true; renderPools();
+  try {
+    const result = await api('account/check', { account });
+    if (request !== discoveryRequest || key !== accountKey()) return;
+    discoveredPools = [...new Set((result.communities || []).filter(name => typeof name === 'string'))];
+    discoveredKey = key;
+    if (!$('#community').value && discoveredPools.length === 1) $('#community').value = discoveredPools[0];
+    message($('#account-feedback'), discoveredPools.length ? 'loginTest' : 'noPools');
+  } catch (error) {
+    if (request === discoveryRequest && key === accountKey()) showError($('#account-feedback'), error);
+  } finally {
+    if (request === discoveryRequest) { loadingPools = false; renderPools(); }
+  }
+}
 
 function t(key, params = {}) {
   let result = messages[key]?.[language] || messages.error_request_failed[language];
@@ -725,8 +829,9 @@ function logout() {
   $$('input').forEach(input => { if (input.type === 'checkbox') input.checked = false; else input.value = ''; });
   $('#channel-list').replaceChildren();
   $('#reminder-times').replaceChildren();
-  $('#communities').replaceChildren();
+  invalidatePools();
   $('#matches').replaceChildren();
+  $('#bonus-questions').replaceChildren();
   $('#mcp-token').type = 'password';
   $$('[data-message]').forEach(clearMessage);
   $('#authenticated').hidden = true;
@@ -749,7 +854,7 @@ function applyEnvelope(envelope, hydrate = []) {
     $('#site').value = config?.account.site || 'de';
     $('#community').value = config?.account.community || '';
     $('#player').value = config?.account.player || '';
-    $('#communities').replaceChildren();
+    invalidatePools();
     dirty.delete('account');
   }
   if (hydrate.includes('notifications')) {
@@ -793,6 +898,7 @@ async function saveConfig(patch, panel, target) {
     // The account may have changed; never leave an old account's token/report visible.
     $('#mcp-token').value = '';
     $('#mcp-token').type = 'password';
+    await discoverPools();
   }
 }
 function navigate(page, refresh = true) {
@@ -832,12 +938,18 @@ function renderOverview() {
   const status = overview?.status;
   const scheduler = status?.scheduler;
   const read = status?.read;
-  const report = overview?.report;
+  const reports = Array.isArray(overview?.reports) ? overview.reports : overview?.report ? [overview.report] : [];
+  const report = reports.length === 1 ? reports[0] : null;
   const readError = overview?.error || read?.lastError;
   const deliveryError = ['delivery_failed', 'state_failed'].includes(scheduler?.lastError) ? scheduler.lastError : null;
-  const error = readError || deliveryError;
+  const bonusFailure = reports.some(item => item.bonusCheckFailed);
+  const error = readError || deliveryError || (bonusFailure ? 'check_failed' : null);
+  const currentTime = Date.now();
+  const openBonus = question => question.editable && question.missingAnswers > 0 &&
+    (!question.deadline || !Number.isFinite(Date.parse(question.deadline)) || Date.parse(question.deadline) > currentTime);
+  const groups = config?.account.communities || (config ? [config.account.community] : []);
   $('#version').textContent = status?.version ? `Kicktipp Agent ${status.version}` : 'Kicktipp Agent';
-  $('#overview-community').textContent = config?.account.community || '';
+  $('#overview-community').textContent = groups.join(' · ');
   $('#last-check').textContent = dateText(read?.lastCheck, { dateStyle: 'short', timeStyle: 'short' });
   $('#next-check').textContent = scheduler?.nextCheck ? dateText(scheduler.nextCheck, { dateStyle: 'short', timeStyle: 'short' }) : t('notScheduled');
   $('#last-success').textContent = dateText(read?.lastSuccess, { dateStyle: 'short', timeStyle: 'short' });
@@ -852,33 +964,69 @@ function renderOverview() {
   warning.textContent = error ? t(messages[`error_${error}`] ? `error_${error}` : 'error_request_failed') : '';
   $('#matchday').hidden = !report?.matchday;
   $('#matchday').textContent = report?.matchday ? t('matchday', { value: report.matchday }) : '';
-  $('#report-time').textContent = report?.now ? t('asOf', { time: dateText(report.now, { dateStyle: 'short', timeStyle: 'short' }) }) : '';
+  const checkedAt = reports.map(item => item.now).filter(Boolean).sort()[0];
+  $('#report-time').textContent = checkedAt ? t('asOf', { time: dateText(checkedAt, { dateStyle: 'short', timeStyle: 'short' }) }) : '';
   $('#matches').replaceChildren();
+  $('#bonus-questions').replaceChildren();
+  $('#bonus-section').hidden = true;
   const state = $('#match-state');
   state.replaceChildren();
-  if (!report) {
+  if (!reports.length) {
     $('#match-title').textContent = t(loadingOverview ? 'loadingTitle' : error ? 'notAvailable' : 'notChecked');
-    const p = document.createElement('p');
-    p.textContent = t(loadingOverview ? 'loading' : 'noReport');
-    state.append(p);
-    state.hidden = false;
+    const p = document.createElement('p'); p.textContent = t(loadingOverview ? 'loading' : 'noReport');
+    state.append(p); state.hidden = false;
   } else {
-    const rows = Array.isArray(report.matches) ? report.matches : [];
-    const count = report.needsBetCount;
-    $('#match-title').textContent = t(loadingOverview ? 'loadingTitle' : readError ? 'staleTitle' : count === 0 ? 'emptyTitle' : count === 1 ? 'openTitleOne' : 'openTitle', { count });
-    state.hidden = rows.length > 0;
-    if (!rows.length) { const p = document.createElement('p'); p.textContent = t('noGames'); state.append(p); }
-    for (const match of rows) {
-      const row = document.createElement('div'); row.className = 'match';
-      const time = document.createElement('div'); time.className = 'time';
-      time.textContent = match.kickoff ? dateText(match.kickoff, { hour: '2-digit', minute: '2-digit' }) : t('unknownKickoff');
-      if (match.kickoff) { const day = document.createElement('small'); day.textContent = dateText(match.kickoff, { weekday: 'short', day: 'numeric', month: 'short' }); time.append(day); }
-      const teams = document.createElement('div'); teams.className = 'teams';
-      for (const name of [match.home, match.away]) { const team = document.createElement('span'); team.textContent = name; teams.append(team); }
-      const score = document.createElement('div'); score.className = 'score';
-      if (match.bet) score.textContent = match.bet;
-      else { const tag = document.createElement('span'); tag.className = `tag${match.needsBet ? ' open' : ''}`; tag.textContent = t(match.closed ? 'closed' : 'missing'); score.append(tag); }
-      row.append(time, teams, score); $('#matches').append(row);
+    const valid = reports.filter(item => !item.readError);
+    const count = valid.reduce((total, item) => total + (item.needsBetCount || 0), 0);
+    const bonusCount = valid.reduce((total, item) => total + (item.bonusQuestions || []).filter(openBonus).length, 0);
+    const incomplete = readError || bonusFailure || valid.length !== reports.length;
+    $('#match-title').textContent = t(loadingOverview ? 'loadingTitle' : incomplete ? 'staleTitle' : bonusCount ? 'predictionsOpen' : count === 0 ? 'emptyTitle' : count === 1 ? 'openTitleOne' : 'openTitle', { count, matches: count, bonus: bonusCount });
+    const rows = valid.flatMap(item => item.matches || []);
+    state.hidden = rows.length > 0 || valid.length !== reports.length || bonusCount > 0;
+    if (!state.hidden) { const p = document.createElement('p'); p.textContent = t('noGames'); state.append(p); }
+    for (const item of reports) {
+      if (reports.length > 1 || item.readError) {
+        const heading = document.createElement('h3'); heading.className = 'group-heading'; heading.textContent = item.community;
+        $('#matches').append(heading);
+      }
+      if (item.readError) {
+        const error = document.createElement('p'); error.className = 'group-error'; error.textContent = t('groupUnavailable');
+        $('#matches').append(error); continue;
+      }
+      for (const match of item.matches || []) {
+        const row = document.createElement('div'); row.className = 'match';
+        const time = document.createElement('div'); time.className = 'time';
+        time.textContent = match.kickoff ? dateText(match.kickoff, { hour: '2-digit', minute: '2-digit' }) : t('unknownKickoff');
+        if (match.kickoff) { const day = document.createElement('small'); day.textContent = dateText(match.kickoff, { weekday: 'short', day: 'numeric', month: 'short' }); time.append(day); }
+        const teams = document.createElement('div'); teams.className = 'teams';
+        for (const name of [match.home, match.away]) { const team = document.createElement('span'); team.textContent = name; teams.append(team); }
+        const score = document.createElement('div'); score.className = 'score';
+        if (match.bet) score.textContent = match.bet;
+        else { const tag = document.createElement('span'); tag.className = `tag${match.needsBet ? ' open' : ''}`; tag.textContent = t(match.closed ? 'closed' : 'missing'); score.append(tag); }
+        row.append(time, teams, score); $('#matches').append(row);
+      }
+      const questions = item.bonusQuestions || [];
+      if (questions.length || item.bonusCheckFailed) {
+        $('#bonus-section').hidden = false;
+        if (reports.length > 1) { const heading = document.createElement('h3'); heading.className = 'group-heading'; heading.textContent = item.community; $('#bonus-questions').append(heading); }
+        if (item.bonusCheckFailed) {
+          const error = document.createElement('p'); error.className = 'group-error'; error.textContent = t('bonusUnavailable');
+          $('#bonus-questions').append(error);
+        }
+        for (const question of questions) {
+          const row = document.createElement('div'); row.className = 'bonus-row';
+          const title = document.createElement('h4'); title.textContent = question.question;
+          const deadline = document.createElement('p');
+          const known = question.deadline && Number.isFinite(Date.parse(question.deadline));
+          deadline.textContent = known ? t('bonusDeadline', { time: dateText(question.deadline, { dateStyle: 'short', timeStyle: 'short' }) }) : t(question.editable && question.missingAnswers > 0 ? 'bonusUnknown' : 'unknown');
+          if (!known && question.editable && question.missingAnswers > 0) deadline.className = 'bonus-warning';
+          const tag = document.createElement('span');
+          const closed = !question.editable || (known && Date.parse(question.deadline) <= currentTime);
+          tag.className = `tag${openBonus(question) ? ' open' : ''}`;
+          tag.textContent = t(closed ? 'closed' : question.missingAnswers > 0 ? 'bonusMissing' : 'bonusAnswered', { count: question.missingAnswers });
+          row.append(title, deadline, tag); $('#bonus-questions').append(row);
+        }
+      }
     }
   }
   $('#summary-channels').replaceChildren();
@@ -998,7 +1146,7 @@ function accountPayload(requirePool) {
   return {
     email: email.value.trim(), site: $('#site').value,
     ...(password.value ? { password: password.value } : {}),
-    ...(requirePool ? { community: community.value.trim(), player: $('#player').value.trim() } : {}),
+    ...(requirePool ? { community: community.value.trim(), communities: [...new Set([...savedPools(), community.value.trim()])], player: $('#player').value.trim() } : {}),
   };
 }
 function renderAccountNotice() {
@@ -1021,7 +1169,7 @@ function setLanguage(next) {
   $('meta[name=description]').content = t('description');
   document.title = `Kicktipp Agent: ${t(token ? currentPage : 'signIn')}`;
   $('#password-help').textContent = t(config?.account.hasPassword ? 'savedSecret' : 'requiredPassword');
-  renderOverview(); renderHours(); renderChannelList(); renderChannelLabels(); renderPermission(); renderAccountNotice();
+  renderOverview(); renderHours(); renderChannelList(); renderChannelLabels(); renderPermission(); renderAccountNotice(); renderPools();
 }
 
 $('#login-form').addEventListener('submit', event => {
@@ -1035,6 +1183,7 @@ $('#login-form').addEventListener('submit', event => {
     applyEnvelope(envelope, ['account', 'notifications', 'agent']);
     $('#login-panel').hidden = true; $('#authenticated').hidden = false; $('#navigation').hidden = false; $('#logout').hidden = false;
     navigate(config ? location.hash.slice(1) || 'overview' : 'account');
+    if (config) void discoverPools();
   });
 });
 $('#logout').addEventListener('click', logout);
@@ -1107,17 +1256,14 @@ $('#save-notifications').addEventListener('click', event => {
   const notifications = { channels: channelDrafts.map(channelPayload), warnHours: [...hours], everyMinutes };
   void action(event.currentTarget, result, () => saveConfig({ notifications, timeZone }, 'notifications', result));
 });
-$$('#account-form input, #account-form select').forEach(input => input.addEventListener('input', () => markDirty('account')));
-$('#check-account').addEventListener('click', event => {
-  const account = accountPayload(false); if (!account) return;
-  void action(event.currentTarget, $('#account-feedback'), async () => {
-    const result = await api('account/check', { account });
-    $('#communities').replaceChildren();
-    for (const name of result.communities || []) { const option = document.createElement('option'); option.value = name; $('#communities').append(option); }
-    if (!$('#community').value && result.communities?.length === 1) $('#community').value = result.communities[0];
-    message($('#account-feedback'), result.communities?.length ? 'loginTest' : 'noPools');
-  });
-});
+$$('#account-form input, #account-form select').forEach(input => input.addEventListener('input', () => {
+  markDirty('account');
+  if (['email', 'password', 'site'].includes(input.id)) {
+    if (['email', 'site'].includes(input.id) && !matchesSavedIdentity()) { $('#community').value = ''; $('#player').value = ''; }
+    invalidatePools();
+  }
+}));
+$('#check-account').addEventListener('click', () => { void discoverPools(); });
 $('#account-form').addEventListener('submit', event => {
   event.preventDefault();
   const account = accountPayload(true); if (!account) return;

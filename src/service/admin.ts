@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { sendNotification, validateChannel, type NotificationChannel } from '../notify/backends.js';
 import { SerialQueue } from './queue.js';
-import { validateServiceConfig, type ServiceConfig } from './settings.js';
+import { configuredCommunities, validateServiceConfig, type ServiceConfig } from './settings.js';
 
 /** Safe, stable error identifiers for the browser; never include submitted secrets. */
 export class AdminError extends Error {
@@ -35,6 +35,7 @@ const channelSchema = z.discriminatedUnion('kind', [
 const accountSchema = z.object({
   email: z.string().trim().email().optional(), password: z.string().optional(),
   community: z.string().trim().regex(/^[\p{L}\p{N}_-]+$/u).optional(),
+  communities: z.array(z.string().trim().regex(/^[\p{L}\p{N}_-]+$/u)).min(1).max(50).optional(),
   site: z.enum(['de', 'com']).optional(), player: z.string().trim().optional(),
 }).strict();
 const patchSchema = z.object({
@@ -104,7 +105,7 @@ function canonical(value: unknown): unknown {
 /** Only the explicitly requested connection route exposes the MCP credential. */
 function publicConfig(config: ServiceConfig) {
   return {
-    account: { email: config.account.email, community: config.account.community, site: config.account.site,
+    account: { email: config.account.email, community: config.account.community, communities: configuredCommunities(config), site: config.account.site,
       ...(config.account.player ? { player: config.account.player } : {}), hasPassword: !!config.account.password },
     notifications: {
       channels: config.notifications.channels.map((channel) => ({ id: channel.id, kind: channel.kind,
@@ -153,6 +154,13 @@ export function createAdminController(options: AdminControllerOptions) {
     if (patch.account) {
       const account = { ...base.account, ...patch.account };
       account.password = resolvePassword(current?.account, { ...account, password: patch.account.password });
+      if (!sameIdentity(current?.account, account.email, account.site)) {
+        // Membership and player selection belong to the verified account, never
+        // to the previous account whose secrets/settings supplied the base.
+        account.community = patch.account.community ?? '';
+        account.communities = patch.account.communities;
+        account.player = patch.account.player;
+      }
       account.player = account.player || undefined;
       base.account = account;
     }
@@ -165,6 +173,16 @@ export function createAdminController(options: AdminControllerOptions) {
     let valid: ServiceConfig;
     try { valid = validateServiceConfig(base); }
     catch { throw new AdminError('invalid_config'); }
+    const sameAccount = sameIdentity(current?.account, valid.account.email, valid.account.site);
+    const previousGroups = new Set(current && sameAccount ? configuredCommunities(current) : []);
+    const groups = configuredCommunities(valid);
+    if (groups.some((community) => !previousGroups.has(community))) {
+      let memberships: string[];
+      try {
+        memberships = await options.checkAccount({ email: valid.account.email, password: valid.account.password, site: valid.account.site });
+      } catch { throw new AdminError('login_failed', 502); }
+      if (groups.some((community) => !memberships.includes(community))) throw new AdminError('community_not_found');
+    }
     try { await options.applyConfig(valid); }
     catch (error) {
       if (error instanceof AdminError) throw error;

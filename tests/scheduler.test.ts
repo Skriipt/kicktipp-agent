@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DeadlineScheduler } from '../src/service/scheduler.js';
 import { NotificationError, type NotificationChannel } from '../src/notify/backends.js';
-import type { DeadlineReport } from '../src/analytics/deadline.js';
+import type { DeadlineBonusQuestion, DeadlineReport } from '../src/analytics/deadline.js';
 import { AuthError } from '../src/core.js';
 
 let directory: string;
@@ -31,7 +31,7 @@ function report(hours = 4): DeadlineReport {
   };
 }
 
-function make(data = report(), options: Partial<ConstructorParameters<typeof DeadlineScheduler>[0]> = {}) {
+function make(data: DeadlineReport | DeadlineReport[] = report(), options: Partial<ConstructorParameters<typeof DeadlineScheduler>[0]> = {}) {
   const send = vi.fn(async () => {});
   const fetchReport = vi.fn(async () => data);
   const scheduler = new DeadlineScheduler({
@@ -40,6 +40,227 @@ function make(data = report(), options: Partial<ConstructorParameters<typeof Dea
   });
   return { scheduler, send, fetchReport };
 }
+
+describe('multiple subscribed groups', () => {
+  it('delivers identical fixtures and bonus questions separately for each group and persists both', async () => {
+    const firstGroup = { ...bonusReport(), matches: report().matches };
+    const secondGroup = { ...structuredClone(firstGroup), community: 'another-group' };
+    const data = [firstGroup, secondGroup];
+    const { scheduler, send } = make(data, { channels: [first] });
+    await scheduler.runOnce();
+    expect(send.mock.calls).toEqual([
+      [first, expect.objectContaining({ event: 'missing_tips', community: 'test' })],
+      [first, expect.objectContaining({ event: 'missing_bonus', community: 'test' })],
+      [first, expect.objectContaining({ event: 'missing_tips', community: 'another-group' })],
+      [first, expect.objectContaining({ event: 'missing_bonus', community: 'another-group' })],
+    ]);
+    expect(scheduler.status()).toMatchObject({ lastSuccess: '2026-10-28T12:00:00.000Z', lastError: null });
+    const restarted = make(data, { channels: [first] });
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).not.toHaveBeenCalled();
+  });
+
+  it('delivers a healthy group despite another group failing, and only records complete recovery as successful', async () => {
+    const healthy = report();
+    const failed = { ...report(), community: 'failed-group', readError: 'check_failed' as const };
+    const data: DeadlineReport[] = [failed, healthy];
+    const { scheduler, send } = make(data, { channels: [first] });
+    await scheduler.runOnce();
+    expect(send.mock.calls).toEqual([
+      [first, expect.objectContaining({ event: 'service_error', code: 'check_failed' })],
+      [first, expect.objectContaining({ event: 'missing_tips', community: 'test' })],
+    ]);
+    expect(scheduler.status()).toMatchObject({ lastError: 'check_failed', lastSuccess: null });
+    now = new Date('2026-10-28T12:15:00Z');
+    await scheduler.runOnce();
+    expect(send).toHaveBeenCalledTimes(2);
+    delete data[0].readError;
+    now = new Date('2026-10-28T12:30:00Z');
+    await scheduler.runOnce();
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(send.mock.calls[2]).toMatchObject([first, { event: 'missing_tips', community: 'failed-group' }]);
+    expect(scheduler.status()).toMatchObject({ lastError: null, lastSuccess: '2026-10-28T12:30:00.000Z' });
+    data[0].readError = 'check_failed';
+    now = new Date('2026-10-28T12:45:00Z');
+    await scheduler.runOnce();
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(send.mock.calls[3]).toMatchObject([first, { event: 'service_error', code: 'check_failed' }]);
+    expect(scheduler.status().lastSuccess).toBe('2026-10-28T12:30:00.000Z');
+  });
+
+  it('prefers an authentication alert and aggregates unknown deadlines only from readable groups', async () => {
+    const data: DeadlineReport[] = [
+      { ...bonusReport({ deadline: null }), community: 'failed-group', readError: 'check_failed' },
+      { ...bonusReport({ deadline: null }), community: 'expired-session', readError: 'auth_required' },
+      { ...bonusReport({ deadline: null }), community: 'readable-group' },
+      { ...bonusReport({ deadline: 'unknown' }), community: 'partial-bonus-group', bonusCheckFailed: true },
+    ];
+    const { scheduler, send } = make(data, { channels: [first] });
+    await scheduler.runOnce();
+    expect(send.mock.calls).toEqual([[first, expect.objectContaining({ event: 'service_error', code: 'auth_required' })]]);
+    expect(scheduler.status()).toMatchObject({ lastError: 'auth_required', lastSuccess: null, unresolvedBonusQuestions: 2 });
+    const restarted = make(data, { channels: [first] });
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).not.toHaveBeenCalled();
+  });
+});
+
+function bonusReport(overrides: Partial<DeadlineBonusQuestion> = {}): DeadlineReport {
+  return {
+    ...report(), matches: [],
+    bonusQuestions: [{
+      id: 'relegation-222', question: 'Wer steigt ab?', deadline: '2026-10-28T16:00:00.000Z',
+      missingAnswers: 2, editable: true, ...overrides,
+    }],
+  };
+}
+
+describe('bonus question reminders', () => {
+  it('reminds about a partially answered question at the most urgent window and deduplicates across restart', async () => {
+    const data = bonusReport();
+    const { scheduler, send } = make(data);
+    await scheduler.runOnce();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]).toMatchObject([first, {
+      event: 'missing_bonus', community: 'test', matchday: 9, timeZone: 'Europe/Berlin',
+      checkedAt: '2026-10-28T12:00:00.000Z', warnHours: 6,
+      bonusQuestions: [{ id: 'relegation-222', question: 'Wer steigt ab?', missingAnswers: 2 }],
+      summary: expect.stringContaining('Abgabefrist'),
+    }]);
+    expect(send.mock.calls[0][1]).toMatchObject({ summary: expect.stringContaining('17:00') });
+    const restarted = make(data);
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).not.toHaveBeenCalled();
+    now = new Date('2026-10-28T15:30:00Z');
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).toHaveBeenCalledTimes(2);
+    expect(restarted.send.mock.calls[0]).toMatchObject([first, { event: 'missing_bonus', warnHours: 1 }]);
+    const state = fs.readFileSync(path.join(directory, 'state.json'), 'utf8');
+    expect(state).not.toContain('secret');
+    expect(state).not.toContain('Wer steigt ab');
+  });
+
+  it.each([
+    ['complete', { missingAnswers: 0 }],
+    ['closed', { editable: false }],
+    ['unknown deadline', { deadline: null }],
+    ['unparseable deadline', { deadline: 'unknown' }],
+    ['past deadline', { deadline: '2026-10-28T11:59:00Z' }],
+    ['deadline now', { deadline: '2026-10-28T12:00:00Z' }],
+    ['outside warning windows', { deadline: '2026-10-30T12:00:00Z' }],
+  ] as const)('skips %s questions', async (_label, overrides) => {
+    const { scheduler, send } = make(bonusReport(overrides));
+    await scheduler.runOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(scheduler.status().unresolvedBonusQuestions).toBe(
+      ['unknown deadline', 'unparseable deadline'].includes(_label) ? 1 : 0,
+    );
+  });
+
+  it('resets the unresolved question count once a deadline can be read', async () => {
+    const data = bonusReport({ deadline: null });
+    const { scheduler, send } = make(data);
+    await scheduler.runOnce();
+    expect(scheduler.status().unresolvedBonusQuestions).toBe(1);
+    data.bonusQuestions![0].deadline = '2026-10-28T16:00:00Z';
+    await scheduler.runOnce();
+    expect(scheduler.status().unresolvedBonusQuestions).toBe(0);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps match reminders working when bonus checks fail and persists the operational alert cooldown', async () => {
+    const data = report();
+    data.bonusCheckFailed = true;
+    const { scheduler, send } = make(data, { channels: [first] });
+    await scheduler.runOnce();
+    expect(scheduler.status()).toMatchObject({ lastError: 'check_failed', lastSuccess: null });
+    expect(send.mock.calls).toEqual([
+      [first, expect.objectContaining({ event: 'service_error', code: 'check_failed' })],
+      [first, expect.objectContaining({ event: 'missing_tips' })],
+    ]);
+    now = new Date('2026-10-28T12:15:00Z');
+    const restarted = make(data, { channels: [first] });
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).not.toHaveBeenCalled();
+    expect(restarted.scheduler.status()).toMatchObject({ lastError: 'check_failed', lastSuccess: null });
+    data.bonusCheckFailed = false;
+    await restarted.scheduler.runOnce();
+    expect(restarted.scheduler.status()).toMatchObject({ lastError: null, lastSuccess: '2026-10-28T12:15:00.000Z' });
+    data.bonusCheckFailed = true;
+    now = new Date('2026-10-28T12:30:00Z');
+    await restarted.scheduler.runOnce();
+    expect(restarted.send.mock.calls).toEqual([[first, expect.objectContaining({ event: 'service_error', code: 'check_failed' })]]);
+    expect(restarted.scheduler.status().lastSuccess).toBe('2026-10-28T12:15:00.000Z');
+  });
+
+  it('does not send when a question closes while the report is being fetched', async () => {
+    const data = bonusReport({ deadline: '2026-10-28T12:00:30Z' });
+    const { scheduler, send } = make(data, { fetchReport: async () => {
+      now = new Date('2026-10-28T12:01:00Z');
+      return data;
+    } });
+    await scheduler.runOnce();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('retries only the failed destination and stops subsequent reminders once all answers are filled', async () => {
+    const data = bonusReport();
+    const send = vi.fn(async (channel: NotificationChannel) => {
+      if (channel.id === 'second') throw new Error('provider secret');
+    });
+    const { scheduler } = make(data, { send });
+    await scheduler.runOnce();
+    expect(scheduler.status()).toMatchObject({ lastError: 'delivery_failed', failedChannels: ['second'] });
+    const restarted = make(data);
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).not.toHaveBeenCalled();
+    expect(restarted.scheduler.status().failedChannels).toEqual(['second']);
+    now = new Date('2026-10-28T12:15:00Z');
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).toHaveBeenCalledTimes(1);
+    expect(restarted.send.mock.calls[0]).toMatchObject([second, { event: 'missing_bonus' }]);
+    data.bonusQuestions![0].missingAnswers = 0;
+    now = new Date('2026-10-28T15:30:00Z');
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a pending retry when the latest report has all answers filled', async () => {
+    const data = bonusReport();
+    const send = vi.fn(async () => { throw new Error('temporary provider failure'); });
+    await make(data, { channels: [first], send }).scheduler.runOnce();
+    data.bonusQuestions![0].missingAnswers = 0;
+    now = new Date('2026-10-28T12:15:00Z');
+    const restarted = make(data, { channels: [first] });
+    await restarted.scheduler.runOnce();
+    expect(restarted.send).not.toHaveBeenCalled();
+    expect(restarted.scheduler.status().failedChannels).toEqual([]);
+  });
+
+  it('keeps question and community identities separate and deduplicates repeated rows', async () => {
+    const data = bonusReport();
+    data.matches = report().matches;
+    data.bonusQuestions!.push({ ...data.bonusQuestions![0] });
+    const firstRun = make(data, { channels: [first] });
+    await firstRun.scheduler.runOnce();
+    expect(firstRun.send).toHaveBeenCalledTimes(2);
+    expect(firstRun.send.mock.calls[0]).toMatchObject([first, { event: 'missing_tips' }]);
+    expect(firstRun.send.mock.calls[1]).toMatchObject([first, { event: 'missing_bonus', bonusQuestions: [data.bonusQuestions![0]] }]);
+    data.community = 'another-group';
+    const otherGroup = make(data, { channels: [first] });
+    await otherGroup.scheduler.runOnce();
+    expect(otherGroup.send).toHaveBeenCalledTimes(2);
+    data.matches = [];
+    data.bonusQuestions = [{ ...data.bonusQuestions![0], id: 'another-question' }];
+    const otherQuestion = make(data, { channels: [first] });
+    await otherQuestion.scheduler.runOnce();
+    expect(otherQuestion.send).toHaveBeenCalledTimes(1);
+    data.bonusQuestions![0].deadline = '2026-10-28T17:00:00Z';
+    const movedDeadline = make(data, { channels: [first] });
+    await movedDeadline.scheduler.runOnce();
+    expect(movedDeadline.send).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('durable deadline scheduler', () => {
   it('checks immediately, repeats on its interval, and stops scheduling on shutdown', async () => {

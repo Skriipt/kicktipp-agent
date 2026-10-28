@@ -10,6 +10,7 @@ import type { ServiceConfig } from '../src/service/settings.js';
 const TOKEN = 'local-process-test-token-with-thirty-two-characters';
 const PASSWORD = 'fixture-password-never-used-outside-local-server';
 const COMMUNITY = 'process-fixture';
+const OTHER_COMMUNITY = 'second-process-fixture';
 const processes = new Set<ChildProcess>();
 let fixture: Server | undefined;
 let directory: string | undefined;
@@ -152,7 +153,8 @@ describe('the compiled service process', () => {
     const requests: { method: string; pathname: string; account: string | null }[] = [];
     const unexpected: string[] = [];
     fixture = createServer(async (request, response) => {
-      const pathname = new URL(request.url!, 'http://localhost').pathname;
+      const url = new URL(request.url!, 'http://localhost');
+      const pathname = url.pathname;
       const account = request.headers.cookie?.match(/(?:^|;\s*)sid=(first|second)(?:;|$)/)?.[1] ?? null;
       requests.push({ method: request.method!, pathname, account });
       const html = (body: string) => {
@@ -185,7 +187,7 @@ describe('the compiled service process', () => {
           }
         }
       }
-      if (request.method === 'GET' && ['/', '/info/profil/meinetipprunden', `/${COMMUNITY}/tippabgabe`, `/${COMMUNITY}/tippspielplan`, `/${COMMUNITY}/tippuebersicht`, `/${COMMUNITY}/spielregeln`].includes(pathname)) {
+      if (request.method === 'GET' && ['/', '/info/profil/meinetipprunden', `/${COMMUNITY}/tippabgabe`, `/${COMMUNITY}/tippspielplan`, `/${COMMUNITY}/tippuebersicht`, `/${COMMUNITY}/spielregeln`, `/${OTHER_COMMUNITY}/tippabgabe`, `/${OTHER_COMMUNITY}/tippspielplan`].includes(pathname)) {
         if (!account) {
           response.writeHead(302, { Location: '/info/profil/login' });
           response.end();
@@ -193,6 +195,15 @@ describe('the compiled service process', () => {
         }
         if (pathname === '/' || pathname === '/info/profil/meinetipprunden') {
           html(`<div id="kicktipp-content"><a href="/${COMMUNITY}/">${COMMUNITY}</a></div>`);
+        } else if (pathname.endsWith('/tippabgabe') && url.searchParams.get('bonus') === 'true') {
+          html(`<div id="kicktipp-content"><table id="tippabgabeFragen"><tbody>
+            <tr><td>1</td><td>Wer wird Meister?</td><td>
+            <select name="tippabgabeFragenForms[101].tipp"><option value="-1" selected>---</option><option value="1">Home FC</option></select>
+            </td></tr></tbody></table></div>`);
+        } else if (pathname.endsWith('/tippspielplan') && url.searchParams.get('bonus') === 'true') {
+          html(`<div id="kicktipp-content"><table id="fragen"><thead><tr>
+            <th name="wettbewerb">Wettbewerb</th><th name="termin">Termin</th><th name="tipptermin">Tipptermin</th><th name="frage">Frage</th>
+            </tr></thead><tbody><tr><td>Fixture League</td><td>01.06.27 15:30</td><td>${kickoff}</td><td>Wer wird Meister?</td></tr></tbody></table></div>`);
         } else if (pathname.endsWith('/tippabgabe')) {
           html(`<div id="kicktipp-content"><div class="pagetitle">Spieltag 1</div>
             <table id="tippabgabeSpiele"><tbody><tr><td>${kickoff}</td><td>Home FC</td><td>Away FC</td><td>
@@ -217,7 +228,7 @@ describe('the compiled service process', () => {
     const fixtureOrigin = `http://127.0.0.1:${(fixture.address() as { port: number }).port}`;
     const config: ServiceConfig = {
       version: 1,
-      account: { email: 'first@example.invalid', password: PASSWORD, community: COMMUNITY, site: 'de' },
+      account: { email: 'first@example.invalid', password: PASSWORD, community: COMMUNITY, communities: [COMMUNITY, OTHER_COMMUNITY], site: 'de' },
       server: { host: '127.0.0.1', port: await freePort(), token: TOKEN, readOnly: true, allowedOrigins: [] },
       notifications: { channels: [{ id: 'local-webhook', kind: 'webhook', url: `${fixtureOrigin}/webhook` }], warnHours: [6, 1], everyMinutes: 1 },
       timeZone: 'Europe/Berlin',
@@ -230,9 +241,13 @@ describe('the compiled service process', () => {
     expect((await fetch(`${first.base}/status`)).status).toBe(401);
     expect((await fetch(`${first.base}/mcp`, { method: 'POST' })).status).toBe(401);
     const firstStatus = await settledStatus(first.base);
-    expect(firstStatus).toMatchObject({ community: COMMUNITY, readOnly: true, scheduler: { running: true, lastError: null, deliveredCount: 1 } });
-    expect(received).toHaveLength(1);
+    expect(firstStatus).toMatchObject({ community: COMMUNITY, readOnly: true, scheduler: { running: true, lastError: null, deliveredCount: 4 } });
+    expect(received).toHaveLength(4);
     expect(received[0]).toMatchObject({ event: 'missing_tips', community: COMMUNITY, warnHours: 1, matches: [{ home: 'Home FC', away: 'Away FC', needsBet: true }] });
+    expect(received[1]).toMatchObject({ event: 'missing_bonus', community: COMMUNITY, warnHours: 1,
+      bonusQuestions: [{ question: 'Wer wird Meister?', missingAnswers: 1, editable: true }] });
+    expect(received[2]).toMatchObject({ event: 'missing_tips', community: OTHER_COMMUNITY });
+    expect(received[3]).toMatchObject({ event: 'missing_bonus', community: OTHER_COMMUNITY });
     const initialized = await rpc(first.base, 'initialize', {
       protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'process-fixture', version: '1' },
     });
@@ -257,7 +272,7 @@ describe('the compiled service process', () => {
     const restarted = await launch(configFile, fixtureOrigin);
     const restartedStatus = await settledStatus(restarted.base);
     expect(restartedStatus.scheduler).toMatchObject({ lastError: null, deliveredCount: 0 });
-    expect(received).toHaveLength(1);
+    expect(received).toHaveLength(4);
     expect(logins).toEqual(['first']);
     expect(JSON.parse((await readRules(restarted.base)).result.contents[0].text).data).toEqual(cached.data);
     await restarted.stop();
@@ -267,9 +282,9 @@ describe('the compiled service process', () => {
     const secondStartRequest = requests.length;
     const second = await launch(configFile, fixtureOrigin);
     const secondStatus = await settledStatus(second.base);
-    expect(secondStatus.scheduler).toMatchObject({ lastError: null, deliveredCount: 1 });
+    expect(secondStatus.scheduler).toMatchObject({ lastError: null, deliveredCount: 4 });
     expect(logins).toEqual(['first', 'second']);
-    expect(received).toHaveLength(2);
+    expect(received).toHaveLength(8);
     expect(requests.slice(secondStartRequest).filter((request) => request.account === 'first')).toEqual([]);
     expect(JSON.parse((await readRules(second.base)).result.contents[0].text)).toMatchObject({ error: 'not_cached' });
     const secondSync = await rpc(second.base, 'tools/call', { name: 'sync_history', arguments: { from: 1, to: 1 } });

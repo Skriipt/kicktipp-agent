@@ -50,9 +50,9 @@ No language model is bundled. Your agent connects when needed; reminder checks d
 
 The local website and MCP share port 8787. No additional container, database or hosted frontend is needed. Compose binds the port to this computer's loopback interface.
 
-- **Overview:** upcoming matches, missing predictions, last successful check, next scheduled check and notification delivery problems. “Check again” reads Kicktipp; it does not submit predictions or send reminders.
+- **Overview:** upcoming matches and incomplete bonus questions for every added pool, last successful check, next scheduled check and notification delivery problems. “Check again” reads Kicktipp; it does not submit predictions or send reminders.
 - **Notifications:** add, edit, test or remove Discord, Telegram and webhook destinations. Choose your own reminder times, including fractions such as `2.5` hours (`2,5` also works in the form). Use up to ten values greater than zero and at most 168 hours; the times apply to every channel. No preset times are required. With no channels, reminders can stay unconfigured.
-- **Account:** update credentials, check the login and choose a pool. One account and one pool are active per instance.
+- **Account:** sign in to discover your existing Kicktipp pools, then click **Add** beside each pool you want to follow. Added pools appear in the overview and receive reminders immediately, without restarting. The list also loads automatically when you unlock the website with an account already configured. You can remove pools and choose the default pool for your agent; at least one pool must remain. Adding a pool here does not join a new pool on Kicktipp.
 - **Connect agent:** view the MCP address, explicitly reveal its token and control whether the agent may submit or edit predictions. Read-only is the default.
 
 **Save applies changes immediately.** Active Kicktipp operations finish before account settings change. A stale browser cannot overwrite a newer save: reload the configuration after a conflict. Configurations edited through the terminal still require a service restart.
@@ -69,7 +69,9 @@ For a remote Docker host, use the [SSH tunnel](#agent-on-another-computer) and o
 
 ## Notifications
 
-All configured channels use the same reminder windows and check interval. You can enable several destinations at once. A reminder is sent only for a missing tip with a known, future kickoff. Existing tips and games that have started are skipped.
+All configured channels and added pools use the same reminder windows and check interval. You can enable several destinations at once. Match reminders require a missing tip and a known, future kickoff. Bonus reminders require at least one unanswered, editable answer slot and a known, future bonus deadline. Completed answers, locked questions and games that have started are skipped.
+
+Bonus deadlines come from the bonus schedule's **Tipptermin**, independently of match kickoffs and event dates. Ambiguous question matches or unreadable deadlines appear as unknown in the overview and `scheduler.unresolvedBonusQuestions`; no timed reminder is invented for them. A failed group or bonus read is shown separately, while reminders for readable groups and matches continue.
 
 Use **Notifications** in the local website to edit channels and times without restarting. The terminal alternative is:
 
@@ -130,7 +132,7 @@ Choose **webhook** and paste your receiver's HTTP(S) URL. It receives a JSON `PO
 }
 ```
 
-Test messages have `event: "test"` and `summary`. Operational alerts have `event: "service_error"`, a `code` (`auth_required` or `check_failed`) and `summary`. `matchday` can be `null` when checking the current matchday.
+Bonus reminders have `event: "missing_bonus"` and the same community, timezone, check time and warning-window fields. Their `bonusQuestions` array contains `id`, `question`, `deadline` (ISO timestamp), `missingAnswers` and `editable`; `summary` describes the deadline and missing answers. Each pool has its own reminder history. Test messages have `event: "test"` and `summary`. Operational alerts have `event: "service_error"`, a `code` (`auth_required` or `check_failed`) and `summary`. `matchday` can be `null` when checking the current matchday.
 
 ### Delivery behavior
 
@@ -159,7 +161,7 @@ docker compose run --rm kicktipp connection
 
 Keep it in your client's secret configuration. Do not put Kicktipp credentials or the access token into agent prompts. Ask your agent to call `get_status` first, then try “Which upcoming games still need a tip?”
 
-The Compose service uses one active account and community. Change them or enable submission in the local website. The terminal alternative is to rerun setup and restart:
+The Compose service uses one active account with one or more added pools. Overview and reminders cover every added pool; MCP and standalone CLI commands retain the selected default pool. Change these settings or enable submission in the local website. The terminal alternative is to rerun setup and restart:
 
 ```bash
 docker compose run --rm kicktipp setup

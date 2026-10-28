@@ -170,18 +170,24 @@ globalThis.fetch = (input, init) => {
   const first = await completedCheck(base);
   assert.equal(first.readOnly, true);
   assert.equal(first.scheduler.lastError, null);
-  assert.equal(first.scheduler.deliveredCount, 1);
+  assert.equal(first.scheduler.deliveredCount, 2);
   const firstEvents = await events();
-  assert.equal(firstEvents.received.length, 1);
+  // Admin save verifies membership with an isolated login; the active service
+  // then creates its own persisted session. Restart must reuse that session.
+  assert.equal(firstEvents.logins, 2);
+  assert.equal(firstEvents.received.length, 2);
   assert.equal(firstEvents.received[0].event, 'missing_tips');
   assert.equal(firstEvents.received[0].matches[0].home, 'Home FC');
+  assert.equal(firstEvents.received[1].event, 'missing_bonus');
+  assert.equal(firstEvents.received[1].bonusQuestions[0].question, 'Wer wird Meister?');
+  assert.equal(firstEvents.received[1].bonusQuestions[0].missingAnswers, 1);
   const result = await rpc(base, 'tools/call', { name: 'get_status', arguments: {} });
   assert.equal(result.result.structuredContent.data.community, community);
   assert.equal(result.result.structuredContent.data.read_only, true);
   const names = (await rpc(base, 'tools/list')).result.tools.map((tool) => tool.name);
   assert(names.includes('list_members'));
   assert(!names.includes('place_bets'));
-  console.log('PASS: container health, authenticated MCP, read-only tools and scheduled webhook.');
+  console.log('PASS: container health, authenticated MCP, read-only tools and scheduled match/bonus webhooks.');
 
   const firstId = await compose(['ps', '-q', 'kicktipp']);
   await compose(['stop', '--timeout', '10', 'kicktipp']);
@@ -193,8 +199,8 @@ globalThis.fetch = (input, init) => {
   assert.equal(second.scheduler.lastError, null);
   assert.equal(second.scheduler.deliveredCount, 0);
   const secondEvents = await events();
-  assert.equal(secondEvents.received.length, 1);
-  assert.equal(secondEvents.logins, 1);
+  assert.equal(secondEvents.received.length, 2);
+  assert.equal(secondEvents.logins, firstEvents.logins);
   assert.deepEqual(secondEvents.unexpected, []);
   const logs = await compose(['logs', '--no-color', 'kicktipp']);
   assert(!logs.includes(token));

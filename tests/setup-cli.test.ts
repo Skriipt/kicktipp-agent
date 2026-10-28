@@ -71,6 +71,20 @@ it('does not save an account after failed login', async () => {
   expect(fs.existsSync(file)).toBe(false);
 });
 
+it.each([false, true])('reconciles web subscriptions during terminal setup (changed account: %s)', async (changed) => {
+  const file = path.join(root, 'service.json');
+  writeServiceConfig({
+    version: 1, account: { email: 'person@example.com', password: 'old-password', community: 'old',
+      communities: ['old', 'departed'], player: 'Old Player', site: 'de' },
+    server: { token: 'a'.repeat(43), host: '0.0.0.0', port: 8787, readOnly: true, allowedOrigins: [] },
+    timeZone: 'Europe/Berlin', notifications: { channels: [], warnHours: [], everyMinutes: 15 },
+  }, file);
+  const { io } = ioWith([changed ? 'next@example.com' : 'person@example.com', 'fixture-password', '1', '1', '', 'n', '', 'n']);
+  await runSetup({ file, io, communities: async () => ['new', 'old'] });
+  expect(readServiceConfig(file).account).toMatchObject({ community: 'new', communities: changed ? ['new'] : ['old', 'new'] });
+  expect(readServiceConfig(file).account.player).toBe(changed ? undefined : 'Old Player');
+});
+
 it('discovers Telegram chats without consuming updates and sanitizes provider errors', async () => {
   const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, result: [
     { message: { chat: { id: 123, first_name: 'Me' } } }, { message: { chat: { id: 123, first_name: 'Me' } } },

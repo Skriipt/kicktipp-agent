@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import type { DeadlineMatch, DeadlineReport } from '../analytics/deadline.js';
+import type { DeadlineBonusQuestion, DeadlineMatch, DeadlineReport } from '../analytics/deadline.js';
 import { AuthError } from '../core.js';
 import { SessionOnlyExpiredError } from '../config.js';
 import { NotificationError, sendNotification, validateChannel, type NotificationChannel, type NotificationPayload } from '../notify/backends.js';
@@ -30,6 +30,7 @@ export interface SchedulerStatus {
   lastError: 'auth_required' | 'check_failed' | 'delivery_failed' | 'state_failed' | null;
   failedChannels: string[];
   deliveredCount: number;
+  unresolvedBonusQuestions: number;
 }
 
 export interface SchedulerOptions {
@@ -38,7 +39,7 @@ export interface SchedulerOptions {
   everyMinutes: number;
   stateFile: string;
   /** The caller serializes this read with all other Kicktipp operations. */
-  fetchReport: () => Promise<DeadlineReport>;
+  fetchReport: () => Promise<DeadlineReport | DeadlineReport[]>;
   send?: typeof sendNotification;
   now?: () => Date;
 }
@@ -83,6 +84,18 @@ export function reminderSummary(report: DeadlineReport, matches: DeadlineMatch[]
   ].join('\n');
 }
 
+function bonusReminderSummary(report: DeadlineReport, questions: DeadlineBonusQuestion[], warnHours: number): string {
+  const format = new Intl.DateTimeFormat('de-DE', {
+    timeZone: report.timeZone, dateStyle: 'short', timeStyle: 'short',
+  });
+  return [
+    `Kicktipp (${report.community}): ${questions.length} Bonusfrage${questions.length === 1 ? ' ist' : 'n sind'} noch nicht vollständig beantwortet.`,
+    `Abgabefrist innerhalb von ${warnHours} Stunde${warnHours === 1 ? '' : 'n'}:`,
+    ...questions.map((question) => `${question.question}: ${format.format(new Date(question.deadline!))} (${question.missingAnswers} Antwort${question.missingAnswers === 1 ? '' : 'en'} offen)`),
+    `Zeitzone: ${report.timeZone}`,
+  ].join('\n');
+}
+
 /**
  * A single instance runs one check at a time. Successful sends are checkpointed
  * separately for each channel/match/window, so a normal restart does not replay
@@ -100,7 +113,7 @@ export class DeadlineScheduler {
   private inFlight: Promise<void> | null = null;
   private snapshot: SchedulerStatus = {
     running: false, lastCheck: null, lastSuccess: null, nextCheck: null,
-    lastError: null, failedChannels: [], deliveredCount: 0,
+    lastError: null, failedChannels: [], deliveredCount: 0, unresolvedBonusQuestions: 0,
   };
 
   constructor(private readonly options: SchedulerOptions) {
@@ -215,66 +228,123 @@ export class DeadlineScheduler {
     }
   }
 
+  private async remindBonus(report: DeadlineReport, channel: NotificationChannel): Promise<void> {
+    const now = this.clock().getTime();
+    const groups = new Map<number, { question: DeadlineBonusQuestion; key: string; expiresAt: number }[]>();
+    const seen = new Set<string>();
+    for (const question of report.bonusQuestions ?? []) {
+      if (!question.editable || question.missingAnswers <= 0 || !question.deadline) continue;
+      const deadline = Date.parse(question.deadline);
+      const remaining = deadline - now;
+      if (!Number.isFinite(deadline) || remaining <= 0) continue;
+      const window = this.windows.find((hours) => remaining <= hours * 3600_000);
+      if (window === undefined) continue;
+      // Preserve existing fixture keys; bonus identities live in their own namespace.
+      const key = hash(['bonus', channel, report.community, question.id, question.deadline, window]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!this.ready(key, now)) {
+        if (this.state.deliveries[key]?.failures && !this.snapshot.failedChannels.includes(channel.id)) {
+          this.snapshot.failedChannels.push(channel.id);
+        }
+        continue;
+      }
+      const group = groups.get(window) ?? [];
+      group.push({ question, key, expiresAt: deadline + 7 * DAY });
+      groups.set(window, group);
+    }
+    for (const [window, entries] of groups) {
+      const deliveryTime = this.clock().getTime();
+      // Earlier provider calls may have consumed the remaining time.
+      const pending = entries.filter(({ question }) => Date.parse(question.deadline!) > deliveryTime);
+      if (!pending.length) continue;
+      const bonusQuestions = pending.map(({ question }) => question);
+      await this.deliver(channel, {
+        event: 'missing_bonus', community: report.community, matchday: report.matchday,
+        timeZone: report.timeZone, checkedAt: report.now, warnHours: window, bonusQuestions,
+        summary: bonusReminderSummary(report, bonusQuestions, window),
+      }, pending, deliveryTime);
+    }
+  }
+
   private async check(): Promise<void> {
     const now = this.clock().getTime();
     this.snapshot.lastCheck = new Date(now).toISOString();
     this.snapshot.lastError = null;
     this.snapshot.failedChannels = [];
+    this.snapshot.unresolvedBonusQuestions = 0;
     try {
       for (const [key, row] of Object.entries(this.state.deliveries)) {
         if (row.expiresAt <= now) delete this.state.deliveries[key];
       }
       // Verify writable persistence before any delivery, including on first boot.
       this.save();
-      let report: DeadlineReport;
+      let reports: DeadlineReport[];
       try {
-        report = await this.options.fetchReport();
+        const result = await this.options.fetchReport();
+        reports = Array.isArray(result) ? result : [result];
       } catch (error) {
         const kind = error instanceof AuthError || error instanceof SessionOnlyExpiredError ? 'auth_required' : 'check_failed';
         this.snapshot.lastError = kind;
         await this.alert(kind, now);
         return;
       }
-      this.snapshot.lastSuccess = this.clock().toISOString();
-      for (const key of Object.keys(this.state.deliveries)) {
-        if (key.startsWith('alert:')) delete this.state.deliveries[key];
+      const readableReports = reports.filter((report) => !report.readError);
+      this.snapshot.unresolvedBonusQuestions = readableReports.reduce((count, report) =>
+        count + (report.bonusQuestions ?? []).filter((question) =>
+          question.editable && question.missingAnswers > 0 &&
+          (!question.deadline || !Number.isFinite(Date.parse(question.deadline))),
+        ).length, 0);
+      const readFailure = reports.some((report) => report.readError === 'auth_required')
+        ? 'auth_required'
+        : reports.some((report) => report.readError || report.bonusCheckFailed) ? 'check_failed' : null;
+      if (readFailure) {
+        this.snapshot.lastError = readFailure;
+        await this.alert(readFailure, now);
+      } else {
+        this.snapshot.lastSuccess = this.clock().toISOString();
+        for (const key of Object.keys(this.state.deliveries)) {
+          if (key.startsWith('alert:')) delete this.state.deliveries[key];
+        }
       }
       this.save();
-      // Refresh time after a potentially slow network request: do not warn about
-      // matches that kicked off while the report was being fetched.
-      const deliveryTime = this.clock().getTime();
-      for (const channel of this.channels) {
-        const groups = new Map<number, { match: DeadlineMatch; key: string; expiresAt: number }[]>();
-        const seen = new Set<string>();
-        for (const match of report.matches) {
-          if (!match.needsBet || match.closed || !match.kickoff) continue;
-          const kickoff = Date.parse(match.kickoff);
-          const remaining = kickoff - deliveryTime;
-          if (!Number.isFinite(kickoff) || remaining <= 0) continue;
-          // At first boot send the most urgent crossed window, not every overdue window.
-          const window = this.windows.find((hours) => remaining <= hours * 3600_000);
-          if (window === undefined) continue;
-          const key = hash([channel, report.community, match.home, match.away, match.kickoff, window]);
-          if (seen.has(key)) continue;
-          if (!this.ready(key, deliveryTime)) {
-            // Waiting for a retry is still degraded, including after a restart.
-            if (this.state.deliveries[key]?.failures && !this.snapshot.failedChannels.includes(channel.id)) {
-              this.snapshot.failedChannels.push(channel.id);
+      for (const report of readableReports) {
+        // Refresh time after a potentially slow read or another group's delivery.
+        const deliveryTime = this.clock().getTime();
+        for (const channel of this.channels) {
+          const groups = new Map<number, { match: DeadlineMatch; key: string; expiresAt: number }[]>();
+          const seen = new Set<string>();
+          for (const match of report.matches) {
+            if (!match.needsBet || match.closed || !match.kickoff) continue;
+            const kickoff = Date.parse(match.kickoff);
+            const remaining = kickoff - deliveryTime;
+            if (!Number.isFinite(kickoff) || remaining <= 0) continue;
+            // At first boot send the most urgent crossed window, not every overdue window.
+            const window = this.windows.find((hours) => remaining <= hours * 3600_000);
+            if (window === undefined) continue;
+            const key = hash([channel, report.community, match.home, match.away, match.kickoff, window]);
+            if (seen.has(key)) continue;
+            if (!this.ready(key, deliveryTime)) {
+              // Waiting for a retry is still degraded, including after a restart.
+              if (this.state.deliveries[key]?.failures && !this.snapshot.failedChannels.includes(channel.id)) {
+                this.snapshot.failedChannels.push(channel.id);
+              }
+              continue;
             }
-            continue;
+            seen.add(key);
+            const group = groups.get(window) ?? [];
+            group.push({ match, key, expiresAt: kickoff + 7 * DAY });
+            groups.set(window, group);
           }
-          seen.add(key);
-          const group = groups.get(window) ?? [];
-          group.push({ match, key, expiresAt: kickoff + 7 * DAY });
-          groups.set(window, group);
-        }
-        for (const [window, entries] of groups) {
-          const matches = entries.map((entry) => entry.match);
-          await this.deliver(channel, {
-            event: 'missing_tips', community: report.community, matchday: report.matchday,
-            timeZone: report.timeZone, checkedAt: report.now, warnHours: window, matches,
-            summary: reminderSummary(report, matches, window),
-          }, entries, deliveryTime);
+          for (const [window, entries] of groups) {
+            const matches = entries.map((entry) => entry.match);
+            await this.deliver(channel, {
+              event: 'missing_tips', community: report.community, matchday: report.matchday,
+              timeZone: report.timeZone, checkedAt: report.now, warnHours: window, matches,
+              summary: reminderSummary(report, matches, window),
+            }, entries, deliveryTime);
+          }
+          await this.remindBonus(report, channel);
         }
       }
       if (this.snapshot.failedChannels.length) this.snapshot.lastError = 'delivery_failed';
