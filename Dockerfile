@@ -4,6 +4,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts/copy-web-assets.mjs ./scripts/copy-web-assets.mjs
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-bookworm-slim

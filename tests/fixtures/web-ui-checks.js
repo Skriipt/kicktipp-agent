@@ -1,0 +1,64 @@
+(async()=>{
+const results=[];function assert(name,value){results.push({name,pass:!!value});if(!value)throw Error(name)}
+const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve()};
+assert('default English',document.documentElement.lang==='en');
+$('#admin-token').value='fixture-admin-token';$('#login-form').requestSubmit();await flush();
+assert('first setup opens account',!$('#authenticated').hidden&&!$('#account').hidden);
+$('#email').value='person@example.com';$('#password').value='fixture-password';$('#check-account').click();await flush();
+assert('account discovery',document.querySelectorAll('#communities option').length===1&&$('#community').value==='friends');
+$('#account-form').requestSubmit();await flush();
+assert('first save no fixed windows',fixtureConfig.notifications.warnHours.length===0);
+assert('account secret cleared after save',$('#password').value==='');
+document.querySelector('[data-page=notifications]').click();$('#add-channel').click();
+$('#channel-secret').value='https://discord.com/api/webhooks/123/fixture';$('#channel-secret').dispatchEvent(new Event('input'));
+$('#save-notifications').click();await flush();assert('channel requires reminder time',$('#notification-feedback').textContent.includes('at least one'));
+for(const value of ['12','2,5']){$('#custom-hours').value=value;$('#add-time').click()}
+$('#custom-hours').value='2.5';$('#add-time').click();assert('decimal duplicate rejected',$('#hours-feedback').textContent.includes('already'));
+$('#custom-hours').value='';$('#test-channel').click();await flush();assert('test sends explicit request',fixtureRequests.some(r=>r.path.endsWith('notifications/test')&&r.body.channel.url.includes('fixture')));
+$('#save-notifications').click();await flush();assert('custom hours reach server',fixtureConfig.notifications.warnHours.join(',')==='12,2.5');
+assert('secret not returned to field',$('#channel-secret').value==='');
+$('#add-channel').click();$('#channel-kind').value='telegram';$('#channel-kind').dispatchEvent(new Event('change'));
+$('#channel-secret').value='123456:fixture-token';$('#channel-secret').dispatchEvent(new Event('input'));$('#chat-id').value='123456';$('#chat-id').dispatchEvent(new Event('input'));
+$('#custom-hours').value='3,5';document.querySelector('[data-language=de]').click();assert('language preserves channel draft',$('#channel-secret').value==='123456:fixture-token'&&$('#custom-hours').value==='3,5');
+$('#add-time').click();$('#save-notifications').click();await flush();const saveRequest=fixtureRequests.filter(r=>r.path.endsWith('/config')&&r.body?.notifications).at(-1);
+assert('existing channel secret omitted',saveRequest.body.notifications.channels[0].id==='channel-0'&&!('url'in saveRequest.body.notifications.channels[0]));
+assert('multiple channels saved',fixtureConfig.notifications.channels.length===2);
+fixtureConflict=true;$('#interval').value='23';$('#save-notifications').click();await flush();assert('conflict preserves edits',!$('#conflict-banner').hidden&&$('#interval').value==='23');
+$('#reload-config').click();await flush();assert('explicit reload restores saved settings',$('#conflict-banner').hidden&&$('#interval').value==='15');
+document.querySelector('[data-page=agent]').click();assert('MCP token not fetched eagerly',!fixtureRequests.some(r=>r.path.endsWith('/connection')));
+$('#reveal-token').click();await flush();assert('MCP token reveal',$('#mcp-token').value==='fixture-mcp-token'&&$('#mcp-token').type==='text');assert('MCP URL uses browser origin',$('#mcp-url').textContent===location.origin+'/mcp');
+$('#permission').checked=true;$('#permission').dispatchEvent(new Event('change'));$('#save-permission').click();await flush();assert('read-only setting submitted',fixtureConfig.readOnly===false);
+document.querySelector('[data-page=overview]').click();await flush();assert('real fixture rows rendered',$('#matches').children.length===2&&$('#match-title').textContent==='1 Tipp fehlt');
+assert('German feedback',$('#read-mode').textContent==='Der Agent darf Tipps abgeben');
+
+document.querySelector('[data-page=notifications]').click();$('#custom-hours').value='7';$('#add-time').click();
+document.querySelector('[data-page=agent]').click();$('#permission').checked=false;$('#permission').dispatchEvent(new Event('change'));
+document.querySelector('[data-page=account]').click();$('#email').value='next@example.com';$('#email').dispatchEvent(new Event('input'));$('#password').value='new-fixture-password';
+assert('account switch warns about draft reset',!$('#account-change-note').hidden);
+let releaseSave;fixtureDelay=new Promise(resolve=>releaseSave=resolve);$('#account-form').requestSubmit();await flush();
+assert('pending save freezes inputs',$('#email').disabled&&$('#account').inert);
+document.querySelector('[data-language=en]').click();assert('language works during save',document.documentElement.lang==='en'&&$('#account').inert);
+fixtureDelay=null;releaseSave();await flush();assert('save restores inputs',!$('#email').disabled&&!$('#account').inert);
+assert('account switch resets other drafts',!$('#reminder-times').textContent.includes('7 hours')&&$('#permission').checked===true);
+fixtureError='check_failed';document.querySelector('[data-page=overview]').click();await flush();assert('failed current check does not claim confirmed login',$('#login-status').textContent==='Unknown');fixtureError=null;
+fixtureError='auth_required';fixtureReadStatus={lastCheck:'2026-10-28T14:05:00Z',lastSuccess:'2026-10-28T14:05:00Z',lastError:null};
+$('#check-now').click();await flush();
+assert('manual recovery clears old scheduled login error',$('#login-status').textContent==='Confirmed'&&$('#overview-warning').hidden);
+assert('manual recovery shows fresh predictions',$('#match-title').textContent==='1 prediction missing');
+fixtureError=null;fixtureReadStatus.lastError='auth_required';document.querySelector('[data-page=account]').click();document.querySelector('[data-page=overview]').click();await flush();
+assert('manual failure remains after navigation',$('#login-status').textContent!== 'Confirmed'&&!$('#overview-warning').hidden);
+fixtureReadStatus.lastError=null;fixtureError='delivery_failed';document.querySelector('[data-page=overview]').click();await flush();
+assert('delivery failure keeps fresh read status',$('#login-status').textContent==='Confirmed'&&$('#match-title').textContent==='1 prediction missing'&&!$('#overview-warning').hidden);
+fixtureError=null;fixtureReadStatus=null;
+// An old overview response arriving after an account/pool save must be ignored.
+let releaseOverview;fixtureOverviewDelay=new Promise(resolve=>releaseOverview=resolve);
+document.querySelector('[data-page=overview]').click();await flush();
+document.querySelector('[data-page=account]').click();$('#community').value='new-pool';$('#account-form').requestSubmit();await flush();
+fixtureOverviewDelay=null;releaseOverview();await flush();
+assert('late previous-pool response ignored',!overview.report&&$('#matches').children.length===0&&config.account.community==='new-pool');
+$('#logout').click();assert('logout clears tokens',$('#mcp-token').value===''&&$('#admin-token').value===''&&$('#authenticated').hidden);
+$('#admin-token').value='fixture-admin-token';$('#login-form').requestSubmit();await flush();document.querySelector('[data-language=en]').click();document.querySelector('[data-page=overview]').click();await flush();
+assert('localized match status',$('#matches .tag').textContent==='Missing');
+assert('no horizontal overflow',document.documentElement.scrollWidth<=innerWidth);
+console.log('WEB_UI_CHECKS '+results.length+' passed, '+results.filter(x=>!x.pass).length+' failed');
+})();

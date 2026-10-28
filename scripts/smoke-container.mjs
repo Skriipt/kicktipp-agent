@@ -15,7 +15,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-compose-smoke-'));
 const project = `kicktipp-smoke-${randomBytes(6).toString('hex')}`;
-const token = randomBytes(32).toString('hex');
+let token = randomBytes(32).toString('hex');
 const password = 'local-smoke-fixture-password';
 const community = 'compose-smoke';
 let composeStarted = false;
@@ -136,11 +136,37 @@ globalThis.fetch = (input, init) => {
   };
   console.log(`Running isolated Compose smoke (${project}).`);
   composeStarted = true;
-  await compose(['run', '--rm', '--no-deps', '-T', '--entrypoint', 'node', 'kicktipp', '-e',
-    "const fs=require('node:fs');let data='';process.stdin.on('data',chunk=>data+=chunk);process.stdin.on('end',()=>fs.writeFileSync('/data/service.json',data,{mode:0o600}));"], JSON.stringify(config));
   await compose(['up', '-d', '--no-build', '--wait', '--wait-timeout', '40']);
   assert.deepEqual(await (await fetch(`${base}/health`)).json(), { status: 'ok' });
+  for (const [asset, type] of [['/', 'text/html'], ['/app.js', 'javascript'], ['/app.css', 'text/css']]) {
+    const response = await fetch(`${base}${asset}`);
+    assert.equal(response.status, 200);
+    assert(response.headers.get('content-type').includes(type));
+    assert(response.headers.get('content-security-policy').includes("script-src 'self'"));
+  }
+  const adminToken = await compose(['exec', '-T', 'kicktipp', 'node', 'dist/service/main.js', 'web-token']);
+  const adminHeaders = { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json', Origin: base };
+  assert.equal((await fetch(`${base}/api/admin/config`)).status, 401);
+  const initial = await (await fetch(`${base}/api/admin/config`, { headers: adminHeaders })).json();
+  assert.equal(initial.configured, false);
+  assert.equal(initial.config, null);
+  const setup = await fetch(`${base}/api/admin/config`, {
+    method: 'POST', headers: adminHeaders,
+    body: JSON.stringify({ revision: initial.revision, account: config.account,
+      notifications: config.notifications, timeZone: config.timeZone, readOnly: true }),
+  });
+  assert.equal(setup.status, 200);
+  const configured = await setup.json();
+  assert.equal(configured.configured, true);
+  assert(!JSON.stringify(configured).includes(password));
+  assert(!JSON.stringify(configured).includes(`${origin}/webhook`));
+  const connection = await (await fetch(`${base}/api/admin/connection`, { headers: adminHeaders })).json();
+  assert.equal(connection.url, '/mcp');
+  token = connection.token;
+  assert.equal((await fetch(`${base}/api/admin/config`, { headers: { Authorization: `Bearer ${token}` } })).status, 401);
+  assert.equal((await fetch(`${base}/status`, { headers: { Authorization: `Bearer ${adminToken}` } })).status, 401);
   assert.equal((await fetch(`${base}/status`)).status, 401);
+  console.log('PASS: packaged web assets, separate admin authentication and first setup through the web API.');
   const first = await completedCheck(base);
   assert.equal(first.readOnly, true);
   assert.equal(first.scheduler.lastError, null);
@@ -173,6 +199,7 @@ globalThis.fetch = (input, init) => {
   const logs = await compose(['logs', '--no-color', 'kicktipp']);
   assert(!logs.includes(token));
   assert(!logs.includes(password));
+  assert(!logs.includes(adminToken));
   console.log('PASS: graceful shutdown, container recreation, persistent login and reminder deduplication.');
 } catch (error) {
   if (composeStarted) {

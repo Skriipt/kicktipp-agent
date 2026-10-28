@@ -8,7 +8,7 @@ Repository instructions are in [AGENTS.md](../AGENTS.md) and `docs/agents/`.
 
 | File | Responsibility |
 | --- | --- |
-| `src/service/main.ts` | Container entry point: `serve`, `setup`, `connection`, `mcp-stdio`, or a CLI command. Applies service configuration before loading the runtime. |
+| `src/service/main.ts` | Container entry point: `serve`, `setup`, `web-token`, `connection`, `mcp-stdio`, or a CLI command. Applies service configuration before loading the runtime. |
 | `src/setup-cli.ts` | Terminal wizard: hidden secret prompts, account validation, community selection, channel setup, optional test sends and Telegram chat discovery. |
 | `src/index.ts` | Commander CLI, including matches, tips, statistics, suggestions, history and Spielleiter commands. |
 | `src/server.ts` | MCP server factory and optional stdio entry point. Registers tools/resources over the shared core. |
@@ -27,7 +27,7 @@ The file contains:
 - `notifications`: channel destinations, warning windows and polling interval.
 - `timeZone`: an IANA display timezone.
 
-The service file stores secrets in plain text with mode `0600`; do not describe it as encrypted. Account-specific config and data directories are selected from a hash of site and account identity. Runtime environment variables connect this configuration to the existing core. A service instance has a fixed account/community; HTTP MCP does not expose tools to change those settings.
+The service file stores secrets in plain text with mode `0600`; do not describe it as encrypted. Account-specific config and data directories are selected from a hash of site and account identity. Runtime environment variables connect this configuration to the existing core. A service instance has one active account/community; HTTP MCP does not expose tools to change those settings.
 
 `src/config.ts` retains standalone INI profiles and session handling. New encrypted passwords use AES-256-GCM with a random persisted `credentials.key`. Legacy machine-derived passwords can be read and migrated on their original machine. Both the key and INI file must be included in CLI backups. Service credentials are read from the service configuration instead.
 
@@ -38,10 +38,12 @@ The service file stores secrets in plain text with mode `0600`; do not describe 
 - `/mcp`: authenticated Streamable HTTP MCP; protocol transport/compatibility handled by the MCP SDK.
 - `/status`: authenticated operational status.
 - `/health`: unauthenticated HTTP-process liveness only.
+- `/`, `/app.js`, `/app.css`: self-hosted web UI.
+- `/api/admin/*`: separate administrator bearer token, same-origin only; never accessible with MCP credentials.
 
-Bearer comparison is timing-safe. Requests with an unapproved `Origin` are rejected. Request bodies are bounded. Neither status nor error responses may expose account passwords, access tokens, webhook URLs or Telegram bot tokens.
+Bearer comparison is timing-safe. Requests with an unapproved `Origin` are rejected. Request bodies are bounded. Neither status nor error responses may expose account passwords, access tokens, webhook URLs or Telegram bot tokens. Only the explicitly requested admin connection route returns the MCP token.
 
-`src/service/queue.ts` supplies the shared serial queue. All daemon MCP tool/resource work and scheduler Kicktipp reads use it because the page abstraction and stored session state are mutable. Do not create a new independent queue per HTTP request. This is process-local coordination, not a distributed lock: multiple service replicas or independent stdio/CLI processes must not share an active account/data volume.
+`src/service/queue.ts` supplies the shared serial queue. All daemon MCP tool/resource work and scheduler Kicktipp reads use it because the page abstraction and stored session state are mutable. Do not create a new independent queue per HTTP request. An HTTP operation queue also gates entire MCP/admin requests during live configuration changes. The scheduler stops before entering the shared Kicktipp queue; its pending read must be allowed to drain. Config save constructs replacement scheduler state before atomic persistence, then starts the new scheduler. Account-check sessions use an isolated in-memory cookie jar and restore the global base URL. This is process-local coordination, not a distributed lock: multiple service replicas or independent stdio/CLI processes must not share an active account/data volume.
 
 On shutdown, stop accepting requests and future scheduler runs, allow in-flight operations to finish, then close transports and sessions. A client disconnect must never be treated as proof that a tip submission did not happen.
 
@@ -61,7 +63,7 @@ For each untipped future fixture, the scheduler chooses the most urgent crossed 
 
 Authentication/check failures send operational alerts with a persisted six-hour cooldown. Corrupt state fails startup; unwritable state prevents delivery and appears as `state_failed`. A crash between external acceptance and local checkpoint can duplicate a notification: there is no cross-system exactly-once transaction.
 
-Scheduled `missing_tips` payloads contain `summary`, community, matchday, timezone, check time, warning window and matches. `service_error` payloads contain a sanitized code and summary. `test` payloads are sent only when explicitly requested during setup or via `notify --test`.
+Scheduled `missing_tips` payloads contain `summary`, community, matchday, timezone, check time, warning window and matches. `service_error` payloads contain a sanitized code and summary. `test` payloads are sent only when explicitly requested in the web UI, during setup or via `notify --test`. Web manual refresh only reads matches and does not run notification delivery.
 
 ## Kicktipp HTTP and parsing
 
@@ -94,7 +96,7 @@ Read-only session refresh may retry a read after re-authentication. Submission r
 - `src/audit/log.ts`: submission audit records and eligible previous values for CLI undo.
 - `src/commands/admin.ts`: Spielleiter member listing, reads and submissions.
 
-TUI, localhost web setup, desktop/command notification delivery, scheduler artifact generation, MCPB packaging and rival/scenario/what-if analyses have been removed. Do not reintroduce callers to deleted modules.
+TUI, legacy desktop web setup, desktop/command notification delivery, scheduler artifact generation, MCPB packaging and rival/scenario/what-if analyses have been removed. Do not reintroduce callers to deleted modules.
 
 ## Submission boundaries
 
@@ -119,3 +121,13 @@ Build before running integration tests that execute `dist/server.js` or the comp
 When checking the daemon, test authenticated tool calls, rejected unauthenticated calls, read-only behavior, graceful shutdown, persisted reminder state and failed-provider isolation. Verify the actual Compose startup path when changing image, entry-point or volume behavior.
 
 CLI JSON output remains machine-readable. MCP tools return both text and `structuredContent` under `{ data: ... }`. Avoid credentials in logs, fixtures, screenshots, tests or PR descriptions.
+
+## Local administrator UI
+
+`src/web/` contains vanilla HTML/CSS/JavaScript. The build copies these assets to `dist/web/`; no runtime CDN, bundler or additional server is needed. English is the initial language, with a persisted EN/DE preference; credentials are never put in localStorage, URLs or application logs.
+
+`src/service/admin.ts` validates all admin inputs, redacts snapshots and applies HMAC revision checks to prevent stale overwrites. Empty password/channel secrets preserve existing values only for the same identity or destination ID/kind. `web-http.ts` bounds JSON bodies, enforces Host/Origin and CSP, and authenticates the independent `web-admin-token`. Fresh containers can serve the locked UI before `service.json` exists. The token is obtained through the local `web-token` command, not through an unauthenticated HTTP endpoint.
+
+Operational status exposes `read` for the latest scheduled or manual Kicktipp read and `scheduler` for notification runs. The UI uses `read` for login, timestamps and report freshness; a successful manual refresh clears an earlier read failure without hiding unresolved notification delivery failures.
+
+Custom reminders permit 1–10 positive fractional hours up to 168. An empty list is allowed only when no destinations are configured. Saving in the web UI applies configuration without a container restart. Settings changed externally still require a restart. Browser API tests and process/container fixtures must never contact real Kicktipp accounts or real notification destinations.
