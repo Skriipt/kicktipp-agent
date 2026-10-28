@@ -211,12 +211,12 @@ describe('compiled local web administration', () => {
     // a browser whose revision still matches the active in-memory settings.
     const originalFile = fs.readFileSync(configFile, 'utf8');
     const externalEdit = JSON.parse(originalFile);
-    externalEdit.timeZone = 'UTC';
+    externalEdit.profiles[0].timeZone = 'UTC';
     fs.writeFileSync(configFile, JSON.stringify(externalEdit));
     const diskConflict = await admin('config', { revision: saved.revision, readOnly: false });
     expect(diskConflict.status).toBe(409);
     expect(await diskConflict.json()).toEqual({ error: 'restart_required' });
-    expect(JSON.parse(fs.readFileSync(configFile, 'utf8')).timeZone).toBe('UTC');
+    expect(JSON.parse(fs.readFileSync(configFile, 'utf8')).profiles[0].timeZone).toBe('UTC');
     expect((await getConfig()).config.timeZone).toBe('Europe/Berlin');
     fs.writeFileSync(configFile, originalFile);
 
@@ -252,8 +252,8 @@ describe('compiled local web administration', () => {
     saved = await save({ revision: saved.revision, account: { password: '' }, notifications: {
       channels: [{ id: 'local-webhook', kind: 'webhook', url: '' }], warnHours: [2.5, 0.5], everyMinutes: 15,
     } });
-    expect(JSON.parse(fs.readFileSync(configFile, 'utf8')).account.password).toBe(PASSWORD);
-    expect(JSON.parse(fs.readFileSync(configFile, 'utf8')).notifications.channels[0].url).toBe(`${fixtureOrigin}/webhook/fixture-secret`);
+    expect(JSON.parse(fs.readFileSync(configFile, 'utf8')).profiles[0].account.password).toBe(PASSWORD);
+    expect(JSON.parse(fs.readFileSync(configFile, 'utf8')).profiles[0].notifications.channels[0].url).toBe(`${fixtureOrigin}/webhook/fixture-secret`);
     await settled();
     expect(received.filter(item => item.event === 'missing_tips')).toHaveLength(1);
 

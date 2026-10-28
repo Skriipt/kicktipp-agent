@@ -2,7 +2,7 @@
 
 import { Command } from 'commander';
 import fs from 'node:fs';
-import { serviceConfigFile, readServiceConfig, applyServiceConfig } from './service/settings.js';
+import { serviceConfigFile, readServiceConfig, applyServiceConfig, resolveServiceProfile, profileServiceConfig } from './service/settings.js';
 import { VERSION } from './version.js';
 import {
   savePlayer,
@@ -41,9 +41,7 @@ import { registerAdminCommand } from './commands/admin.js';
 import { currentLanguage, parseLanguage, resolveLanguage, setLanguage, t } from './i18n/index.js';
 import { parseSite, resolveBaseUrl, setUrlBase, siteLabel, urlBase } from './url.js';
 
-if (!process.argv.includes('setup') && fs.existsSync(serviceConfigFile())) {
-  applyServiceConfig(readServiceConfig());
-}
+const serviceConfiguration = !process.argv.includes('setup') && fs.existsSync(serviceConfigFile()) ? readServiceConfig() : null;
 setLanguage(resolveLanguage({ configLanguage: readUiLanguage() }));
 setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 
@@ -69,11 +67,18 @@ program
   .option('-p, --profile <name>', t('program.optionProfile'))
   .option('--lang <code>', t('program.optionLang'))
   .option('--site <host>', t('program.optionSite'))
-  .hook('preAction', (command) => {
+  .hook('preAction', (command, actionCommand) => {
     // Applied before every subcommand so the flags work everywhere without
     // each command having to know about them.
     const opts = command.opts();
-    if (opts.profile) setActiveProfile(opts.profile);
+    if (serviceConfiguration) {
+      if (!['profiles', 'setup', 'guide'].includes(actionCommand.name())) {
+        const profile = resolveServiceProfile(serviceConfiguration, opts.profile ?? process.env.KICKTIPP_PROFILE);
+        applyServiceConfig(profileServiceConfig(serviceConfiguration, profile), profile.id);
+        command.setOptionValue('profile', profile.id);
+        setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
+      }
+    } else if (opts.profile) setActiveProfile(opts.profile);
     if (opts.community) setCommunityOverride(opts.community);
   });
 
@@ -82,6 +87,12 @@ program
   .description(t('cmd.profiles.description'))
   .option('--json', t('opt.json'))
   .action((opts) => {
+    if (serviceConfiguration) {
+      const profiles = serviceConfiguration.profiles.map(({ id, name, account, readOnly }) => ({ id, name, community: account.community, readOnly }));
+      if (opts.json) emitJson({ profiles });
+      else for (const profile of profiles) console.log(`${profile.id}: ${profile.name} (${profile.community})`);
+      return;
+    }
     const profiles = listProfiles();
     const active = getActiveProfile();
     if (opts.json) {

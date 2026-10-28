@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { applyServiceConfig, configuredCommunities, readServiceConfig, writeServiceConfig, serviceConfigFile, type ServiceConfig } from './settings.js';
+import { configuredCommunities, readServiceConfig, writeServiceConfig, serviceConfigFile, validateServiceConfig, resolveServiceProfile, serviceProfileDataDir, type ServiceConfig, type LegacyServiceConfig, type ServiceProfile } from './settings.js';
 import { ensureWebToken } from './web-token.js';
+import { sendNotification } from '../notify/backends.js';
+import { createProfileAccess } from './profiles.js';
 import { AdminError, createAdminController } from './admin.js';
 import type { DeadlineReport } from '../analytics/deadline.js';
 
@@ -12,96 +14,115 @@ function initialConfig(): ServiceConfig | null {
   return fs.existsSync(serviceConfigFile()) ? readServiceConfig() : null;
 }
 
-export async function startService(config: ServiceConfig | null = initialConfig()) {
-  // Capture instance paths before account scoping changes the data directory.
+export async function startService(config: ServiceConfig | LegacyServiceConfig | null = initialConfig()) {
   const configFile = serviceConfigFile();
   process.env.KICKTIPP_SERVICE_CONFIG = configFile;
   const adminToken = ensureWebToken();
-  let activeConfig = config ? structuredClone(config) : null;
-  const host = config?.server.host ?? process.env.KICKTIPP_LISTEN_HOST ?? '0.0.0.0';
-  const port = config?.server.port ?? Number(process.env.KICKTIPP_LISTEN_PORT || 8787);
+  let activeConfig = config ? validateServiceConfig(config) : null;
+  const host = activeConfig?.server.host ?? process.env.KICKTIPP_LISTEN_HOST ?? '0.0.0.0';
+  const port = activeConfig?.server.port ?? Number(process.env.KICKTIPP_LISTEN_PORT || 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid service port.');
-  if (activeConfig) applyServiceConfig(activeConfig);
   const [{ startHttpService }, { kicktippQueue }, { DeadlineScheduler }, browser,
     { fetchBets, AuthError }, { buildDeadlineReport }, { VERSION }, urls, { discardSession }, { SessionOnlyExpiredError }, { fetchBonusReminders }] = await Promise.all([
     import('./http.js'), import('./queue.js'), import('./scheduler.js'), import('../browser.js'),
     import('../core.js'), import('../analytics/deadline.js'), import('../version.js'), import('../url.js'), import('../server.js'), import('../config.js'), import('../bonus-reminders.js'),
   ]);
-  urls.setUrlBase(urls.resolveBaseUrl());
-  let report: DeadlineReport | null = null;
-  let reports: DeadlineReport[] = [];
-  // Manual reads and scheduled reads share freshness, but only scheduled runs
-  // report notification delivery outcomes.
-  let read: { lastCheck: string | null; lastSuccess: string | null; lastError: 'auth_required' | 'check_failed' | null } = {
-    lastCheck: null, lastSuccess: null, lastError: null,
+  const profileAccess = createProfileAccess(() => activeConfig);
+  type ProfileState = {
+    report: DeadlineReport | null;
+    reports: DeadlineReport[];
+    read: { lastCheck: string | null; lastSuccess: string | null; lastError: 'auth_required' | 'check_failed' | null };
+    scheduler: InstanceType<typeof DeadlineScheduler>;
   };
-  const readReports = (current: ServiceConfig) => kicktippQueue.run(async () => {
-    read.lastCheck = new Date().toISOString();
-    const next: DeadlineReport[] = [];
-    const communities = configuredCommunities(current);
-    const blank = (community: string) => buildDeadlineReport(community, null, [], {
-      warnHours: Math.max(0, ...current.notifications.warnHours), timeZone: current.timeZone,
-    });
-    const errorCode = (error: unknown) => error instanceof AuthError || error instanceof SessionOnlyExpiredError
-      ? 'auth_required' as const : 'check_failed' as const;
-    let page: InstanceType<typeof browser.Page> | undefined;
-    try {
-      page = await browser.launchBrowser();
-      for (const community of communities) {
-        try {
-          const result = await fetchBets(page, community);
-          const group = buildDeadlineReport(community, null, result.matches, {
-            warnHours: Math.max(0, ...current.notifications.warnHours), timeZone: current.timeZone,
-          });
-          try { group.bonusQuestions = await fetchBonusReminders(page, community); }
-          catch { group.bonusCheckFailed = true; }
-          next.push(group);
-        } catch (error) {
-          next.push({ ...blank(community), readError: errorCode(error) });
+  const emptyScheduler = () => ({ running: false, lastCheck: null, lastSuccess: null,
+    nextCheck: null, lastError: null, failedChannels: [], deliveredCount: 0, unresolvedBonusQuestions: 0 });
+  const emptyRead = (): ProfileState['read'] => ({ lastCheck: null, lastSuccess: null, lastError: null });
+  let states = new Map<string, ProfileState>();
+  const readReports = (profile: ServiceProfile, state: ProfileState) => kicktippQueue.run(() =>
+    profileAccess.withProfile(profile.id, async () => {
+      state.read.lastCheck = new Date().toISOString();
+      const next: DeadlineReport[] = [];
+      const communities = configuredCommunities(profile);
+      const blank = (community: string) => buildDeadlineReport(community, null, [], {
+        warnHours: Math.max(0, ...profile.notifications.warnHours), timeZone: profile.timeZone,
+      });
+      const errorCode = (error: unknown) => error instanceof AuthError || error instanceof SessionOnlyExpiredError
+        ? 'auth_required' as const : 'check_failed' as const;
+      let page: InstanceType<typeof browser.Page> | undefined;
+      try {
+        page = await browser.launchBrowser();
+        for (const community of communities) {
+          try {
+            const result = await fetchBets(page, community);
+            const group = buildDeadlineReport(community, null, result.matches, {
+              warnHours: Math.max(0, ...profile.notifications.warnHours), timeZone: profile.timeZone,
+            });
+            try { group.bonusQuestions = await fetchBonusReminders(page, community); }
+            catch { group.bonusCheckFailed = true; }
+            next.push(group);
+          } catch (error) {
+            next.push({ ...blank(community), readError: errorCode(error) });
+          }
         }
-      }
-    } catch (error) {
-      for (const community of communities) next.push({ ...blank(community), readError: errorCode(error) });
-    }
-    finally { await page?.close(); }
-    reports = next;
-    report = reports.find(group => group.community === current.account.community && !group.readError) ?? null;
-    read.lastError = reports.some(group => group.readError === 'auth_required') ? 'auth_required'
-      : reports.some(group => group.readError || group.bonusCheckFailed) ? 'check_failed' : null;
-    if (!read.lastError) read.lastSuccess = new Date().toISOString();
-    return reports;
-  });
-  function makeScheduler(current: ServiceConfig) {
-    return new DeadlineScheduler({ ...current.notifications,
-      stateFile: path.join(process.env.KICKTIPP_DATA_DIR!, 'notifications.json'),
-      fetchReport: () => readReports(current),
-    });
+      } catch (error) {
+        for (const community of communities) next.push({ ...blank(community), readError: errorCode(error) });
+      } finally { await page?.close(); }
+      state.reports = next;
+      state.report = next.find(group => group.community === profile.account.community && !group.readError) ?? null;
+      state.read.lastError = next.some(group => group.readError === 'auth_required') ? 'auth_required'
+        : next.some(group => group.readError || group.bonusCheckFailed) ? 'check_failed' : null;
+      if (!state.read.lastError) state.read.lastSuccess = new Date().toISOString();
+      return next;
+    }));
+  function makeStates(current: ServiceConfig | null) {
+    return new Map(current?.profiles.map(profile => {
+      const state: ProfileState = { report: null, reports: [], read: emptyRead(), scheduler: new DeadlineScheduler({
+        ...profile.notifications,
+        stateFile: path.join(serviceProfileDataDir(current, profile, configFile), 'notifications.json'),
+        fetchReport: () => readReports(profile, state),
+        send: (channel, payload) => sendNotification(channel, { ...payload,
+          profile: { id: profile.id, name: profile.name }, summary: `[${profile.name}] ${payload.summary}` }),
+      }) };
+      return [profile.id, state] as const;
+    }) ?? []);
   }
-  let scheduler = activeConfig ? makeScheduler(activeConfig) : null;
+  states = makeStates(activeConfig);
   const startedAt = new Date().toISOString();
-  const status = () => ({ version: VERSION, startedAt, configured: !!activeConfig,
-    read: { ...read },
-    community: activeConfig?.account.community ?? null, readOnly: activeConfig?.server.readOnly ?? true,
-    communities: activeConfig ? configuredCommunities(activeConfig) : [],
-    groupErrors: reports.filter(group => group.readError || group.bonusCheckFailed)
-      .map(group => ({ community: group.community, code: group.readError ?? 'check_failed' })),
-    scheduler: scheduler?.status() ?? { running: false, lastCheck: null, lastSuccess: null,
-      nextCheck: null, lastError: null, failedChannels: [], deliveredCount: 0, unresolvedBonusQuestions: 0 },
-  });
-  const overview = async () => ({ status: status(), report, reports });
+  const profileStatus = (profile: ServiceProfile) => {
+    const state = states.get(profile.id);
+    return { id: profile.id, name: profile.name, community: profile.account.community, readOnly: profile.readOnly,
+      communities: configuredCommunities(profile),
+      groupErrors: (state?.reports ?? []).filter(group => group.readError || group.bonusCheckFailed)
+        .map(group => ({ community: group.community, code: group.readError ?? 'check_failed' })),
+      read: { ...(state?.read ?? emptyRead()) }, scheduler: state?.scheduler.status() ?? emptyScheduler() };
+  };
+  const status = (id?: string) => {
+    const profiles = activeConfig?.profiles ?? [];
+    const selected = id === undefined ? (profiles.length === 1 ? profiles[0] : undefined)
+      : profiles.find(profile => profile.id === id);
+    if (id !== undefined && !selected) throw new AdminError('profile_not_found', 404);
+    return { version: VERSION, startedAt, configured: profiles.length > 0,
+      read: emptyRead(), community: null, communities: [], groupErrors: [], readOnly: profiles.every(profile => profile.readOnly), scheduler: emptyScheduler(),
+      ...(selected ? profileStatus(selected) : {}), profiles: profiles.map(profileStatus) };
+  };
+  const overview = async (id?: string) => {
+    const state = states.get(id ?? activeConfig?.profiles[0]?.id ?? '');
+    return { status: status(id), report: state?.report ?? null, reports: state?.reports ?? [] };
+  };
+  const startSchedulers = () => { for (const state of states.values()) state.scheduler.start(); };
+  const stopSchedulers = () => Promise.all([...states.values()].map(state => state.scheduler.stop()));
   let closing = false;
   const admin = createAdminController({
     getConfig: () => activeConfig,
     serverDefaults: { host, port }, status, overview,
-    check: async () => {
+    check: async id => {
       if (!activeConfig) throw new AdminError('setup_required', 409);
-      const refreshed = await readReports(activeConfig);
+      const profile = resolveServiceProfile(activeConfig, id);
+      const refreshed = await readReports(profile, states.get(profile.id)!);
       if (refreshed.every(group => group.readError)) throw new AdminError('check_failed', 502);
-      return overview();
+      return overview(profile.id);
     },
     checkAccount: account => kicktippQueue.run(async () => {
-      // A candidate login gets its own in-memory cookie jar and cannot replace
-      // the active account's persisted session or base URL.
       const previousBase = urls.urlBase();
       const page = new browser.Page();
       try {
@@ -112,59 +133,37 @@ export async function startService(config: ServiceConfig | null = initialConfig(
     }),
     applyConfig: async candidate => {
       if (closing) throw new AdminError('stopping', 503);
-      // A terminal edit has not been activated yet; do not silently overwrite it.
       const diskConfig = fs.existsSync(configFile) ? readServiceConfig(configFile) : null;
-      // Optional undefined properties disappear when written as JSON.
       if (!isDeepStrictEqual(diskConfig, JSON.parse(JSON.stringify(activeConfig)))) throw new AdminError('restart_required', 409);
-      // HTTP dispatch gates all MCP/admin calls around this operation. Stop the
-      // scheduler outside the Kicktipp queue so an already queued read can end.
-      const previous = activeConfig;
-      const previousScheduler = scheduler;
-      await previousScheduler?.stop();
-      const previousEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('KICKTIPP_')));
-      const previousBase = urls.urlBase();
+      // Drain scheduler reads before taking the operation queue. HTTP dispatch
+      // separately gates admin edits against MCP calls, so no caller sees half a save.
+      await stopSchedulers();
       try {
         await kicktippQueue.run(async () => {
           await discardSession();
-          applyServiceConfig(candidate);
-          urls.setUrlBase(urls.resolveBaseUrl());
-          // Construct before committing: corrupt account state must not leave a
-          // half-applied configuration or replace a valid settings file.
-          const replacement = makeScheduler(candidate);
+          const replacement = makeStates(candidate);
           writeServiceConfig(candidate, configFile);
           activeConfig = candidate;
-          scheduler = replacement;
-          report = null;
-          reports = [];
-          read = { lastCheck: null, lastSuccess: null, lastError: null };
+          states = replacement;
         });
-      } catch (error) {
-        for (const key of Object.keys(process.env)) if (key.startsWith('KICKTIPP_')) delete process.env[key];
-        Object.assign(process.env, previousEnv);
-        urls.setUrlBase(previousBase);
-        activeConfig = previous;
-        scheduler = previousScheduler;
-        previousScheduler?.start();
-        throw error;
-      }
-      scheduler?.start();
+      } finally { if (!closing) startSchedulers(); }
     },
   });
   const http = await startHttpService({
     host, port, token: () => activeConfig?.server.token ?? null,
-    allowedOrigins: config?.server.allowedOrigins,
-    web: { token: adminToken, allowedOrigins: config?.server.allowedOrigins,
+    allowedOrigins: activeConfig?.server.allowedOrigins,
+    web: { token: adminToken, allowedOrigins: activeConfig?.server.allowedOrigins,
       handle: (pathname, method, body) => admin.handle(pathname, method, body) },
-    status,
+    status, profileAccess,
   });
-  scheduler?.start();
+  startSchedulers();
   return {
-    http, get scheduler() { return scheduler; },
+    http,
+    get scheduler() { return states.size === 1 ? [...states.values()][0].scheduler : null; },
     async close() {
       closing = true;
-      await Promise.all([http.close(), scheduler?.stop()]);
-      // An accepted config operation may finish during listener shutdown.
-      await scheduler?.stop();
+      await Promise.all([http.close(), stopSchedulers()]);
+      await stopSchedulers();
       await kicktippQueue.idle();
     },
   };
@@ -196,7 +195,6 @@ async function main(): Promise<void> {
     return;
   }
   if (command !== 'serve') {
-    if (fs.existsSync(serviceConfigFile())) applyServiceConfig(readServiceConfig());
     if (command === 'mcp-stdio') {
       const { startStdio } = await import('../server.js');
       await startStdio();

@@ -10,11 +10,11 @@ import { createServer } from 'node:http';
  * the regression test for tool registration: a schema mistake shows up here
  * and nowhere else.
  */
-function callServer(requests: object[], env: Record<string, string> = {}, entry = 'dist/server.js'): Promise<any[]> {
+function callServer(requests: object[], env: Record<string, string> = {}, entry: string | string[] = 'dist/server.js'): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const childEnv = { ...process.env, ...env };
     if (env.HOME && env.USERPROFILE === undefined) childEnv.USERPROFILE = env.HOME;
-    const child = spawn('node', [entry], {
+    const child = spawn('node', typeof entry === 'string' ? [entry] : entry, {
       env: childEnv,
       stdio: ['pipe', 'pipe', 'ignore'],
     });
@@ -119,6 +119,73 @@ describe('the MCP server as a client sees it', () => {
       await new Promise<void>((resolve) => fixture.close(() => resolve()));
       fs.rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    ['direct server', ['dist/server.js']],
+    ['service stdio command', ['dist/service/main.js', 'mcp-stdio']],
+  ])('selects v2 profiles through %s without network access', async (_label, entry) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-mcp-profiles-'));
+    const configFile = path.join(directory, 'service.json');
+    const guard = path.join(directory, 'network-forbidden.mjs');
+    const networkAttempt = path.join(directory, 'network-attempt');
+    fs.writeFileSync(guard, `import fs from 'node:fs'; globalThis.fetch = () => {
+      fs.writeFileSync(${JSON.stringify(networkAttempt)}, 'attempted'); throw new Error('Network forbidden in profile discovery/cache test');
+    };`);
+    fs.writeFileSync(configFile, JSON.stringify({
+      version: 2, server: { token: 'stdio-private-token-at-least-32-characters', host: '127.0.0.1', port: 8787, allowedOrigins: [] },
+      profiles: ['alice', 'bob'].map(id => ({
+        id, name: id === 'alice' ? 'Alice' : 'Bob',
+        account: { email: `${id}@example.invalid`, password: 'stdio-private-password', community: 'shared-pool', player: id, site: 'de' },
+        readOnly: id === 'bob', timeZone: 'Europe/Berlin',
+        notifications: { channels: [], warnHours: [], everyMinutes: 15 },
+      })),
+    }));
+    const env = { HOME: directory, KICKTIPP_SERVICE_CONFIG: configFile, KICKTIPP_DATA_DIR: directory,
+      KICKTIPP_PROFILE: '', KICKTIPP_BASE_URL: 'http://127.0.0.1:1', NODE_OPTIONS: `--import=${guard}` };
+    try {
+      // Seed each real on-disk cache using the compiled identity/path functions.
+      // The MCP process must select the right one when both pools have one name.
+      execFileSync(process.execPath, ['--input-type=module', '-e', `
+        import {readServiceConfig, applyServiceConfig, profileServiceConfig} from './dist/service/settings.js';
+        import {CacheStore} from './dist/cache/store.js';
+        const config = readServiceConfig();
+        for (const profile of config.profiles) {
+          applyServiceConfig(profileServiceConfig(config, profile), profile.id);
+          new CacheStore(profile.account.community).write('rules', [{type:'heading', text:profile.name}]);
+        }
+      `], { env: { ...process.env, ...env }, encoding: 'utf8' });
+      const call = (id: number, name: string, args: object) => ({
+        jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args },
+      });
+      const resource = (id: number, uri: string) => ({ jsonrpc: '2.0', id, method: 'resources/read', params: { uri } });
+      const messages = await callServer([
+        INIT, call(2, 'get_profiles', {}), call(3, 'get_status', { profile: 'alice' }), call(4, 'get_status', { profile: 'bob' }),
+        call(5, 'get_bet_log', {}), call(6, 'get_bets', { profile: 'missing' }),
+        resource(7, 'kicktipp://profiles/alice/shared-pool/rules'), resource(8, 'kicktipp://profiles/bob/shared-pool/rules'),
+        resource(9, 'kicktipp://shared-pool/rules'), resource(10, 'kicktipp://profiles/missing/shared-pool/rules'),
+      ], env, entry);
+      const message = (id: number) => messages.find(item => item.id === id);
+      expect(message(1).result.instructions).toContain('get_profiles');
+      expect(message(2).result.structuredContent.data.profiles).toMatchObject([
+        { id: 'alice', name: 'Alice', community: 'shared-pool', read_only: false },
+        { id: 'bob', name: 'Bob', community: 'shared-pool', read_only: true },
+      ]);
+      for (const [id, profile, readOnly] of [[3, 'alice', false], [4, 'bob', true]] as const) {
+        expect(message(id).result.isError).toBeFalsy();
+        expect(message(id).result.structuredContent.data).toMatchObject({ profile, player: profile, community: 'shared-pool', read_only: readOnly, setup_needed: false });
+      }
+      for (const id of [5, 6]) {
+        expect(message(id).result.isError).toBe(true);
+        expect(message(id).result.content[0].text).toMatch(/profile/i);
+      }
+      expect(JSON.parse(message(7).result.contents[0].text).data).toEqual([{ type: 'heading', text: 'Alice' }]);
+      expect(JSON.parse(message(8).result.contents[0].text).data).toEqual([{ type: 'heading', text: 'Bob' }]);
+      for (const id of [9, 10]) expect(message(id).error.message).toMatch(/profile/i);
+      expect(JSON.stringify(messages)).not.toContain('stdio-private-password');
+      expect(JSON.stringify(messages)).not.toContain('stdio-private-token');
+      expect(fs.existsSync(networkAttempt)).toBe(false);
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   });
 
   it('shares one login and keeps concurrent tool reads in separate operations', async () => {

@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ServiceConfig } from '../src/service/settings.js';
+import type { LegacyServiceConfig } from '../src/service/settings.js';
 
 const TOKEN = 'local-process-test-token-with-thirty-two-characters';
 const PASSWORD = 'fixture-password-never-used-outside-local-server';
@@ -226,7 +226,7 @@ describe('the compiled service process', () => {
     fixture.listen(0, '127.0.0.1');
     await once(fixture, 'listening');
     const fixtureOrigin = `http://127.0.0.1:${(fixture.address() as { port: number }).port}`;
-    const config: ServiceConfig = {
+    const config: LegacyServiceConfig = {
       version: 1,
       account: { email: 'first@example.invalid', password: PASSWORD, community: COMMUNITY, communities: [COMMUNITY, OTHER_COMMUNITY], site: 'de' },
       server: { host: '127.0.0.1', port: await freePort(), token: TOKEN, readOnly: true, allowedOrigins: [] },

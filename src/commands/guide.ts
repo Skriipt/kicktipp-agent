@@ -9,13 +9,22 @@ export function getGuideText(): string {
   docker compose run --rm kicktipp setup
   docker compose up -d
 
-The setup wizard configures your account, community, MCP access and notification
-channels. Use setup --notifications to change Discord, Telegram or webhook
+The web interface configures any number of named profiles, each with its own
+account, community, permissions and notification channels. Changes apply immediately.
+The terminal setup wizard can also add or select profiles. Use setup --notifications to change Discord, Telegram or webhook
 delivery and reminder times. Restart the service after changing its settings.
 
   kicktipp setup
   kicktipp setup --notifications
   kicktipp notify --test          # test all configured channels; no Kicktipp call
+
+## Profiles
+
+  kicktipp profiles --json       # list IDs for service profiles
+  kicktipp --profile <id> bets   # explicitly select a service profile
+
+With one service profile, selection is optional. With several, pass --profile
+to account commands. Standalone CLI profiles continue to use config.ini.
 
 ## Reading Kicktipp
 
@@ -65,7 +74,11 @@ confirmation and preview options.
 
 The Compose service provides authenticated HTTP MCP at /mcp. Configure the
 endpoint and Bearer token shown by setup in your MCP client. The service keeps
-checking reminders even when no agent is connected. Local clients can still
+checking reminders for every profile even when no agent is connected. Call
+get_profiles to discover IDs and permissions. Pass profile on every tool call
+when several profiles exist, including reads, suggestions and submissions.
+Use the same profile throughout a task; ask the user if the target is unclear.
+The shared endpoint grants access to all profiles. Local clients can still
 start node dist/server.js using stdio.
 `;
 }

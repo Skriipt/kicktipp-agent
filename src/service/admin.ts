@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { sendNotification, validateChannel, type NotificationChannel } from '../notify/backends.js';
 import { SerialQueue } from './queue.js';
-import { configuredCommunities, validateServiceConfig, type ServiceConfig } from './settings.js';
+import { configuredCommunities, validateServiceConfig, serviceProfileIdSchema, serviceProfileNameSchema, type ServiceConfig, type ServiceProfile } from './settings.js';
 
 /** Safe, stable error identifiers for the browser; never include submitted secrets. */
 export class AdminError extends Error {
@@ -16,10 +16,10 @@ export interface AdminControllerOptions {
   getConfig: () => ServiceConfig | null;
   /** Persist and activate atomically, or reject without changing the active config. */
   applyConfig: (config: ServiceConfig) => Promise<void>;
-  status: () => unknown;
-  overview: () => Promise<unknown>;
+  status: (profile?: string) => unknown;
+  overview: (profile?: string) => Promise<unknown>;
   /** Read-only refresh, without dispatching scheduler reminders. */
-  check: () => Promise<unknown>;
+  check: (profile?: string) => Promise<unknown>;
   /** Isolated login check: must not replace the active account/session. */
   checkAccount: (account: { email: string; password: string; site: 'de' | 'com' }) => Promise<string[]>;
   sendNotification?: typeof sendNotification;
@@ -39,7 +39,7 @@ const accountSchema = z.object({
   site: z.enum(['de', 'com']).optional(), player: z.string().trim().optional(),
 }).strict();
 const patchSchema = z.object({
-  revision: z.string().min(1),
+  revision: z.string().min(1), profile: serviceProfileIdSchema.optional(), name: serviceProfileNameSchema.optional(),
   account: accountSchema.optional(),
   notifications: z.object({
     channels: z.array(channelSchema).max(20),
@@ -49,14 +49,18 @@ const patchSchema = z.object({
   timeZone: z.string().optional(), readOnly: z.boolean().optional(),
 }).strict();
 const checkAccountSchema = z.object({
+  profile: serviceProfileIdSchema.optional(),
   account: z.object({
     email: z.string().trim().email(), password: z.string().optional(), site: z.enum(['de', 'com']),
   }).strict(),
 }).strict();
 const testNotificationSchema = z.object({
+  profile: serviceProfileIdSchema.optional(),
   channel: channelSchema, language: z.enum(['en', 'de']).default('en'),
 }).strict();
-const emptySchema = z.object({}).strict();
+const selectionSchema = z.object({ profile: serviceProfileIdSchema.optional() }).strict();
+const createSchema = z.object({ revision: z.string().min(1), name: serviceProfileNameSchema, account: accountSchema }).strict();
+const removeSchema = z.object({ revision: z.string().min(1), profile: serviceProfileIdSchema }).strict();
 
 type ChannelInput = z.infer<typeof channelSchema>;
 
@@ -66,11 +70,11 @@ function parse<T>(schema: z.ZodType<T>, value: unknown, code = 'invalid_config')
   return result.data;
 }
 
-function sameIdentity(current: ServiceConfig['account'] | undefined, email: string, site: string): boolean {
+function sameIdentity(current: ServiceProfile['account'] | undefined, email: string, site: string): boolean {
   return !!current && current.site === site && current.email.trim().toLowerCase() === email.trim().toLowerCase();
 }
 
-function resolvePassword(current: ServiceConfig['account'] | undefined, account: { email: string; password?: string; site: string }): string {
+function resolvePassword(current: ServiceProfile['account'] | undefined, account: { email: string; password?: string; site: string }): string {
   if (account.password) return account.password;
   if (sameIdentity(current, account.email, account.site)) return current!.password;
   throw new AdminError('account_required');
@@ -103,8 +107,9 @@ function canonical(value: unknown): unknown {
 }
 
 /** Only the explicitly requested connection route exposes the MCP credential. */
-function publicConfig(config: ServiceConfig) {
+function publicConfig(config: ServiceProfile) {
   return {
+    id: config.id, name: config.name,
     account: { email: config.account.email, community: config.account.community, communities: configuredCommunities(config), site: config.account.site,
       ...(config.account.player ? { player: config.account.player } : {}), hasPassword: !!config.account.password },
     notifications: {
@@ -112,7 +117,7 @@ function publicConfig(config: ServiceConfig) {
         hasSecret: true, ...(channel.kind === 'telegram' ? { chatId: channel.chatId } : {}) })),
       warnHours: [...config.notifications.warnHours], everyMinutes: config.notifications.everyMinutes,
     },
-    timeZone: config.timeZone, readOnly: config.server.readOnly,
+    timeZone: config.timeZone, readOnly: config.readOnly,
   };
 }
 
@@ -127,97 +132,164 @@ export function createAdminController(options: AdminControllerOptions) {
   const revisionKey = randomBytes(32);
   const revision = (config: ServiceConfig | null) => createHmac('sha256', revisionKey)
     .update(JSON.stringify(canonical(config))).digest('base64url');
-  const snapshot = () => {
+  const summaries = (config: ServiceConfig | null) => config?.profiles.map(({ id, name, account, readOnly }) => ({ id, name, community: account.community, readOnly })) ?? [];
+  function select(config: ServiceConfig | null, id?: string, first = false): ServiceProfile | undefined {
+    if (id !== undefined) {
+      const profile = config?.profiles.find((candidate) => candidate.id === id);
+      if (!profile) throw new AdminError('profile_not_found', 404);
+      return profile;
+    }
+    if (!config?.profiles.length) return undefined;
+    if (first || config.profiles.length === 1) return config.profiles[0];
+    throw new AdminError('profile_required');
+  }
+  const snapshot = (id?: string) => {
     const config = options.getConfig();
-    return { revision: revision(config), configured: !!config,
-      config: config ? publicConfig(config) : null, status: options.status() };
+    const profile = select(config, id, true);
+    return { revision: revision(config), configured: !!config?.profiles.length,
+      profiles: summaries(config), profile: profile?.id ?? null,
+      config: profile ? publicConfig(profile) : null, status: options.status(profile?.id) };
   };
   const requireConfig = () => {
     const config = options.getConfig();
-    if (!config) throw new AdminError('setup_required', 409);
+    if (!config?.profiles.length) throw new AdminError('setup_required', 409);
     return config;
   };
-
-  async function save(body: unknown) {
-    const patch = parse(patchSchema, body);
-    const current = options.getConfig();
-    if (patch.revision !== revision(current)) throw new AdminError('config_conflict', 409);
-    const base: ServiceConfig = current ? structuredClone(current) : {
-      version: 1,
-      account: { email: '', password: '', community: '', site: 'de' },
-      server: { token: randomBytes(32).toString('base64url'),
-        host: options.serverDefaults?.host ?? '0.0.0.0', port: options.serverDefaults?.port ?? 8787,
-        readOnly: true, allowedOrigins: [] },
-      notifications: { channels: [], warnHours: [], everyMinutes: 15 }, timeZone: 'Europe/Berlin',
-    };
-    if (!current && !patch.account) throw new AdminError('account_required');
-    if (patch.account) {
-      const account = { ...base.account, ...patch.account };
-      account.password = resolvePassword(current?.account, { ...account, password: patch.account.password });
-      if (!sameIdentity(current?.account, account.email, account.site)) {
-        // Membership and player selection belong to the verified account, never
-        // to the previous account whose secrets/settings supplied the base.
-        account.community = patch.account.community ?? '';
-        account.communities = patch.account.communities;
-        account.player = patch.account.player;
-      }
-      account.player = account.player || undefined;
-      base.account = account;
-    }
-    if (patch.notifications) {
-      base.notifications = { ...patch.notifications,
-        channels: patch.notifications.channels.map((channel) => resolveChannel(channel, current?.notifications.channels ?? [])) };
-    }
-    if (patch.timeZone !== undefined) base.timeZone = patch.timeZone;
-    if (patch.readOnly !== undefined) base.server.readOnly = patch.readOnly;
+  const emptyConfig = (): ServiceConfig => ({ version: 2, profiles: [], server: {
+    token: randomBytes(32).toString('base64url'), host: options.serverDefaults?.host ?? '0.0.0.0',
+    port: options.serverDefaults?.port ?? 8787, allowedOrigins: [],
+  } });
+  const emptyProfile = (id: string, name: string): ServiceProfile => ({ id, name,
+    account: { email: '', password: '', community: '', site: 'de' },
+    notifications: { channels: [], warnHours: [], everyMinutes: 15 }, timeZone: 'Europe/Berlin', readOnly: true,
+  });
+  const checkRevision = (expected: string, config: ServiceConfig | null) => {
+    if (expected !== revision(config)) throw new AdminError('config_conflict', 409);
+  };
+  async function apply(config: ServiceConfig, changedId?: string, previous?: ServiceProfile) {
     let valid: ServiceConfig;
-    try { valid = validateServiceConfig(base); }
+    try { valid = validateServiceConfig(config); }
     catch { throw new AdminError('invalid_config'); }
-    const sameAccount = sameIdentity(current?.account, valid.account.email, valid.account.site);
-    const previousGroups = new Set(current && sameAccount ? configuredCommunities(current) : []);
-    const groups = configuredCommunities(valid);
-    if (groups.some((community) => !previousGroups.has(community))) {
-      let memberships: string[];
-      try {
-        memberships = await options.checkAccount({ email: valid.account.email, password: valid.account.password, site: valid.account.site });
-      } catch { throw new AdminError('login_failed', 502); }
-      if (groups.some((community) => !memberships.includes(community))) throw new AdminError('community_not_found');
+    if (changedId !== undefined) {
+      const changed = valid.profiles.find((profile) => profile.id === changedId)!;
+      const sameAccount = sameIdentity(previous?.account, changed.account.email, changed.account.site);
+      const previousGroups = new Set(previous && sameAccount ? configuredCommunities(previous) : []);
+      const groups = configuredCommunities(changed);
+      if (groups.some((community) => !previousGroups.has(community))) {
+        let memberships: string[];
+        try { memberships = await options.checkAccount({ email: changed.account.email,
+          password: changed.account.password, site: changed.account.site }); }
+        catch { throw new AdminError('login_failed', 502); }
+        if (groups.some((community) => !memberships.includes(community))) throw new AdminError('community_not_found');
+      }
     }
     try { await options.applyConfig(valid); }
     catch (error) {
       if (error instanceof AdminError) throw error;
       throw new AdminError('request_failed', 500);
     }
+  }
+
+  async function save(body: unknown) {
+    const patch = parse(patchSchema, body);
+    const current = options.getConfig();
+    checkRevision(patch.revision, current);
+    const selected = select(current, patch.profile);
+    const base = current ? structuredClone(current) : emptyConfig();
+    const profile = selected ? base.profiles.find((candidate) => candidate.id === selected.id)!
+      : emptyProfile('default', patch.name ?? 'Default');
+    if (!selected && !patch.account) throw new AdminError('account_required');
+    if (patch.account) {
+      const account = { ...profile.account, ...patch.account };
+      account.password = resolvePassword(selected?.account, { ...account, password: patch.account.password });
+      if (!sameIdentity(selected?.account, account.email, account.site)) {
+        // Membership and player choice belong to this identity, not the prior account.
+        account.community = patch.account.community ?? '';
+        account.communities = patch.account.communities;
+        account.player = patch.account.player;
+      }
+      account.player = account.player || undefined;
+      profile.account = account;
+    }
+    if (patch.name !== undefined) profile.name = patch.name;
+    if (patch.notifications) {
+      profile.notifications = { ...patch.notifications,
+        channels: patch.notifications.channels.map((channel) => resolveChannel(channel, selected?.notifications.channels ?? [])) };
+    }
+    if (patch.timeZone !== undefined) profile.timeZone = patch.timeZone;
+    if (patch.readOnly !== undefined) profile.readOnly = patch.readOnly;
+    if (!selected) base.profiles.push(profile);
+    await apply(base, profile.id, selected);
+    return snapshot(profile.id);
+  }
+
+  async function create(body: unknown) {
+    const input = parse(createSchema, body);
+    const current = options.getConfig();
+    checkRevision(input.revision, current);
+    const base = current ? structuredClone(current) : emptyConfig();
+    const profile = emptyProfile(`profile-${randomBytes(8).toString('hex')}`, input.name);
+    profile.account = { ...profile.account, ...input.account };
+    if (!profile.account.password) throw new AdminError('account_required');
+    profile.account.player = profile.account.player || undefined;
+    base.profiles.push(profile);
+    await apply(base, profile.id);
+    return snapshot(profile.id);
+  }
+
+  async function remove(body: unknown) {
+    const input = parse(removeSchema, body);
+    const current = options.getConfig();
+    checkRevision(input.revision, current);
+    select(current, input.profile);
+    const base = structuredClone(current!);
+    base.profiles = base.profiles.filter((profile) => profile.id !== input.profile);
+    await apply(base);
     return snapshot();
   }
 
-  async function dispatch(path: string, method: string, body: unknown) {
+  async function dispatch(address: string, method: string, body: unknown) {
+    const url = new URL(address, 'http://localhost');
+    const path = url.pathname;
+    if ([...url.searchParams.keys()].some((key) => key !== 'profile') || url.searchParams.getAll('profile').length > 1) throw new AdminError('invalid_config');
+    const query = parse(selectionSchema, Object.fromEntries(url.searchParams));
     const methods: Record<string, readonly string[]> = {
       '/api/admin/config': ['GET', 'POST'], '/api/admin/connection': ['GET'],
+      '/api/admin/profiles': ['POST'], '/api/admin/profiles/remove': ['POST'],
       '/api/admin/overview': ['GET'], '/api/admin/check': ['POST'],
       '/api/admin/account/check': ['POST'], '/api/admin/notifications/test': ['POST'],
     };
     if (!methods[path]) throw new AdminError('not_found', 404);
     if (!methods[path].includes(method)) throw new AdminError('method_not_allowed', 405);
-    if (path === '/api/admin/config') return method === 'GET' ? snapshot() : save(body);
+    // Mutations take their selector in the body, preventing conflicting targets.
+    if (method === 'POST' && query.profile !== undefined) throw new AdminError('invalid_config');
+    if (path === '/api/admin/config') return method === 'GET' ? snapshot(query.profile) : save(body);
+    if (path === '/api/admin/profiles') return create(body);
+    if (path === '/api/admin/profiles/remove') return remove(body);
     if (path === '/api/admin/connection') {
       const config = requireConfig();
-      return { url: '/mcp', token: config.server.token, readOnly: config.server.readOnly };
+      const profile = select(config, query.profile, true)!;
+      return { url: '/mcp', token: config.server.token, readOnly: profile.readOnly, profiles: summaries(config) };
     }
     if (path === '/api/admin/overview' || path === '/api/admin/check') {
-      requireConfig();
-      if (method === 'POST') parse(emptySchema, body ?? {});
-      try { return await (method === 'GET' ? options.overview() : options.check()); }
+      const config = requireConfig();
+      const selection = method === 'GET' ? query : parse(selectionSchema, body ?? {});
+      const profile = select(config, selection.profile)!;
+      try { return await (method === 'GET' ? options.overview(profile.id) : options.check(profile.id)); }
       catch { throw new AdminError('check_failed', 502); }
     }
     if (path === '/api/admin/account/check') {
-      const { account } = parse(checkAccountSchema, body);
-      const password = resolvePassword(options.getConfig()?.account, account);
+      const { account, profile: id } = parse(checkAccountSchema, body);
+      const current = options.getConfig();
+      // New-profile login checks supply a password and need no existing selection.
+      const selected = id !== undefined || !account.password ? select(current, id) : undefined;
+      const password = resolvePassword(selected?.account, account);
       try { return { communities: await options.checkAccount({ ...account, password }) }; }
       catch { throw new AdminError('login_failed', 502); }
     }
-    const { channel, language } = parse(testNotificationSchema, body, 'invalid_channel');
-    const target = resolveChannel(channel, options.getConfig()?.notifications.channels ?? []);
+    const { channel, language, profile: id } = parse(testNotificationSchema, body, 'invalid_channel');
+    const selected = select(options.getConfig(), id);
+    const target = resolveChannel(channel, selected?.notifications.channels ?? []);
     try {
       await (options.sendNotification ?? sendNotification)(target, {
         event: 'test', summary: language === 'de'

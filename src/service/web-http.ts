@@ -108,7 +108,7 @@ export function createWebHandler(options: WebAdminOptions, gate: SerialQueue) {
         }
         body = await readJson(request);
       }
-      const result = await gate.run(() => options.handle(pathname, request.method!, body));
+      const result = await gate.run(() => options.handle(pathname + new URL(request.url!, 'http://localhost').search, request.method!, body));
       json(response, 200, result);
     } catch (error) {
       json(response, error instanceof AdminError ? error.status : 500, {
