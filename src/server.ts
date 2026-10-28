@@ -8,7 +8,8 @@ import { existsSync, realpathSync } from 'node:fs';
 import { kicktippQueue, type SerialQueue } from './service/queue.js';
 import { localizeMatchDates } from './helpers/match-date.js';
 import { Page, getCommunities, getPlayers, launchBrowser } from './browser.js';
-import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, readDefaultStrategy, readUiLanguage, readUiSite } from './config.js';
+import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasUsableAuth, isSessionOnly, SessionOnlyExpiredError, getActiveProfile, accountScope, readDefaultStrategy, readUiLanguage, readUiSite } from './config.js';
+import { createProfileAccess, type describeProfiles } from './service/profiles.js';
 import { VERSION } from './version.js';
 import { resolveLanguage, setLanguage } from './i18n/index.js';
 import { resolveBaseUrl, setUrlBase } from './url.js';
@@ -17,7 +18,7 @@ import { loadSeason } from './analytics/season.js';
 import { computeSeasonStats } from './analytics/season-stats.js';
 import { resolveRulesFromCache } from './rules/resolve.js';
 import { syncSeason } from './cache/sync.js';
-import { isReadOnly } from './read-only.js';
+import { isReadOnly, assertWritable } from './read-only.js';
 import { buildDeadlineReport } from './analytics/deadline.js';
 import { readAudit } from './audit/log.js';
 import { resolveRules } from './rules/resolve.js';
@@ -48,10 +49,13 @@ import {
 // ── Persistent Kicktipp session ────────────────────────────────────
 
 let pageInstance: Page | null = null;
+let pageOwner: string | null = null;
 
-const SETUP_INSTRUCTIONS = 'Run docker compose run --rm kicktipp setup on the server to connect or reconnect the account. Never send passwords in chat.';
+const SETUP_INSTRUCTIONS = 'Open the service web interface to configure the selected profile, or run docker compose run --rm kicktipp setup on the server to connect or reconnect the account. Never send passwords in chat.';
 
 async function getPage(): Promise<Page> {
+  const owner = `${process.env.KICKTIPP_CONFIG_DIR ?? ''}:${accountScope()}`;
+  if (pageOwner !== owner) await discardSession();
   if (pageInstance && !pageInstance.isClosed()) return pageInstance;
   if (!hasUsableAuth()) {
     throw new Error(SETUP_INSTRUCTIONS);
@@ -59,6 +63,7 @@ async function getPage(): Promise<Page> {
   try {
     const page = await launchBrowser();
     pageInstance = page;
+    pageOwner = owner;
     return page;
   } catch (err) {
     if (err instanceof SessionOnlyExpiredError) {
@@ -71,6 +76,7 @@ async function getPage(): Promise<Page> {
 export async function discardSession(): Promise<void> {
   const stale = pageInstance;
   pageInstance = null;
+  pageOwner = null;
   if (stale) await stale.close();
 }
 
@@ -110,53 +116,81 @@ export interface McpServerOptions {
   queue?: SerialQueue;
   /** A long-running instance has fixed account, community and player settings. */
   lockedConfiguration?: boolean;
-  serviceStatus?: () => unknown;
+  serviceStatus?: (profile?: string) => unknown;
+  profiles?: () => ReturnType<typeof describeProfiles>;
+  /** Runs within queue; binds the complete operation to the selected profile. */
+  withProfile?: <T>(id: string | undefined, operation: () => Promise<T>) => Promise<T>;
 }
 
 export function createMcpServer(options: McpServerOptions = {}): McpServer {
   const queue = options.queue ?? kicktippQueue;
   function serial<Args extends unknown[], Result>(fn: (...args: Args) => Promise<Result>): (...args: Args) => Promise<Result> {
-    return (...args) => queue.run(() => fn(...args));
+    return (...args) => queue.run(async () => {
+      const input = args[0] instanceof URL ? args[1] : args[0];
+      const profile = input && typeof input === 'object' && 'profile' in input ? input.profile : undefined;
+      if (profile !== undefined && typeof profile !== 'string') throw new Error('Invalid profile ID.');
+      if (profile !== undefined && !options.withProfile) throw new Error('Per-call profiles require a service configuration. Select standalone CLI profiles through KICKTIPP_PROFILE.');
+      return options.withProfile ? options.withProfile(profile, () => fn(...args)) : fn(...args);
+    });
   }
-  setLanguage(resolveLanguage({ configLanguage: readUiLanguage() }));
-  setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
-  const readOnly = isReadOnly();
+  function profileInput<Shape extends z.ZodRawShape>(shape: Shape) {
+    return z.object({ ...shape, profile: z.string().min(1).optional().describe(
+      'Profile ID from get_profiles. Required when multiple profiles exist; omitted only for a single profile. Use the same profile for reads, suggestions and submissions.',
+    ) });
+  }
+  // Service requests activate settings inside the shared queue. Creating an MCP
+  // transport must not change the site under a scheduler operation in flight.
+  if (!options.withProfile) {
+    setLanguage(resolveLanguage({ configLanguage: readUiLanguage() }));
+    setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
+  }
+  const readOnly = options.profiles ? options.profiles().every(profile => profile.read_only) : isReadOnly();
 
   const server = new McpServer(
     { name: 'kicktipp', version: VERSION },
-    { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on Kicktipp. Do not offer to place bets. ' : '') + 'Kicktipp football prediction game (kicktipp.com and kicktipp.de). Call get_status first. Account and notification setup is performed by the owner using docker compose run --rm kicktipp setup. Never ask for a password in chat.' },
+    { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on Kicktipp. Do not offer to place bets. ' : '') + (options.profiles ? 'Kicktipp football prediction game (kicktipp.com and kicktipp.de). Call get_status and get_profiles first. Each profile is a separate account, prediction pool, permissions and reminders. Use its exact ID in the profile argument on every tool call. If there is one profile, omission selects it; with multiple profiles omission is rejected. Ask which profile the user means when ambiguous. For all profiles, call each separately and label results by profile name. Always use the same profile for get_bets, suggestions and submissions; never infer it from the last call or community name. A shared MCP connection has access to every listed profile; read_only forbids submissions for that profile even if write tools exist for others. Account, profile and notification setup is performed by the owner in the service web interface. Never ask for a password in chat.' : 'Kicktipp football prediction game. Call get_status first. This standalone connection uses the configured CLI account. The owner configures it locally; never ask for a password in chat.') },
   );
 
   server.registerTool(
     'get_status',
     {
       description: 'Check account configuration and service status without exposing credentials. Call this first. If setup_needed is true, the owner should run the setup command on the server.',
-      inputSchema: z.object({}),
+      inputSchema: profileInput({}),
       outputSchema: OUTPUT_SCHEMA,
     },
-    serial(async () => {
-      const usable = hasUsableAuth();
-      const community = loadCommunity();
-      const player = loadPlayer();
-      return jsonResult({
-            read_only: readOnly,
-            profile: getActiveProfile(),
-            credentials_saved: usable,
-            session_only: isSessionOnly(),
-            community: community || null,
-            player: player || null,
-            service: options.serviceStatus?.() ?? null,
-            setup_needed: !usable || !community,
-            setup_instructions: !usable || !community ? SETUP_INSTRUCTIONS : null,
-          });
+    async ({ profile }) => queue.run(async () => {
+      const profiles = options.profiles?.();
+      if (!profiles && profile !== undefined) throw new Error('Per-call profiles require a service configuration.');
+      if (profiles && profile === undefined && profiles.length !== 1) {
+        return jsonResult({ profiles, read_only: readOnly, setup_needed: !profiles.length,
+          service: options.serviceStatus?.() ?? null,
+          setup_instructions: !profiles.length ? SETUP_INSTRUCTIONS : null });
+      }
+      const status = async () => {
+        const usable = hasUsableAuth();
+        const community = loadCommunity();
+        return jsonResult({ read_only: isReadOnly(),
+          profile: profiles ? (profile ?? profiles[0]?.id) : getActiveProfile(),
+          ...(profiles ? { profiles } : {}), credentials_saved: usable, session_only: isSessionOnly(),
+          community: community || null, player: loadPlayer() || null,
+          service: options.serviceStatus?.(profile ?? profiles?.[0]?.id) ?? null,
+          setup_needed: !usable || !community,
+          setup_instructions: !usable || !community ? SETUP_INSTRUCTIONS : null });
+      };
+      return options.withProfile ? options.withProfile(profile, status) : status();
     }),
   );
+
+  if (options.profiles) server.registerTool('get_profiles', {
+    description: 'List all available profiles with stable IDs, names, communities and read-only permissions. Use the profile ID in subsequent tools. Never guess a profile when several exist.',
+    inputSchema: z.object({}), outputSchema: OUTPUT_SCHEMA,
+  }, async () => jsonResult({ profiles: options.profiles!() }));
 
   server.registerTool(
     'get_today_matches',
     {
       description: "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
-      inputSchema: z.object({}),
+      inputSchema: profileInput({}),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async () => withFreshSession(async () => {
@@ -171,7 +205,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_bets',
     {
       description: 'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
-      inputSchema: z.object({ matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') }),
+      inputSchema: profileInput({ matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') }),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ matchday }) => withFreshSession(async () => {
@@ -186,7 +220,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_schedule',
     {
       description: 'Get the match schedule with results for a matchday.',
-      inputSchema: z.object({ matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') }),
+      inputSchema: profileInput({ matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') }),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ matchday }) => withFreshSession(async () => {
@@ -201,7 +235,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_leaderboard',
     {
       description: 'Get player rankings for a matchday. Includes matches/results and ranking table with points.',
-      inputSchema: z.object({
+      inputSchema: profileInput({
         matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
         bonus: z.boolean().optional().describe('Show bonus question rankings instead of match rankings.'),
       }),
@@ -222,7 +256,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     {
       description:
         'Show which players have submitted all, some, or none of their tips for a matchday. This is read-only and does not reveal the score predictions.',
-      inputSchema: z.object({
+      inputSchema: profileInput({
         matchday: z
           .number()
           .int()
@@ -245,7 +279,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_overview',
     {
       description: 'Get the season overview showing all players and their points across matchdays.',
-      inputSchema: z.object({ view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') }),
+      inputSchema: profileInput({ view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') }),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ view }) => withFreshSession(async () => {
@@ -260,7 +294,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_table',
     {
       description: 'Get the league table (standings of the actual football teams, not the prediction game).',
-      inputSchema: z.object({ option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') }),
+      inputSchema: profileInput({ option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') }),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ option }) => withFreshSession(async () => {
@@ -275,7 +309,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_rules',
     {
       description: 'Get the game rules and scoring system.',
-      inputSchema: z.object({}),
+      inputSchema: profileInput({}),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async () => withFreshSession(async () => {
@@ -290,7 +324,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_communities',
     {
       description: 'List all kicktipp communities the user belongs to.',
-      inputSchema: z.object({}),
+      inputSchema: profileInput({}),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async () => withFreshSession(async () => {
@@ -304,7 +338,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_players',
     {
       description: 'List all players in the saved community.',
-      inputSchema: z.object({}),
+      inputSchema: profileInput({}),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async () => withFreshSession(async () => {
@@ -320,7 +354,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'set_community',
     {
       description: 'Set the active community. Use get_communities first to see available options, then pass the exact name.',
-      inputSchema: z.object({ name: z.string().describe('Exact community name as returned by get_communities.') }),
+      inputSchema: profileInput({ name: z.string().describe('Exact community name as returned by get_communities.') }),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ name }) => {
@@ -340,7 +374,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'set_player',
     {
       description: 'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
-      inputSchema: z.object({ name: z.string().describe('Exact player name as returned by get_players.') }),
+      inputSchema: profileInput({ name: z.string().describe('Exact player name as returned by get_players.') }),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ name }) => {
@@ -360,7 +394,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_bonus_questions',
     {
       description: 'Get available bonus questions with their options and current selections.',
-      inputSchema: z.object({}),
+      inputSchema: profileInput({}),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async () => withFreshSession(async () => {
@@ -375,7 +409,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_bet_log',
     {
       description: 'Show what this agent has actually submitted to Kicktipp, with timestamps and which entry point did it. Use this to answer "what have you placed?" from the record rather than from memory. Records marked dry-run or intent never reached Kicktipp.',
-      inputSchema: z.object({
+      inputSchema: profileInput({
         matchday: z.number().int().min(1).max(34).optional().describe('Only this matchday.'),
         include_all: z.boolean().optional().describe('Include dry runs, intents and failures (default: submitted only).'),
       }),
@@ -395,7 +429,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_deadline',
     {
       description: "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Kickoff instants are parsed from Kicktipp's HTML (Central Time on .com, Berlin on .de) and shown in the time_zone field, which is this machine unless KICKTIPP_TZ is set.",
-      inputSchema: z.object({
+      inputSchema: profileInput({
         matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for the current one.'),
         warn_hours: z.number().positive().optional().describe('Urgency window in hours (default 6).'),
       }),
@@ -417,7 +451,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     {
       description:
         'ADMIN ONLY: list the community members with their tipperIds, and whether each is a dummy member with no login. Requires the logged-in user to be a Spielleiter. Use this to find the id or exact name before any of the other admin tools.',
-      inputSchema: z.object({}),
+      inputSchema: profileInput({}),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async () => withFreshSession(async () => {
@@ -432,7 +466,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     {
       description:
         "ADMIN ONLY: read another member's bets for a matchday through Tipps nachtragen. Requires Spielleiter rights.",
-      inputSchema: z.object({
+      inputSchema: profileInput({
         member: z.string().describe('Member name or tipperId, as listed by list_members.'),
         matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for the current one.'),
       }),
@@ -450,7 +484,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'get_stats',
     {
       description: 'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
-      inputSchema: z.object({
+      inputSchema: profileInput({
         player: z.string().optional().describe('Player name. Defaults to the configured player.'),
         compare: z.string().optional().describe('Optional second player to compute alongside.'),
       }),
@@ -486,7 +520,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'sync_history',
     {
       description: 'Update the local season cache so get_stats has data to work with. Stops at the current matchday, skips finished and still-upcoming ones, and paces requests politely. The first run backfills holes; later runs usually cost one matchday. Pass to=34 to walk the rest of the season.',
-      inputSchema: z.object({
+      inputSchema: profileInput({
         from: z.number().int().min(1).max(34).optional().describe('First matchday (default 1).'),
         to: z.number().int().min(1).max(34).optional().describe('Last matchday (default: Kicktipp current matchday, not 34).'),
       }),
@@ -504,7 +538,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'suggest_bets',
     {
       description: "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
-      inputSchema: z.object({
+      inputSchema: profileInput({
         strategy: z
           .enum(['safe', 'ev', 'contrarian', 'auto'])
           .optional()
@@ -549,7 +583,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       {
         description:
           "ADMIN ONLY and DESTRUCTIVE: submit bets on somebody else's account through Tipps nachtragen. Requires Spielleiter rights. This acts on another person's entry, so confirm with the user first and pass that person's exact name as confirm_member; a mismatch is refused and nothing is submitted. Use dry_run to preview. Format each bet as \"Home vs Away=H:G\".",
-        inputSchema: z.object({
+        inputSchema: profileInput({
           member: z.string().describe('Member name or tipperId, as listed by list_members.'),
           confirm_member: z
             .string()
@@ -561,6 +595,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         outputSchema: OUTPUT_SCHEMA,
       },
       serial(async ({ member, confirm_member, bets, matchday, dry_run }) => {
+        assertWritable('Placing member bets');
         const page = await getPage();
         const community = await resolveCommunity(page);
         const resolved = resolveMember(await fetchMembers(page, community), member);
@@ -592,7 +627,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'place_bets',
     {
       description: 'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
-      inputSchema: z.object({
+      inputSchema: profileInput({
         bets: z.array(z.string()).min(1).describe('Bets in format "Home vs Away=H:G", e.g. ["FC Bayern München vs Borussia Dortmund=2:1"]'),
         matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.'),
         dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
@@ -600,6 +635,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ bets, matchday, dry_run }) => {
+        assertWritable('Placing bets');
         const page = await getPage();
         const community = await resolveCommunity(page);
         const placed = await placeBets(page, community, bets, matchday, !dry_run, 'mcp:place_bets');
@@ -613,13 +649,14 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'place_bonus_bets',
     {
       description: 'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer". Ranking questions have several dropdowns (selects.length > 1): pass one array entry per slot in the SAME call, in order, repeating the question text. Example: ["Who will be relegated?=FC St. Pauli", "Who will be relegated?=1. FC Heidenheim", "Who will be relegated?=Holstein Kiel"]. A shorter list fills remaining empty slots instead of overwriting the first dropdown. A successful dry run still returns success=true with dry_run=true; nothing is submitted.',
-      inputSchema: z.object({
+      inputSchema: profileInput({
         bets: z.array(z.string()).min(1).describe('Bonus bets in format "Question text=Answer". Repeat the question once per ranking dropdown in a single call.'),
         dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
       }),
       outputSchema: OUTPUT_SCHEMA,
     },
     serial(async ({ bets, dry_run }) => {
+        assertWritable('Placing bonus bets');
         const page = await getPage();
         const community = await resolveCommunity(page);
         const placed = await placeBonusBets(page, community, bets, !dry_run, 'mcp:place_bonus_bets');
@@ -702,20 +739,30 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       resourceContents(uri, cachedResource(variables.community, 'schedule', Number(variables.matchday)))),
   );
 
+  if (options.withProfile) {
+    for (const kind of ['rules', 'leaderboard', 'schedule'] as const) {
+      server.registerResource(`profile_${kind}`,
+        new ResourceTemplate(`kicktipp://profiles/{profile}/{community}/${kind}${kind === 'rules' ? '' : '/{matchday}'}`, { list: undefined }),
+        { title: `Profile ${kind}`, description: 'Profile-scoped cached data. Select the ID from get_profiles.', mimeType: 'application/json' },
+        serial(async (uri, variables) => resourceContents(uri,
+          cachedResource(variables.community, kind, kind === 'rules' ? undefined : Number(variables.matchday)))));
+    }
+  }
+
   return server;
 }
 
 // stdio remains available for clients that launch a local subprocess.
 export async function startStdio() {
-  const server = createMcpServer({ lockedConfiguration: Boolean(process.env.KICKTIPP_SERVICE_CONFIG) });
+  const { serviceConfigFile, readServiceConfig } = await import('./service/settings.js');
+  const config = existsSync(serviceConfigFile()) ? readServiceConfig() : null;
+  const server = createMcpServer({ lockedConfiguration: !!config, ...(config ? createProfileAccess(() => config) : {}) });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
 if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   (async () => {
-    const { serviceConfigFile, readServiceConfig, applyServiceConfig } = await import('./service/settings.js');
-    if (existsSync(serviceConfigFile())) applyServiceConfig(readServiceConfig());
     await startStdio();
   })().catch((err) => {
     console.error('Fatal:', err);

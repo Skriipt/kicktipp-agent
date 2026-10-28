@@ -8,8 +8,8 @@ Repository instructions are in [AGENTS.md](../AGENTS.md) and `docs/agents/`.
 
 | File | Responsibility |
 | --- | --- |
-| `src/service/main.ts` | Container entry point: `serve`, `setup`, `web-token`, `connection`, `mcp-stdio`, or a CLI command. Applies service configuration before loading the runtime. |
-| `src/setup-cli.ts` | Terminal wizard: hidden secret prompts, account validation, community selection, channel setup, optional test sends and Telegram chat discovery. |
+| `src/service/main.ts` | Container entry point: `serve`, `setup`, `web-token`, `connection`, `mcp-stdio`, or a CLI command. Starts the profile-aware runtime and per-profile schedulers. |
+| `src/setup-cli.ts` | Terminal wizard: profile selection/creation, hidden secret prompts, account validation, community selection, channel setup, optional test sends and Telegram chat discovery. |
 | `src/index.ts` | Commander CLI, including matches, tips, statistics, suggestions, history and Spielleiter commands. |
 | `src/server.ts` | MCP server factory and optional stdio entry point. Registers tools/resources over the shared core. |
 | `src/core.ts` | Kicktipp parsing and business operations. Functions receive a `Page` and community and return structured results. |
@@ -20,14 +20,14 @@ Repository instructions are in [AGENTS.md](../AGENTS.md) and `docs/agents/`.
 
 `src/service/settings.ts` validates and atomically saves `ServiceConfig`. Its default location is the platform data directory's `service.json`; the container sets `KICKTIPP_SERVICE_CONFIG=/data/service.json`.
 
-The file contains:
+The version 2 file contains:
 
-- `account`: email, password, default `community`, optional tracked `communities`, optional player, and `de`/`com` site. Legacy files without `communities` track only the default; a configured list is nonempty, unique and includes the default.
-- `server`: bearer token, listen host/port, read-only mode and exact allowed browser origins.
-- `notifications`: channel destinations, warning windows and polling interval.
-- `timeZone`: an IANA display timezone.
+- `server`: shared bearer token, listen host/port and exact allowed browser origins.
+- `profiles`: an array with no artificial count limit. Each profile has a stable `id`, a human-readable `name`, `account` (email, password, default `community`, optional tracked `communities`, optional player and `de`/`com` site), `readOnly`, `notifications` (destinations, warning windows and polling interval), and an IANA `timeZone`.
 
-The service file stores secrets in plain text with mode `0600`; do not describe it as encrypted. Account-specific config and data directories are selected from a hash of site and account identity. Runtime environment variables connect this configuration to the existing core. A service instance has one active account and multiple tracked communities. MCP/CLI retain the default community; HTTP MCP does not expose tools to change account/subscription settings. Admin saves verify new subscriptions against fresh account membership. Switching accounts clears inherited subscriptions and player selection.
+IDs and case-insensitive names must be unique. Within each profile, an optional `account.communities` list contains 1–50 unique pools including the default; omitting it follows only the default pool. Empty profile arrays are valid so removing the last profile returns the UI to setup while retaining the shared MCP token. `validateServiceConfig` accepts a legacy version 1 file and converts it to one `default` profile without losing settings. Reads do not rewrite the file; the next atomic save persists version 2.
+
+The service file stores secrets in plain text with mode `0600`; do not describe it as encrypted. Each profile's config/data paths also include the site/account identity hash. The `default` profile preserves the pre-migration account path; other profiles use `profiles/<id>/accounts/<identity>/`. Renaming preserves IDs and history. Removing a profile deletes its configuration, not historical files. HTTP MCP does not expose profile or subscription administration. MCP/CLI retain the selected profile's default community. Admin saves verify newly added pools against fresh membership for that profile's account. Switching account identity clears inherited subscriptions and player selection.
 
 `src/config.ts` retains standalone INI profiles and session handling. New encrypted passwords use AES-256-GCM with a random persisted `credentials.key`. Legacy machine-derived passwords can be read and migrated on their original machine. Both the key and INI file must be included in CLI backups. Service credentials are read from the service configuration instead.
 
@@ -43,7 +43,11 @@ The service file stores secrets in plain text with mode `0600`; do not describe 
 
 Bearer comparison is timing-safe. Requests with an unapproved `Origin` are rejected. Request bodies are bounded. Neither status nor error responses may expose account passwords, access tokens, webhook URLs or Telegram bot tokens. Only the explicitly requested admin connection route returns the MCP token.
 
-`src/service/queue.ts` supplies the shared serial queue. All daemon MCP tool/resource work and scheduler Kicktipp reads use it because the page abstraction and stored session state are mutable. Do not create a new independent queue per HTTP request. An HTTP operation queue also gates entire MCP/admin requests during live configuration changes. The scheduler stops before entering the shared Kicktipp queue; its pending read must be allowed to drain. Config save constructs replacement scheduler state before atomic persistence, then starts the new scheduler. Account-check sessions use an isolated in-memory cookie jar and restore the global base URL. This is process-local coordination, not a distributed lock: multiple service replicas or independent stdio/CLI processes must not share an active account/data volume.
+`src/service/queue.ts` supplies the shared serial queue. All daemon MCP tool/resource work and scheduler Kicktipp reads use it because the core still reads mutable process settings. `src/service/profiles.ts` resolves the requested profile and binds its credentials, state paths, read-only permission, timezone and site for the complete queued operation, including retries and submission read-back. Never switch the profile outside that boundary or create an independent queue per HTTP request.
+
+An HTTP operation queue also gates entire MCP/admin requests during live configuration changes. Stop all schedulers before entering the shared Kicktipp queue so pending reads can drain. Config save constructs replacement scheduler state before atomic persistence, then starts the new schedulers. Account-check sessions use an isolated in-memory cookie jar and restore the global base URL. This is process-local coordination, not a distributed lock: use one service process per volume, with as many profiles as needed.
+
+The shared MCP token grants access to all configured profiles. `get_profiles` exposes IDs, names, communities and permissions without secrets. Every profile-specific tool accepts `profile`; omission resolves only when exactly one profile exists. `get_status` may omit selection for a service overview. MCP instructions require discovery, explicit selection when multiple profiles exist, and the same profile throughout reads, suggestions and submissions. No call changes another client's implicit selection. Profile-specific cache resources use `kicktipp://profiles/{profile}/{community}/...`; legacy resource URIs work only when selection is unambiguous.
 
 On shutdown, stop accepting requests and future scheduler runs, allow in-flight operations to finish, then close transports and sessions. A client disconnect must never be treated as proof that a tip submission did not happen.
 
@@ -57,7 +61,7 @@ On shutdown, stop accepting requests and future scheduler runs, allow in-flight 
 
 Generic webhooks receive the structured JSON payload. Discord receives `content`, with mentions disabled and `wait=true`. Telegram uses `sendMessage` with plain text and disabled link previews. Provider failures are sanitized; retry information is carried by `NotificationError`.
 
-`src/service/scheduler.ts` owns `DeadlineScheduler`. Its injected `fetchReport` accepts a report or report array and is queued by the service entry point. The service reads each tracked community in the same account session, publishes the reports together, and marks per-group failures with `readError`. The scheduler starts immediately, then schedules the next run after the current one finishes; overlapping scheduler checks reuse the in-flight promise. Failed groups do not suppress reminders for healthy groups.
+`src/service/scheduler.ts` owns `DeadlineScheduler`. The service creates one scheduler and separate delivery history for each profile. Its injected `fetchReport` accepts a report or report array and is bound to that profile within the shared queue. It reads every tracked pool in that profile's account session, publishes reports together, and marks pool failures with `readError`. The scheduler starts immediately, then schedules the next run after the current one finishes; overlapping scheduler checks reuse the in-flight promise. Failed pools do not suppress reminders for healthy pools.
 
 For each untipped future fixture, the scheduler chooses the most urgent crossed warning window. Per-destination hashes include community, fixture, kickoff and window. Successful sends are checkpointed independently; failed destinations retry with backoff while healthy destinations remain deduplicated. State contains hashes and timestamps, not channel credentials. Expired records are pruned.
 
@@ -65,7 +69,7 @@ Authentication/check failures send operational alerts with a persisted six-hour 
 
 Scheduled `missing_tips` payloads contain `summary`, community, matchday, timezone, check time, warning window and matches. `service_error` payloads contain a sanitized code and summary. `test` payloads are sent only when explicitly requested in the web UI, during setup or via `notify --test`. Web manual refresh only reads matches and does not run notification delivery.
 
-`src/bonus-reminders.ts` reads editable bonus answer slots and joins uniquely matching question titles to the bonus schedule's `table#fragen` / `th[name="tipptermin"]` column. Form array indices are not assumed to be schedule question IDs. Duplicate titles, missing dates and invalid dates retain `deadline: null`. `missing_bonus` notifications use a separate identity namespace and include the question, explicit deadline and missing-answer count. Unknown deadlines are exposed as `unresolvedBonusQuestions`; bonus read failures use `bonusCheckFailed` and leave known match reminders available. A complete successful check is required before `lastSuccess` advances.
+`src/bonus-reminders.ts` reads editable bonus answer slots and joins uniquely matching question titles to the bonus schedule's `table#fragen` / `th[name="tipptermin"]` column. Form array indices are not assumed to be schedule question IDs. Duplicate titles, missing dates and invalid dates retain `deadline: null`. `missing_bonus` notifications use a separate identity namespace and include the question, explicit deadline and missing-answer count. Unknown deadlines are exposed as `unresolvedBonusQuestions`; bonus read failures use `bonusCheckFailed` and leave known match reminders available. A complete successful check is required before a profile's `lastSuccess` advances.
 
 ## Kicktipp HTTP and parsing
 
@@ -102,7 +106,7 @@ TUI, legacy desktop web setup, desktop/command notification delivery, scheduler 
 
 ## Submission boundaries
 
-1. `src/read-only.ts` enforces write restrictions in the shared core as well as at the entry points. Read-only MCP clients do not see submission tools.
+1. `src/read-only.ts` enforces write restrictions in the shared core as well as at the entry points. MCP hides submission tools if all profiles are read-only. With mixed permissions, the selected profile's read-only setting is still enforced by the shared core.
 2. `src/submission.ts` confirms requested values through a fresh read. Preserve `submitted`, `rejected` and `submission_unknown` semantics; a missing confirmation is not success.
 3. `src/audit/log.ts` records submission outcomes inside the shared submission lifecycle, so new callers cannot bypass it accidentally.
 4. Spielleiter submissions carry the resolved member's `tipperId`; MCP additionally confirms the intended member. Losing that identity must not fall back to the signed-in user's form.
@@ -120,7 +124,7 @@ npm test
 
 Build before running integration tests that execute `dist/server.js` or the compiled service. Tests cover core parsers/submissions, MCP over stdio/HTTP, configuration/setup and notification scheduling. Use injected providers and local fixture endpoints for repeatable tests; those results do not establish live account or provider acceptance.
 
-When checking the daemon, test authenticated tool calls, rejected unauthenticated calls, read-only behavior, graceful shutdown, persisted reminder state and failed-provider isolation. Verify the actual Compose startup path when changing image, entry-point or volume behavior.
+When checking the daemon, test authenticated tool calls, rejected unauthenticated calls, per-profile read-only behavior, overlapping calls across two profiles, rejected ambiguous selections, graceful shutdown, persisted reminder state and failed-provider isolation. Verify the actual Compose startup path when changing image, entry-point or volume behavior.
 
 CLI JSON output remains machine-readable. MCP tools return both text and `structuredContent` under `{ data: ... }`. Avoid credentials in logs, fixtures, screenshots, tests or PR descriptions.
 
@@ -128,10 +132,10 @@ CLI JSON output remains machine-readable. MCP tools return both text and `struct
 
 `src/web/` contains vanilla HTML/CSS/JavaScript. The build copies these assets to `dist/web/`; no runtime CDN, bundler or additional server is needed. English is the initial language, with a persisted EN/DE preference; credentials are never put in localStorage, URLs or application logs.
 
-`src/service/admin.ts` validates all admin inputs, redacts snapshots and applies HMAC revision checks to prevent stale overwrites. Empty password/channel secrets preserve existing values only for the same identity or destination ID/kind. `web-http.ts` bounds JSON bodies, enforces Host/Origin and CSP, and authenticates the independent `web-admin-token`. Fresh containers can serve the locked UI before `service.json` exists. The token is obtained through the local `web-token` command, not through an unauthenticated HTTP endpoint.
+`src/service/admin.ts` validates all admin inputs, redacts snapshots and applies one HMAC revision across the whole configuration to prevent stale overwrites, including edits to different profiles. The UI selects a profile for settings and overview requests; profile creation and removal use dedicated admin routes. Empty password/channel secrets preserve existing values only within the selected profile and for the same identity or destination ID/kind. `web-http.ts` bounds JSON bodies, enforces Host/Origin and CSP, and authenticates the independent `web-admin-token`. Fresh containers can serve the locked UI before `service.json` exists. The token is obtained through the local `web-token` command, not through an unauthenticated HTTP endpoint.
 
-Operational status exposes `read` for the latest scheduled or manual Kicktipp read and `scheduler` for notification runs. The UI uses `read` for login, timestamps and report freshness; a successful manual refresh clears an earlier read failure without hiding unresolved notification delivery failures.
+Operational status exposes a `profiles` list with a separate `read` for each profile's latest scheduled or manual Kicktipp read and `scheduler` for its notification runs. Selected-profile responses, and the single-profile compatibility view, also expose these fields at the top level. The UI uses `read` for login, timestamps and report freshness; a successful manual refresh clears an earlier read failure without hiding unresolved notification delivery failures.
 
-The overview includes `reports` for every tracked group and retains `report` for the default group (null if its read failed). Status includes `communities` and `groupErrors`. Per-group `readError` must render as a failure, never an empty successful round. Membership discovery responses are invalidated on account edits or logout; the Add action persists subscriptions immediately through revision-checked admin saves.
+The selected profile's overview includes `reports` for every tracked pool and retains `report` for its default pool (null if that read failed). Each profile's status includes `communities` and `groupErrors`. Per-pool `readError` must render as a failure, never an empty successful round. Membership discovery responses are invalidated on profile/account edits or logout; the Add action persists that profile's subscriptions immediately through revision-checked admin saves.
 
 Custom reminders permit 1–10 positive fractional hours up to 168. An empty list is allowed only when no destinations are configured. Saving in the web UI applies configuration without a container restart. Settings changed externally still require a restart. Browser API tests and process/container fixtures must never contact real Kicktipp accounts or real notification destinations.

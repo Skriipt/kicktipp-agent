@@ -80,6 +80,63 @@ fixtureReports=[{...fixtureReport(),matches:[],needsBetCount:0,bonusCheckFailed:
 document.querySelector('[data-page=overview]').click();await flush();
 assert('failed bonus check shown explicitly',!$('#bonus-section').hidden&&$('#bonus-questions').textContent.includes('could not be checked')&&$('#match-title').textContent!=='All predictions submitted');
 fixtureReports=null;
+
+// Both profiles share one endpoint but every operation carries its own ID.
+const firstProfile = selectedProfile;
+const firstSaved = structuredClone(fixtureProfiles.find(item => item.id === firstProfile));
+window.confirm = () => true;
+$('#add-profile').click();
+assert('new profile clears account and secrets',!config&&$('#email').value===''&&$('#password').value===''&&$('#mcp-token').value==='');
+$('#profile-name').value='Family';$('#email').value='family@example.com';$('#password').value='family-fixture-password';$('#community').value='family-pool';
+$('#account-form').requestSubmit();await flush();
+const secondProfile = selectedProfile;
+assert('two profiles configured',profiles.length===2&&secondProfile!==firstProfile&&config.name==='Family');
+assert('new profile defaults independent',config.readOnly&&config.notifications.channels.length===0&&config.notifications.warnHours.length===0);
+assert('new profile discovers only its own memberships',!!$('[data-add-pool="family-league"]')&&!$('[data-add-pool="league"]'));
+$('[data-add-pool="family-league"]').click();await flush();
+assert('pool subscriptions are scoped to second profile',config.account.communities.join(',')==='family-pool,family-league'&&JSON.stringify(fixtureProfiles.find(item=>item.id===firstProfile))===JSON.stringify(firstSaved));
+assert('pool add request explicitly scoped',fixtureRequests.filter(item=>item.path.endsWith('/config')&&item.body?.account?.communities?.includes('family-league')).at(-1).profile===secondProfile);
+document.querySelector('[data-page=agent]').click();$('#permission').checked=true;$('#permission').dispatchEvent(new Event('change'));$('#save-permission').click();await flush();
+assert('permission write targets selected profile',fixtureRequests.filter(item=>item.body&&'readOnly'in item.body).at(-1).profile===secondProfile);
+document.querySelector('[data-page=notifications]').click();$('#custom-hours').value='4';$('#add-time').click();$('#save-notifications').click();await flush();
+assert('reminders stay on second profile',fixtureProfiles.find(item=>item.id===secondProfile).notifications.warnHours.join(',')==='4'&&JSON.stringify(fixtureProfiles.find(item=>item.id===firstProfile))===JSON.stringify(firstSaved));
+$('#profile-select').value=firstProfile;$('#profile-select').dispatchEvent(new Event('change'));await flush();
+assert('profile switch restores first settings',selectedProfile===firstProfile&&config.account.email===firstSaved.account.email&&JSON.stringify(config.notifications)===JSON.stringify(firstSaved.notifications));
+assert('profile switch clears secret fields',$('#password').value===''&&$('#channel-secret').value===''&&$('#mcp-token').value==='');
+assert('profile switch restores own subscriptions and discoveries',JSON.stringify(config.account.communities)===JSON.stringify(firstSaved.account.communities)&&!$('#pool-list').textContent.includes('family-league'));
+$('#custom-hours').value='9';$('#add-time').click();window.confirm=()=>false;
+$('#profile-select').value=secondProfile;$('#profile-select').dispatchEvent(new Event('change'));await flush();
+assert('cancelled switch preserves unsaved edits',selectedProfile===firstProfile&&$('#profile-select').value===firstProfile&&hours.includes(9));
+window.confirm=()=>true;
+let releaseProfileDiscovery;fixtureAccountDelay=new Promise(resolve=>releaseProfileDiscovery=resolve);
+document.querySelector('[data-page=account]').click();$('#check-account').click();await flush();
+fixtureAccountDelay=null;
+$('#profile-select').value=secondProfile;$('#profile-select').dispatchEvent(new Event('change'));await flush();
+releaseProfileDiscovery();await flush();
+assert('late discovery cannot cross profile boundary',selectedProfile===secondProfile&&$('#pool-list').textContent.includes('family-league')&&!$('#pool-list').textContent.includes('new-pool'));
+$('#profile-select').value=firstProfile;$('#profile-select').dispatchEvent(new Event('change'));await flush();
+let releaseOldProfile;fixtureOverviewDelay=new Promise(resolve=>releaseOldProfile=resolve);
+document.querySelector('[data-page=overview]').click();await flush();
+$('#profile-select').value=secondProfile;$('#profile-select').dispatchEvent(new Event('change'));await flush();
+fixtureOverviewDelay=null;releaseOldProfile();await flush();
+assert('late profile result cannot overwrite selection',selectedProfile===secondProfile&&config.account.community==='family-pool'&&overview.report.community==='family-pool');
+assert('profile overview request explicitly scoped',fixtureRequests.filter(item=>item.path.endsWith('/overview')).at(-1).profile===secondProfile);
+document.querySelector('[data-page=account]').click();$('#profile-name').value='Family renamed';$('#account-form').requestSubmit();await flush();
+assert('profile renamed without changing id',selectedProfile===secondProfile&&config.name==='Family renamed');
+window.confirm=()=>false;$('#remove-profile').click();await flush();assert('removal requires confirmation',profiles.length===2);
+window.confirm=()=>true;$('#remove-profile').click();await flush();
+assert('remove returns to remaining profile',profiles.length===1&&selectedProfile===firstProfile&&config.account.email===firstSaved.account.email);
+$('#remove-profile').click();await flush();
+assert('last removal returns to setup',profiles.length===0&&!config&&!$('#account').hidden&&!$('#setup-banner').hidden);
+$('#email').value='restored@example.com';$('#password').value='restored-fixture-password';$('#community').value='friends';$('#account-form').requestSubmit();await flush();
+assert('setup works again after last removal',profiles.length===1&&config.account.email==='restored@example.com');
+// Another admin can remove the selected profile; reload must recover to setup.
+fixtureProfiles=[];fixtureConfig=null;fixtureRevision=String(Number(fixtureRevision)+1);
+$('#reload-config').click();await flush();
+assert('reload recovers externally removed profile',profiles.length===0&&!config&&!$('#setup-banner').hidden);
+$('#email').value='restored@example.com';$('#password').value='restored-fixture-password';$('#community').value='friends';$('#account-form').requestSubmit();await flush();
+
+
 $('#logout').click();assert('logout clears tokens',$('#mcp-token').value===''&&$('#admin-token').value===''&&$('#authenticated').hidden);
 $('#admin-token').value='fixture-admin-token';$('#login-form').requestSubmit();await flush();document.querySelector('[data-language=en]').click();document.querySelector('[data-page=overview]').click();await flush();
 assert('saved-account login discovers memberships automatically',$('#pool-list').textContent.includes('league'));

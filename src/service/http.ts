@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { once } from 'node:events';
 import { createMcpHandler } from '@modelcontextprotocol/server';
-import { createMcpServer, discardSession } from '../server.js';
+import { createMcpServer, discardSession, type McpServerOptions } from '../server.js';
 import { kicktippQueue, SerialQueue } from './queue.js';
 import { createWebHandler, type WebAdminOptions } from './web-http.js';
 
@@ -16,6 +16,7 @@ export interface HttpServiceOptions {
   allowedOrigins?: string[];
   /** Must contain operational status only, never configuration secrets. */
   status: () => unknown;
+  profileAccess?: Pick<McpServerOptions, 'profiles' | 'withProfile'>;
 }
 
 export interface HttpService {
@@ -66,7 +67,7 @@ export async function startHttpService(options: HttpServiceOptions): Promise<Htt
   const web = options.web ? createWebHandler(options.web, gate) : undefined;
   const origins = new Set(options.allowedOrigins ?? []);
   const handler = createMcpHandler(
-    () => createMcpServer({ lockedConfiguration: true, serviceStatus: options.status }),
+    () => createMcpServer({ lockedConfiguration: true, serviceStatus: options.status, ...options.profileAccess }),
     { legacy: 'stateless', maxSubscriptions: 0 },
   );
   let stopping = false;

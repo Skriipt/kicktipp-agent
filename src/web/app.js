@@ -1,6 +1,25 @@
 'use strict';
 
 const messages = {
+  "profile": { "en": "Profile", "de": "Profil" },
+  "profileCount": { "en": "{count} profiles", "de": "{count} Profile" },
+  "profileHelp": { "en": "Account, reminders and permissions belong to the selected profile.", "de": "Konto, Erinnerungen und Berechtigungen gehören zum ausgewählten Profil." },
+  "profileName": { "en": "Profile name", "de": "Profilname" },
+  "profileNameHelp": { "en": "Choose a recognizable name so you and your agent can tell profiles apart.", "de": "Wähle einen eindeutigen Namen, damit du und dein Agent die Profile unterscheiden können." },
+  "defaultProfileName": { "en": "My profile", "de": "Mein Profil" },
+  "newProfile": { "en": "New profile", "de": "Neues Profil" },
+  "addProfile": { "en": "Add profile", "de": "Profil hinzufügen" },
+  "cancel": { "en": "Cancel", "de": "Abbrechen" },
+  "removeProfile": { "en": "Remove profile", "de": "Profil entfernen" },
+  "removeProfileConfirm": { "en": "Remove “{name}” from this service? Its reminders will stop. Saved history is kept. Unsaved edits will be discarded.", "de": "„{name}“ aus diesem Dienst entfernen? Seine Erinnerungen werden beendet. Gespeicherte Verlaufsdaten bleiben erhalten. Ungespeicherte Änderungen werden verworfen." },
+  "discardProfileEdits": { "en": "Discard unsaved edits and switch profiles?", "de": "Ungespeicherte Änderungen verwerfen und das Profil wechseln?" },
+  "profileNameRequired": { "en": "Enter a profile name.", "de": "Gib einen Profilnamen ein." },
+  "profileRemoved": { "en": "Profile removed. Saved history has been kept.", "de": "Profil entfernt. Gespeicherte Verlaufsdaten wurden beibehalten." },
+  "agentProfiles": { "en": "Ask your agent to call get_profiles, then use the returned profile ID in each tool call. With one profile, selection is optional; with several, the agent must choose explicitly.", "de": "Dein Agent ruft get_profiles auf und verwendet die zurückgegebene Profil-ID bei jedem Werkzeugaufruf. Bei einem Profil ist die Auswahl optional, bei mehreren muss der Agent ausdrücklich eines auswählen." },
+  "agentProfileId": { "en": "Selected profile: {name} · ID: {id}. Permissions below apply only to this profile.", "de": "Ausgewähltes Profil: {name} · ID: {id}. Die Berechtigung unten gilt nur für dieses Profil." },
+  "error_profile_required": { "en": "Choose a profile first.", "de": "Wähle zuerst ein Profil aus." },
+  "error_profile_not_found": { "en": "This profile no longer exists. Select another profile or reload the settings.", "de": "Dieses Profil existiert nicht mehr. Wähle ein anderes Profil oder lade die Einstellungen neu." },
+  "error_duplicate_profile_name": { "en": "A profile with this name already exists. Choose a different name.", "de": "Ein Profil mit diesem Namen existiert bereits. Wähle einen anderen Namen." },
   "error_restart_required": { "en": "The settings file changed outside this page. Restart the service to load it.", "de": "Die Einstellungsdatei wurde außerhalb dieser Seite geändert. Starte den Dienst neu, um sie zu laden." },
   "overview": {
     "de": "Übersicht",
@@ -139,8 +158,8 @@ const messages = {
     "en": "Default pool for your agent"
   },
   "singlePool": {
-    "de": "Erinnerungen gelten für alle hinzugefügten Tipprunden. Die Standardgruppe wird für Agent und CLI verwendet.",
-    "en": "Reminders cover all added pools. The default pool is used by your agent and CLI."
+    "de": "Jedes Profil hat eigene Tipprunden. Erinnerungen gelten für alle hinzugefügten Gruppen; die Standardgruppe wird für Agent und CLI verwendet.",
+    "en": "Each profile has its own pools. Reminders cover all added pools; the default pool is used by your agent and CLI."
   },
   "checkLogin": {
     "de": "Anmelden und Gruppen laden",
@@ -159,16 +178,16 @@ const messages = {
     "en": "Access token"
   },
   "tokenHelp": {
-    "de": "Im MCP-Client als Bearer-Token hinterlegen.",
-    "en": "Use this as the bearer token in your MCP client."
+    "de": "Dieses Bearer-Token gibt deinem Agenten Zugriff auf alle Profile.",
+    "en": "This bearer token gives your agent access to all profiles."
   },
   "permission": {
     "de": "Tipps abgeben und ändern",
     "en": "Submit and edit predictions"
   },
   "permissionOff": {
-    "de": "Ausgeschaltet. Der Agent darf nur lesen.",
-    "en": "Off. The agent can only read."
+    "de": "Ausgeschaltet. Der Agent darf dieses Profil nur lesen.",
+    "en": "Off. The agent can only read this profile."
   },
   "hoursLabel": {
     "de": "Stunden vor Abgabe",
@@ -632,6 +651,11 @@ let token = '';
 let epoch = 0;
 let config = null;
 let revision = '';
+let profiles = [];
+let selectedProfile = null;
+let creatingProfile = false;
+let profileLoading = false;
+let activeActions = 0;
 let overview = null;
 let currentPage = 'overview';
 let channelDrafts = [];
@@ -647,7 +671,7 @@ let discoveryRequest = 0;
 let loadingPools = false;
 
 function accountKey() {
-  return JSON.stringify([$('#email').value.trim().toLowerCase(), $('#site').value, $('#password').value]);
+  return JSON.stringify([selectedProfile, $('#email').value.trim().toLowerCase(), $('#site').value, $('#password').value]);
 }
 function matchesSavedIdentity() {
   return !!config && config.account.email.trim().toLowerCase() === $('#email').value.trim().toLowerCase() && config.account.site === $('#site').value;
@@ -767,11 +791,17 @@ function errorKey(error) {
 }
 function showError(target, error) {
   if (error.code === 'stale_session') return;
-  if (error.code === 'config_conflict') $('#conflict-banner').hidden = false;
+  if (['config_conflict', 'profile_not_found'].includes(error.code)) $('#conflict-banner').hidden = false;
   if (error.code === 'unauthorized') message($('#login-feedback'), 'error_unauthorized', {}, true);
   else message(target, errorKey(error), {}, true);
 }
-async function api(path, body) {
+async function api(path, body, unscoped = false) {
+  // Selection travels with each request; a browser selection never changes a
+  // process-wide active profile for another client or the agent.
+  if (!unscoped && selectedProfile && !['profiles', 'profiles/remove'].includes(path)) {
+    if (body === undefined) path += `${path.includes('?') ? '&' : '?'}profile=${encodeURIComponent(selectedProfile)}`;
+    else body = { ...body, profile: selectedProfile };
+  }
   const session = epoch;
   const accessToken = token;
   let response;
@@ -805,6 +835,7 @@ async function action(button, target, operation) {
   if (scope) scope.inert = true;
   locked.forEach(([control]) => { control.disabled = true; });
   button.setAttribute('aria-busy', 'true');
+  activeActions++; renderProfiles();
   clearMessage(target);
   try { await operation(); } catch (error) { showError(target, error); }
   finally {
@@ -812,6 +843,7 @@ async function action(button, target, operation) {
     if (scope) scope.inert = wasInert;
     if (scope?.id === 'notifications') $('#channel-kind').disabled = !!currentChannel()?.id;
     button.removeAttribute('aria-busy');
+    activeActions--; renderProfiles();
   }
 }
 function logout() {
@@ -819,6 +851,7 @@ function logout() {
   epoch++;
   config = null;
   revision = '';
+  profiles = []; selectedProfile = null; creatingProfile = false; profileLoading = false;
   overview = null;
   channelDrafts = [];
   hours = [];
@@ -832,6 +865,7 @@ function logout() {
   invalidatePools();
   $('#matches').replaceChildren();
   $('#bonus-questions').replaceChildren();
+  $$('[data-panel]').forEach(panel => { panel.inert = false; });
   $('#mcp-token').type = 'password';
   $$('[data-message]').forEach(clearMessage);
   $('#authenticated').hidden = true;
@@ -842,13 +876,84 @@ function logout() {
   document.title = `Kicktipp Agent: ${t('signIn')}`;
   $('#admin-token').focus();
 }
+function renderProfiles() {
+  const select = $('#profile-select');
+  select.replaceChildren();
+  if (creatingProfile || !profiles.length) {
+    const option = document.createElement('option'); option.value = ''; option.textContent = t('newProfile'); select.append(option);
+  }
+  for (const profile of profiles) {
+    const option = document.createElement('option'); option.value = profile.id;
+    option.textContent = `${profile.name} · ${profile.community}`; select.append(option);
+  }
+  select.value = selectedProfile || '';
+  const busy = profileLoading || activeActions > 0;
+  select.disabled = busy || profiles.length === 0;
+  $('#add-profile').disabled = busy || creatingProfile || !profiles.length;
+  $('#cancel-profile').hidden = !creatingProfile || !profiles.length;
+  $('#cancel-profile').disabled = busy;
+  $('#remove-profile').hidden = !config || creatingProfile;
+  $('#remove-profile').disabled = busy;
+  $('#profile-count').hidden = profiles.length < 2;
+  $('#profile-count').textContent = t('profileCount', { count: profiles.length });
+  $('#agent-profile-id').textContent = config && selectedProfile ? t('agentProfileId', { name: config.name, id: selectedProfile }) : '';
+}
+function clearProfileView() {
+  epoch++;
+  overviewRequest++;
+  loadingOverview = false;
+  overview = null;
+  dirty.clear();
+  $$('[data-message]').forEach(clearMessage);
+  clearInvalid();
+  applyEnvelope({ revision, profiles, profile: selectedProfile, configured: profiles.length > 0, config: null }, ['account', 'notifications', 'agent']);
+}
+async function switchProfile(id) {
+  if (profileLoading || activeActions) { renderProfiles(); return; }
+  if (dirty.size && !window.confirm(t('discardProfileEdits'))) { renderProfiles(); return; }
+  const page = currentPage;
+  selectedProfile = id || null;
+  creatingProfile = false;
+  profileLoading = true;
+  clearProfileView();
+  const generation = epoch;
+  $$('[data-panel]').forEach(panel => { panel.inert = true; });
+  try {
+    const envelope = await api('config');
+    applyEnvelope(envelope, ['account', 'notifications', 'agent']);
+    navigate(page);
+    if (config) void discoverPools();
+  } catch (error) { showError($('#profile-feedback'), error); }
+  finally {
+    if (generation === epoch) {
+      profileLoading = false;
+      $$('[data-panel]').forEach(panel => { panel.inert = false; });
+      renderProfiles();
+    }
+  }
+}
+function newProfile() {
+  if (profileLoading || activeActions) return;
+  if (dirty.size && !window.confirm(t('discardProfileEdits'))) return;
+  selectedProfile = null;
+  creatingProfile = true;
+  clearProfileView();
+  $('#profile-name').value = '';
+  navigate('account', false);
+  $('#profile-name').focus();
+}
 function applyEnvelope(envelope, hydrate = []) {
   revision = envelope.revision;
+  profiles = envelope.profiles || [];
+  selectedProfile = envelope.profile || null;
   config = envelope.config;
+  if (config) creatingProfile = false;
+  if (!profiles.length) creatingProfile = true;
   $('#setup-banner').hidden = !!envelope.configured;
   $('#conflict-banner').hidden = true;
   if (envelope.status) overview = { ...overview, status: envelope.status };
   if (hydrate.includes('account')) {
+    $('#profile-name').value = config?.name || t('defaultProfileName');
     $('#email').value = config?.account.email || '';
     $('#password').value = '';
     $('#site').value = config?.account.site || 'de';
@@ -878,13 +983,24 @@ function applyEnvelope(envelope, hydrate = []) {
   $('#password-help').textContent = t(config?.account.hasPassword ? 'savedSecret' : 'requiredPassword');
   $$('[data-page=overview], [data-page=notifications], [data-page=agent]').forEach(button => button.disabled = !config);
   $('#mcp-url').textContent = `${location.origin}/mcp`;
+  renderProfiles();
   renderPermission();
   renderOverview();
 }
 async function saveConfig(patch, panel, target) {
+  // Pool Add/Remove and the account form all save the same named profile.
+  if (panel === 'account') {
+    const name = $('#profile-name').value.trim();
+    if (!name) { fieldError($('#profile-name'), target, 'profileNameRequired'); return; }
+    if (profiles.some(profile => profile.id !== selectedProfile && profile.name.toLowerCase() === name.toLowerCase())) {
+      fieldError($('#profile-name'), target, 'error_duplicate_profile_name'); return;
+    }
+    patch = { ...patch, name };
+  }
   const previousIdentity = JSON.stringify(config ? [config.account.email.toLowerCase(), config.account.site, config.account.community] : null);
   const otherEdits = dirty.has('notifications') || dirty.has('agent');
-  const envelope = await api('config', { revision, ...patch });
+  const isNew = !config && panel === 'account';
+  const envelope = await api(isNew ? 'profiles' : 'config', { revision, ...patch });
   // A response requested before this save belongs to the previous config.
   overviewRequest++;
   loadingOverview = false;
@@ -1169,7 +1285,7 @@ function setLanguage(next) {
   $('meta[name=description]').content = t('description');
   document.title = `Kicktipp Agent: ${t(token ? currentPage : 'signIn')}`;
   $('#password-help').textContent = t(config?.account.hasPassword ? 'savedSecret' : 'requiredPassword');
-  renderOverview(); renderHours(); renderChannelList(); renderChannelLabels(); renderPermission(); renderAccountNotice(); renderPools();
+  renderOverview(); renderHours(); renderChannelList(); renderChannelLabels(); renderPermission(); renderAccountNotice(); renderPools(); renderProfiles();
 }
 
 $('#login-form').addEventListener('submit', event => {
@@ -1187,13 +1303,33 @@ $('#login-form').addEventListener('submit', event => {
   });
 });
 $('#logout').addEventListener('click', logout);
+$('#profile-select').addEventListener('change', event => { void switchProfile(event.target.value); });
+$('#add-profile').addEventListener('click', newProfile);
+$('#cancel-profile').addEventListener('click', () => { void switchProfile(profiles[0]?.id); });
+$('#remove-profile').addEventListener('click', event => {
+  if (!config || !selectedProfile || !window.confirm(t('removeProfileConfirm', { name: config.name }))) return;
+  void action(event.currentTarget, $('#profile-feedback'), async () => {
+    const envelope = await api('profiles/remove', { revision, profile: selectedProfile });
+    epoch++; overviewRequest++; overview = null; loadingOverview = false; dirty.clear();
+    $$('[data-message]').forEach(clearMessage);
+    clearInvalid();
+    applyEnvelope(envelope, ['account', 'notifications', 'agent']);
+    navigate(config ? currentPage : 'account');
+    message($('#profile-feedback'), 'profileRemoved');
+  });
+});
 $$('[data-language]').forEach(button => button.addEventListener('click', () => setLanguage(button.dataset.language)));
 $$('[data-page]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.page)));
 window.addEventListener('hashchange', () => { if (token && !$('#authenticated').hidden) navigate(location.hash.slice(1)); });
 window.addEventListener('beforeunload', event => { if (dirty.size) { event.preventDefault(); event.returnValue = ''; } });
 $('#reload-config').addEventListener('click', event => {
   void action(event.currentTarget, $('#check-feedback'), async () => {
-    const envelope = await api('config');
+    let envelope;
+    try { envelope = await api('config'); }
+    catch (error) {
+      if (error.code !== 'profile_not_found') throw error;
+      envelope = await api('config', undefined, true);
+    }
     overviewRequest++;
     loadingOverview = false;
     overview = null;

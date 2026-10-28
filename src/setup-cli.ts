@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { Page, login, getCommunities } from './browser.js';
 import { setUrlBase } from './url.js';
 import { validateChannel, sendNotification, type NotificationChannel } from './notify/backends.js';
-import { readServiceConfig, serviceConfigFile, writeServiceConfig, type ServiceConfig } from './service/settings.js';
+import { readServiceConfig, serviceConfigFile, writeServiceConfig, type ServiceConfig, type ServiceProfile } from './service/settings.js';
 
 export interface SetupIO {
   ask(question: string, options?: { default?: string; secret?: boolean }): Promise<string>;
@@ -104,43 +104,63 @@ export async function runSetup(options: SetupOptions = {}): Promise<void> {
     if (options.notificationsOnly && !previous) throw new Error('Bitte zuerst die vollständige Einrichtung mit setup ausführen.');
     io.log('Kicktipp einrichten — Zugangsdaten werden nur lokal gespeichert.');
     const config: ServiceConfig = previous ? structuredClone(previous) : {
-      version: 1, account: { email: '', password: '', community: '', site: 'de' },
-      server: { token: crypto.randomBytes(32).toString('base64url'), host: '0.0.0.0', port: 8787, readOnly: true, allowedOrigins: [] },
-      timeZone: 'Europe/Berlin', notifications: { channels: [], warnHours: [24, 6, 1], everyMinutes: 15 },
+      version: 2, profiles: [],
+      server: { token: crypto.randomBytes(32).toString('base64url'), host: '0.0.0.0', port: 8787, allowedOrigins: [] },
     };
+    if (options.notificationsOnly && !config.profiles.length) throw new Error('Bitte zuerst ein Profil einrichten.');
+    let profile = config.profiles[0];
+    if (config.profiles.length && (!options.notificationsOnly || config.profiles.length > 1)) {
+      const choices = config.profiles.map((entry) => `${entry.name} (${entry.id})`);
+      if (!options.notificationsOnly) choices.push('Neues Profil hinzufügen');
+      const selected = await choose(io, 'Profil', choices);
+      profile = config.profiles[choices.indexOf(selected)];
+    }
+    const existing = profile ? structuredClone(profile) : undefined;
+    if (!profile) {
+      const name = config.profiles.length ? await required(io, 'Profilname') : 'Default';
+      profile = {
+        id: config.profiles.length ? `profile-${crypto.randomBytes(8).toString('hex')}` : 'default', name,
+        account: { email: '', password: '', community: '', site: 'de' }, readOnly: true,
+        timeZone: 'Europe/Berlin', notifications: { channels: [], warnHours: [24, 6, 1], everyMinutes: 15 },
+      } satisfies ServiceProfile;
+      config.profiles.push(profile);
+    }
     if (!options.notificationsOnly) {
-      config.account.email = await required(io, 'Kicktipp E-Mail', { default: config.account.email });
-      const password = await io.ask(`Kicktipp Passwort${previous ? ' (Enter: bisheriges behalten)' : ''}`, { secret: true });
-      config.account.password = password || config.account.password;
-      if (!config.account.password) config.account.password = await required(io, 'Kicktipp Passwort', { secret: true });
-      config.account.site = await choose(io, 'Kicktipp-Seite', ['de', 'com'], config.account.site) as 'de' | 'com';
+      profile.account.email = await required(io, 'Kicktipp E-Mail', { default: profile.account.email });
+      const password = await io.ask(`Kicktipp Passwort${existing ? ' (Enter: bisheriges behalten)' : ''}`, { secret: true });
+      profile.account.password = password || profile.account.password;
+      if (!profile.account.password) profile.account.password = await required(io, 'Kicktipp Passwort', { secret: true });
+      profile.account.site = await choose(io, 'Kicktipp-Seite', ['de', 'com'], profile.account.site) as 'de' | 'com';
+      if (!password && existing && (existing.account.email.toLowerCase() !== profile.account.email.toLowerCase() || existing.account.site !== profile.account.site)) {
+        profile.account.password = await required(io, 'Passwort für das neue Konto', { secret: true });
+      }
       io.log('Prüfe Anmeldung und lade deine Tipprunden …');
-      const communities = await (options.communities ?? discoverCommunities)(config.account.email, config.account.password, config.account.site);
+      const communities = await (options.communities ?? discoverCommunities)(profile.account.email, profile.account.password, profile.account.site);
       if (!communities.length) throw new Error('Keine Tipprunde gefunden. Tritt zunächst auf Kicktipp einer Tipprunde bei.');
-      const sameAccount = previous?.account.email.trim().toLowerCase() === config.account.email.trim().toLowerCase()
-        && previous?.account.site === config.account.site;
-      if (!sameAccount) config.account.player = undefined;
-      config.account.community = await choose(io, 'Tipprunde', communities, config.account.community);
-      config.account.communities = [...new Set([
-        ...(sameAccount ? previous?.account.communities ?? [] : []).filter(group => communities.includes(group)),
-        config.account.community,
+      const sameAccount = existing?.account.email.trim().toLowerCase() === profile.account.email.trim().toLowerCase()
+        && existing?.account.site === profile.account.site;
+      if (!sameAccount) profile.account.player = undefined;
+      profile.account.community = await choose(io, 'Tipprunde', communities, profile.account.community);
+      profile.account.communities = [...new Set([
+        ...(sameAccount ? existing?.account.communities ?? [] : []).filter(group => communities.includes(group)),
+        profile.account.community,
       ])];
-      const player = await io.ask('Spielername für Statistiken (optional)', { default: config.account.player });
-      config.account.player = player.trim() || undefined;
-      config.server.readOnly = !await askYes(io, 'Darf dein Agent Tipps abgeben und ändern?', !config.server.readOnly);
+      const player = await io.ask('Spielername für Statistiken (optional)', { default: profile.account.player });
+      profile.account.player = player.trim() || undefined;
+      profile.readOnly = !await askYes(io, 'Darf dein Agent Tipps abgeben und ändern?', !profile.readOnly);
       for (;;) {
-        const zone = await io.ask('Zeitzone', { default: config.timeZone });
-        try { new Intl.DateTimeFormat('de', { timeZone: zone }); config.timeZone = zone; break; }
+        const zone = await io.ask('Zeitzone', { default: profile.timeZone });
+        try { new Intl.DateTimeFormat('de', { timeZone: zone }); profile.timeZone = zone; break; }
         catch { io.log('Ungültige Zeitzone. Beispiel: Europe/Berlin.'); }
       }
     }
 
     io.log('Benachrichtigungen: mehrere Kanäle sind möglich.');
-    if (config.notifications.channels.length) {
-      io.log(`Gespeichert: ${config.notifications.channels.map((c) => `${c.id} (${c.kind})`).join(', ')}`);
-      if (!await askYes(io, 'Vorhandene Kanäle behalten?', true)) config.notifications.channels = [];
+    if (profile.notifications.channels.length) {
+      io.log(`Gespeichert: ${profile.notifications.channels.map((c) => `${c.id} (${c.kind})`).join(', ')}`);
+      if (!await askYes(io, 'Vorhandene Kanäle behalten?', true)) profile.notifications.channels = [];
     }
-    while (await askYes(io, 'Benachrichtigungskanal hinzufügen?', config.notifications.channels.length === 0)) {
+    while (await askYes(io, 'Benachrichtigungskanal hinzufügen?', profile.notifications.channels.length === 0)) {
       const kind = await choose(io, 'Kanaltyp', ['discord', 'telegram', 'webhook']) as NotificationChannel['kind'];
       const id = `${kind}-${crypto.randomBytes(4).toString('hex')}`;
       let channel: NotificationChannel;
@@ -179,18 +199,18 @@ export async function runSetup(options: SetupOptions = {}): Promise<void> {
           if (!await askYes(io, 'Kanal trotzdem speichern?', false)) continue;
         }
       }
-      config.notifications.channels.push(channel);
+      profile.notifications.channels.push(channel);
     }
-    if (config.notifications.channels.length) {
+    if (profile.notifications.channels.length) {
       for (;;) {
-        const value = await io.ask('Erinnerungen wie viele Stunden vor Anpfiff? (Komma-getrennt)', { default: config.notifications.warnHours.join(',') });
+        const value = await io.ask('Erinnerungen wie viele Stunden vor Anpfiff? (Komma-getrennt)', { default: profile.notifications.warnHours.join(',') });
         const hours = value.split(',').map((part) => Number(part.trim()));
-        if (hours.length <= 10 && hours.every((n) => Number.isFinite(n) && n > 0 && n <= 168)) { config.notifications.warnHours = hours; break; }
+        if (hours.length <= 10 && hours.every((n) => Number.isFinite(n) && n > 0 && n <= 168)) { profile.notifications.warnHours = hours; break; }
         io.log('Bitte 1 bis 10 positive Stundenwerte bis 168 angeben, z. B. 24,6,1.');
       }
       for (;;) {
-        const value = Number(await io.ask('Prüfintervall in Minuten', { default: String(config.notifications.everyMinutes) }));
-        if (Number.isFinite(value) && value >= 1 && value <= 1440) { config.notifications.everyMinutes = value; break; }
+        const value = Number(await io.ask('Prüfintervall in Minuten', { default: String(profile.notifications.everyMinutes) }));
+        if (Number.isFinite(value) && value >= 1 && value <= 1440) { profile.notifications.everyMinutes = value; break; }
         io.log('Bitte einen Wert von 1 bis 1440 eingeben.');
       }
     }

@@ -1,6 +1,6 @@
 /**
- * One queue for the account owned by this process. Kicktipp's page object is
- * mutable, so an entire read or submission must finish before another caller
+ * One queue for all profiles owned by this process. Kicktipp's page object is
+ * mutable and profile activation sets process options, so an entire read or submission must finish before another caller
  * (including the scheduler) starts navigating it.
  */
 export class SerialQueue {

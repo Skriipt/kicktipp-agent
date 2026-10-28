@@ -5,7 +5,7 @@ import { emitJson, setJsonMode } from '../helpers/output.js';
 import { fetchBets } from '../core.js';
 import { buildDeadlineReport, urgencyWarning } from '../analytics/deadline.js';
 import { sendNotification, type NotificationPayload } from '../notify/backends.js';
-import { readServiceConfig } from '../service/settings.js';
+import { readServiceConfig, resolveServiceProfile } from '../service/settings.js';
 import { t } from '../i18n/index.js';
 
 export function registerNotifyCommand(program: Command): void {
@@ -19,7 +19,7 @@ export function registerNotifyCommand(program: Command): void {
     .option('--json', t('cmd.notify.optionJson'))
     .action(async (opts) => {
       if (opts.json) setJsonMode(true);
-      const config = readServiceConfig();
+      const config = resolveServiceProfile(readServiceConfig(), program.opts().profile);
       let payload: NotificationPayload;
       if (opts.test) {
         payload = { summary: t('notify.testSummary'), event: 'test' };
