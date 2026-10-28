@@ -3,7 +3,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 /**
- * Same string as package.json, so the CLI, MCP server, and Desktop pack
+ * Same string as package.json, so the CLI, HTTP service, and MCP server
  * cannot drift from a GitHub release that was cut from this tree.
  */
 export const VERSION: string = readPackageVersion();

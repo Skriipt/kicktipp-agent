@@ -21,3 +21,6 @@ jobs:
       # The MCP integration tests start the compiled dist/server.js.
       - run: npm run build
       - run: npm test
+      - run: npm audit --omit=dev
+      - run: docker compose build
+      - run: node scripts/smoke-container.mjs

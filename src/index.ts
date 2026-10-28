@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import fs from 'node:fs';
+import { serviceConfigFile, readServiceConfig, applyServiceConfig } from './service/settings.js';
 import { VERSION } from './version.js';
-import { spawn } from 'child_process';
 import {
   savePlayer,
   logout,
@@ -15,7 +16,6 @@ import {
   saveUiLanguage,
   saveUiSite,
 } from './config.js';
-import { startSetupListener } from './setup/listener.js';
 import { launchBrowser, getCommunities, getPlayers } from './browser.js';
 import { ask, ensureCommunity, selectCommunity } from './shared.js';
 import { statusClear } from './helpers/spinner.js';
@@ -33,18 +33,17 @@ import { registerGuideCommand } from './commands/guide.js';
 import { registerSyncCommand } from './commands/sync.js';
 import { registerCacheCommand } from './commands/cache.js';
 import { registerStatsCommand } from './commands/stats.js';
-import { registerRivalCommand } from './commands/rival.js';
 import { registerSuggestCommand } from './commands/suggest.js';
 import { registerDeadlineCommand } from './commands/deadline.js';
-import { registerNotifyCommand, registerRemindCommand, registerSetNotifyCommand } from './commands/remind.js';
+import { registerNotifyCommand } from './commands/remind.js';
 import { registerLogCommand } from './commands/log.js';
-import { registerScenarioCommand } from './commands/scenario.js';
-import { registerWhatifCommand } from './commands/whatif.js';
 import { registerAdminCommand } from './commands/admin.js';
-import { registerTuiCommand } from './commands/tui.js';
 import { currentLanguage, parseLanguage, resolveLanguage, setLanguage, t } from './i18n/index.js';
 import { parseSite, resolveBaseUrl, setUrlBase, siteLabel, urlBase } from './url.js';
 
+if (!process.argv.includes('setup') && fs.existsSync(serviceConfigFile())) {
+  applyServiceConfig(readServiceConfig());
+}
 setLanguage(resolveLanguage({ configLanguage: readUiLanguage() }));
 setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 
@@ -100,39 +99,24 @@ program
   });
 
 program
+  .command('setup')
+  .description(t('cmd.setup.description'))
+  .option('--notifications', t('cmd.setup.optionNotifications'))
+  .action(async (opts) => {
+    const { runSetup } = await import('./setup-cli.js');
+    await runSetup({ notificationsOnly: !!opts.notifications });
+  });
+
+program
   .command('login')
   .description(t('cmd.login.description'))
-  .option('--web', t('cmd.login.optionWeb'))
-  .action(async (opts) => {
-    if (!opts.web) {
-      const page = await launchBrowser();
-      try {
-        await selectCommunity(page);
-      } finally {
-        await page.close();
-      }
-      return;
+  .action(async () => {
+    const page = await launchBrowser();
+    try {
+      await selectCommunity(page);
+    } finally {
+      await page.close();
     }
-    const handle = await startSetupListener();
-    console.log(t('login.openPage', { url: handle.url }));
-    if (process.platform === 'darwin') {
-      spawn('open', [handle.url], { detached: true, stdio: 'ignore' }).unref();
-    } else if (process.platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '', handle.url], { detached: true, stdio: 'ignore' }).unref();
-    } else {
-      spawn('xdg-open', [handle.url], { detached: true, stdio: 'ignore' }).unref();
-    }
-    const outcome = await handle.finished;
-    if (outcome === 'saved') {
-      console.log(t('login.connected'));
-      return;
-    }
-    if (outcome === 'timeout') {
-      console.error(t('login.timeout'));
-      process.exit(1);
-    }
-    console.error(t('login.unfinished'));
-    process.exit(1);
   });
 
 program
@@ -235,17 +219,11 @@ registerGuideCommand(program);
 registerSyncCommand(program);
 registerCacheCommand(program);
 registerStatsCommand(program);
-registerRivalCommand(program);
 registerSuggestCommand(program);
 registerDeadlineCommand(program);
-registerRemindCommand(program);
 registerNotifyCommand(program);
-registerSetNotifyCommand(program);
 registerLogCommand(program);
-registerScenarioCommand(program);
-registerWhatifCommand(program);
 registerAdminCommand(program);
-registerTuiCommand(program);
 
 export { program, ensureCommunity, ask };
 

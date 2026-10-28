@@ -9,7 +9,6 @@ import {
   setLanguage,
   t,
 } from '../src/i18n/index.js';
-import { loginPage } from '../src/setup/html.js';
 
 afterEach(() => setLanguage('en'));
 
@@ -72,26 +71,6 @@ describe('resolveLanguage', () => {
 describe('catalogs', () => {
   it('keeps the same keys in de as in en', () => {
     expect(flattenKeys(de).sort()).toEqual(flattenKeys(en).sort());
-  });
-});
-
-describe('setup HTML', () => {
-  it('uses German labels when the language is de', () => {
-    setLanguage('de');
-    const html = loginPage('tok');
-    expect(html).toContain('lang="de"');
-    expect(html).toContain('Kicktipp verbinden');
-    expect(html).toContain('Anmelden');
-    expect(html).not.toContain('Connect Kicktipp');
-  });
-
-  it('stays English by default', () => {
-    const html = loginPage('tok');
-    expect(html).toContain('lang="en"');
-    expect(html).toContain('Connect Kicktipp');
-    expect(html).toContain('kicktipp.de');
-    expect(html).toContain('name="site"');
-    expect(html).toContain('name="language"');
   });
 });
 

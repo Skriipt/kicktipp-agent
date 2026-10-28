@@ -141,6 +141,7 @@ export class Page {
         headers,
         body: currentMethod === 'POST' ? currentBody : undefined,
         redirect: 'manual',
+        signal: AbortSignal.timeout(30_000),
         ...(fresh ? { cache: 'no-store' as const } : {}),
       });
       this.jar.store(currentUrl, res.headers);

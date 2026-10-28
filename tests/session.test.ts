@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { launchBrowser, getCommunities, Page } from '../src/browser.js';
+import { AuthError } from '../src/http/response.js';
 import { CookieJar } from '../src/http/cookie-jar.js';
 import { mockFetch, page as htmlPage, type Handler, type RecordedRequest } from './helpers/mock-fetch.js';
 
@@ -93,7 +94,7 @@ describe('launchBrowser', () => {
     vi.stubEnv('KICKTIPP_PASSWORD', 'wrong');
     const { fetchImpl } = mockFetch(kicktipp());
 
-    await expect(launchBrowser({ sessionFile, fetchImpl })).rejects.toThrow(/Login failed/);
+    await expect(launchBrowser({ sessionFile, fetchImpl })).rejects.toThrow(AuthError);
   });
 
   it('writes the session file with owner-only permissions', async () => {

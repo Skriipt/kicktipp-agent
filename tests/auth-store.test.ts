@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import crypto from 'node:crypto';
 
 let home: string;
 let configFile: string;
@@ -31,6 +32,27 @@ afterEach(() => {
 });
 
 describe('saveAuth', () => {
+  it('keeps stored credentials usable when the container hostname changes', async () => {
+    const config = await loadConfig();
+    config.saveAuth({ email: 'me@example.com', password: 'portable-secret' });
+    vi.spyOn(os, 'hostname').mockReturnValue('replacement-container');
+    expect(await config.loadCredentials()).toEqual({ email: 'me@example.com', password: 'portable-secret' });
+    expect(fs.statSync(path.join(path.dirname(configFile), 'credentials.key')).mode & 0o777).toBe(0o600);
+  });
+
+  it('migrates a legacy machine-bound password on successful read', async () => {
+    const key = crypto.createHash('sha256').update(`kicktipp-agent:${os.hostname()}:${os.userInfo().username}`).digest();
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const encrypted = Buffer.concat([cipher.update('legacy-secret'), cipher.final()]);
+    const legacy = `enc.${Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64')}`;
+    const config = await loadConfig(`[auth]\nemail = me@example.com\npassword = ${legacy}\n`);
+    expect(await config.loadCredentials()).toEqual({ email: 'me@example.com', password: 'legacy-secret' });
+    expect(fs.readFileSync(configFile, 'utf8')).toContain('enc.v2.');
+    vi.spyOn(os, 'hostname').mockReturnValue('new-container');
+    expect((await config.loadCredentials()).password).toBe('legacy-secret');
+  });
+
   it('encrypts a password by default', async () => {
     const config = await loadConfig();
     config.saveAuth({ email: 'me@example.com', password: 'secret' });

@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- Docker Compose service with authenticated HTTP MCP, persistent account data, Docker health checks and graceful shutdown.
+- Terminal setup wizard that verifies Kicktipp login, discovers communities, generates the MCP token and defaults to read-only access.
+- Native Discord, Telegram and generic webhook notifications, multiple destinations, optional test messages and Telegram chat discovery.
+- Internal deadline scheduler with configurable warning windows, durable per-destination delivery history, retry backoff and operational alerts.
+- Authenticated service status showing last/next checks and channel failures; shared serialization of daemon MCP and scheduler operations.
+
+### Changed
+
+- Compose configuration is stored in a portable owner-readable service file; standalone CLI passwords use a random persisted encryption key instead of deriving the key from the machine name.
+- `bet` requires explicit fixture/score or bonus arguments. CLI, regular and bonus submissions, Spielleiter tools, statistics, suggestions, cache and audit/undo remain available.
+- HTTP service account/community settings and notification credentials are configured locally rather than changed by MCP clients.
+- Main documentation now starts with Compose setup and channel-specific onboarding.
+
+### Removed
+
+- Full-screen TUI and interactive prediction grid.
+- Desktop/command notification backends and systemd/cron/ICS generation.
+- Localhost setup web page and MCP `connect_account` / `set_notify` tools.
+- Rival analysis, standings scenarios and what-if replays.
+- Claude Desktop MCPB bundle and its release packaging workflow.
+
 ## [1.3.0] - 2026-09-03
 
 ### Changed
