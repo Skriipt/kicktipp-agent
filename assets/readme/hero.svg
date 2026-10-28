@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">kicktipp-agent — Check tips. Get reminders.</title>
+  <desc id="desc">A football pitch and a prediction slip connect Kicktipp's matchday to your own AI assistant.</desc>
+  <rect width="1200" height="400" rx="20" fill="#112d26"/>
+  <g id="pitch" fill="none" stroke="#3f6659" stroke-width="2">
+    <path d="M810 40H1150V360H810Z M980 40V360"/>
+    <circle cx="980" cy="200" r="60"/>
+    <path d="M810 120H860V280H810 M1150 120H1100V280H1150"/>
+  </g>
+  <g id="title-block" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="58" y="78" font-size="22" font-weight="600" letter-spacing="3" fill="#b7c9be">BEFORE KICKOFF</text>
+    <text x="54" y="169" font-size="78" font-weight="700" letter-spacing="-3" fill="#f4f1e8">kicktipp-agent</text>
+    <text x="58" y="240" font-size="42" fill="#f4f1e8">Check tips. Get reminders.</text>
+    <text x="58" y="301" font-size="27" fill="#b7c9be">Your AI assistant, connected to Kicktipp.</text>
+    <path d="M58 344H145" stroke="#c4e887" stroke-width="5"/>
+  </g>
+  <g id="prediction-slip" transform="translate(850 100)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect width="245" height="200" rx="12" fill="#f4f1e8"/>
+    <text x="25" y="43" font-size="23" font-weight="650" fill="#112d26">MY TIP</text>
+    <path d="M25 63H220" stroke="#b7c9be" stroke-width="2"/>
+    <text x="122" y="143" text-anchor="middle" font-size="66" font-weight="700" fill="#112d26">2 : 1</text>
+    <path d="M179 33L187 41L201 24" fill="none" stroke="#3f6659" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M25 172H220" stroke="#b7c9be" stroke-width="2" stroke-dasharray="5 7"/>
+  </g>
+</svg>

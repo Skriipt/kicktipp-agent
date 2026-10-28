@@ -1,17 +1,31 @@
+<p align="center">
+  <img src="assets/readme/hero.svg" width="100%" alt="kicktipp-agent — Check tips. Get reminders. Your AI assistant, connected to Kicktipp.">
+</p>
+
 # kicktipp-agent
 
-A self-hosted Kicktipp service for your AI assistant, with multiple profiles and automatic reminders through **Discord, Telegram and webhooks**. Start it with Docker Compose, connect your agent over MCP, and let the service check for missing tips even when no agent is connected.
+A self-hosted service that checks your Kicktipp pools, reminds you about missing tips, and lets your AI assistant read or submit predictions through MCP. Manage accounts and notifications in a local website. No AI subscription is needed for reminders.
 
 [![CI](https://github.com/Skriipt/kicktipp-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Skriipt/kicktipp-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Quick start](#quick-start) · [Local website](#local-website) · [Profiles](#profiles) · [Notifications](#notifications) · [Connect your agent](#connect-your-agent) · [CLI](#cli) · [Operations](#operations)
+[Quick Start](#quick-start) · [Reminders](#set-up-reminders) · [Connect your agent](#connect-your-agent) · [Limitations](#limitations) · [Service reference](docs/service-reference.md)
 
-The service supports [kicktipp.de](https://www.kicktipp.de/) and [kicktipp.com](https://www.kicktipp.com/). It reads the website over HTTP without browser automation. This is an unofficial client; website changes can require parser updates.
+## What can it do?
 
-## Quick start
+- **Check your pools:** fixtures, saved tips, deadlines, results, rankings, tables and scoring rules.
+- **Remind you:** missing match tips and incomplete bonus answers, sent to Discord, Telegram or a webhook. Checks run even when your agent is offline.
+- **Work with your agent:** answer questions, suggest a slip from Kicktipp's published odds, and submit regular or bonus tips when you enable writes. Saved tips are checked with a fresh read.
+- **Keep accounts separate:** named profiles with their own pools, sessions, reminders and write permissions, all in one container.
+- **Go further:** season sync, statistics, submission history, a scriptable CLI, and Spielleiter tools for accounts that already have those rights.
 
-Install Docker with the Compose plugin, then run:
+For example, ask your connected agent: **“Which upcoming matches still need my tip?”** Then: **“Suggest a slip and explain it. Don't submit anything yet.”**
+
+**It does not run an AI model, guarantee winning predictions, or place tips just because a reminder is due.** Discord and Telegram receive notifications; they are not chat interfaces to the agent. The local website handles setup and status; predictions are submitted through MCP or the CLI.
+
+## Quick Start
+
+You need [Docker with Docker Compose](https://docs.docker.com/compose/install/), Git, and a Kicktipp account that has already joined a prediction pool.
 
 ```bash
 git clone https://github.com/Skriipt/kicktipp-agent.git
@@ -20,11 +34,179 @@ docker compose up -d --build
 docker compose exec kicktipp node dist/service/main.js web-token
 ```
 
-Open **http://localhost:8787** and enter the web access token printed by the command. Add your first profile, check its Kicktipp login, choose its prediction pool and save. Use **Add profile** for another account or pool; both run in the same instance. The website starts in English; use **EN / DE** to switch languages.
+1. Open **http://localhost:8787** on the computer running Docker. Unlock it with the administrator token printed above.
+2. In **Account**, name your first profile, enter your Kicktipp login and choose `.de` or `.com`. Click **Sign in and load pools**, select your pool, then **Save**.
+3. Open **Overview** to check upcoming matches and bonus questions. Add more pools under **Account** or another account with **Add profile**.
+4. Set up [reminders](#set-up-reminders), [connect your agent](#connect-your-agent), or use both.
 
-You can also use the terminal wizard: `docker compose run --rm kicktipp setup`, followed by `docker compose restart kicktipp`. The terminal wizard retains its existing reminder defaults. The website starts with no notification channels or prescribed reminder times.
+The website supports English and German. New profiles start **read-only**, with no notification channels or reminder times. Website saves apply immediately. Keep the service running for reminders.
 
-Check the service:
+<details>
+<summary>Docker is on another computer, or port 8787 is busy</summary>
+
+From your own computer, open an SSH tunnel to the Docker host:
+
+```bash
+ssh -N -L 8787:127.0.0.1:8787 your-user@your-server
+```
+
+Keep that terminal open, then visit `http://localhost:8787`. Local MCP clients can use the tunnel too. Compose deliberately binds to localhost.
+
+If port 8787 is already in use, start with `KICKTIPP_PORT=8788 docker compose up -d --build` and use port 8788 in your browser, MCP client and SSH forwarding. Keep that setting in a local `.env` file for later Compose commands.
+
+</details>
+
+<details>
+<summary>Use the terminal setup instead</summary>
+
+```bash
+docker compose run --rm kicktipp setup
+docker compose restart kicktipp
+```
+
+Follow the prompts for account, pool, permissions and notifications. Unlike the website, a newly created wizard profile suggests reminder times of 24, 6 and 1 hour; you can change them.
+
+This fork is built from this repository. Do not install the unscoped npm package to get this version.
+
+</details>
+
+## Set up reminders
+
+Select a profile and open **Notifications**. Add a destination, choose when to remind you (for example, 24, 6 and 1 hour before the deadline), send a test, then **Save**. Times apply to all destinations and added pools in that profile.
+
+<details>
+<summary>Discord — send reminders to a channel</summary>
+
+1. In Discord, open your text channel's **Settings → Integrations → Webhooks**. You need permission to manage webhooks.
+2. Create a webhook and copy its URL. No Discord bot is needed.
+3. In the local website's **Notifications**, add **Discord** and paste the URL.
+4. Choose reminder times, use **Send test message**, check Discord, and **Save**.
+
+Keep the URL private. Mentions are disabled in reminder messages. For forum threads, the URL may need a `thread_id` parameter. [Discord's webhook guide](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks).
+
+</details>
+
+<details>
+<summary>Telegram — create a bot and find your chat</summary>
+
+1. Message [@BotFather](https://t.me/BotFather), send `/newbot`, and follow its instructions. Keep the bot token private.
+2. Open your new bot and send `/start`. For a group, add the bot and send `/start@YourBotUsername` there.
+3. From the repository directory, run:
+
+   ```bash
+   docker compose run --rm kicktipp setup --notifications
+   docker compose restart kicktipp
+   ```
+
+4. Select your profile, keep any existing channels, add **Telegram**, and enter the bot token. Leave **Chat-ID** empty to discover your chat, then select it and send a test. Finish the wizard to save.
+
+Already know the chat ID? Add **Telegram** in the website instead, with the token and ID. The website does not discover chats. If another application reads this bot's updates or uses a Telegram webhook, discovery may fail; enter the ID manually. The bot must be allowed to post. [Telegram bot setup](https://core.telegram.org/bots/tutorial).
+
+</details>
+
+<details>
+<summary>Webhooks and reminder timing</summary>
+
+Add **Webhook** with a receiver that accepts JSON `POST` requests. Redirects are not followed. See [payload examples and event types](docs/service-reference.md#generic-webhook-payloads).
+
+Use up to ten reminder times, each greater than zero and at most 168 hours; fractions such as `2.5` are supported. The default check interval is 15 minutes, so delivery is approximate. Only missing tips with future kickoffs and editable bonus answers with known future deadlines trigger reminders. Unknown bonus deadlines are shown without inventing a reminder time.
+
+Successful deliveries are remembered across restarts, separately per destination. Failed destinations retry with backoff. Login/check failures also send alerts. A crash after delivery can cause a duplicate. Scheduled summaries currently use German. [Delivery details](docs/service-reference.md#reminder-delivery).
+
+</details>
+
+## Connect your agent
+
+MCP (Model Context Protocol) lets an assistant call this service's tools. Start the service and save a profile first. Open **Connect agent** to reveal the **MCP token**; it is different from the website's administrator token.
+
+| Client setting | Value |
+| --- | --- |
+| Server URL | `http://127.0.0.1:8787/mcp` |
+| Transport | Streamable HTTP |
+| HTTP header | `Authorization: Bearer YOUR_MCP_TOKEN` |
+
+**One MCP token can access every configured profile.** Start with `get_status` and `get_profiles`. With multiple profiles, pass the exact returned `profile` ID on every profile-specific call; the website's selection does not select the agent's profile. MCP uses that profile's default pool. [Profile routing](docs/service-reference.md#profile-selection-for-agents).
+
+<details>
+<summary>Claude Code — connect locally</summary>
+
+In a terminal on the same computer (or with the SSH tunnel open):
+
+```bash
+read -rsp 'Kicktipp MCP token: ' KICKTIPP_MCP_TOKEN; echo
+claude mcp add --transport http kicktipp http://127.0.0.1:8787/mcp \
+  --header "Authorization: Bearer $KICKTIPP_MCP_TOKEN"
+```
+
+Enter the MCP token at the prompt. This saves a credential in your Claude configuration; keep it private. Open Claude Code, check `/mcp`, then ask it to call `get_status` and `get_profiles`. The token belongs in client configuration, never in a chat prompt or committed file. [Official Claude Code instructions](https://code.claude.com/docs/en/mcp).
+
+This recipe is for **Claude Code**. A hosted Claude client needs a reachable HTTPS endpoint and a compatible authentication method; it cannot reach your computer's localhost. Kicktipp provides bearer authentication, not an OAuth server.
+
+</details>
+
+<details>
+<summary>Codex — connect locally</summary>
+
+Add this to your user configuration at `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.kicktipp]
+url = "http://127.0.0.1:8787/mcp"
+bearer_token_env_var = "KICKTIPP_MCP_TOKEN"
+```
+
+In Bash, enter the MCP token without writing it into shell history, then launch Codex from that terminal:
+
+```bash
+read -rsp 'Kicktipp MCP token: ' KICKTIPP_MCP_TOKEN; echo
+export KICKTIPP_MCP_TOKEN
+codex
+```
+
+Check `/mcp`, then ask for `get_status` and `get_profiles`. The environment variable must exist in the process running Codex; a desktop launch does not automatically inherit a terminal's variables. [Official MCP configuration](https://developers.openai.com/codex/mcp).
+
+</details>
+
+<details>
+<summary>ChatGPT — a private custom plugin through an OpenAI Tunnel</summary>
+
+Use OpenAI's **Secure MCP Tunnel** to reach your local service without publishing port 8787. You need permission to add custom MCP servers in ChatGPT and access to Platform tunnels; availability depends on your account and workspace.
+
+1. Create a tunnel in [Platform tunnel settings](https://platform.openai.com/settings/organization/tunnels), associate your ChatGPT workspace, and copy the tunnel ID.
+2. Install OpenAI's `tunnel-client` on the Docker host.
+3. Configure its HTTP target as `http://127.0.0.1:8787/mcp`, with the Kicktipp bearer header supplied locally.
+4. In **ChatGPT → Plugins → + → Add custom MCP server**, choose **Tunnel**, select yours, and create and install the plugin.
+5. Select it with `@` and ask for `get_status` and `get_profiles`.
+
+**Follow the [copy-and-paste tunnel guide](docs/chatgpt-tunnel.md)** for the exact commands, secret prompts and authentication settings. The tunnel and Kicktipp service must both stay running. This creates a private integration; it is not a public plugin listing. [Official tunnel documentation](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
+
+</details>
+
+<details>
+<summary>Other MCP clients, remote access and stdio</summary>
+
+Use the URL and bearer header above in any client supporting Streamable HTTP. Retrieve the MCP token locally with `docker compose run --rm kicktipp connection` if needed.
+
+For another computer, use the SSH tunnel above. A hosted client needs an HTTPS route it can reach or a supported private tunnel. If you configure a reverse proxy, preserve `Authorization`; browser clients need their exact origin in `server.allowedOrigins`. Restart after editing the configuration file. Notification webhook URLs are outbound destinations, not MCP addresses.
+
+For stdio-only clients, see [the separate-process instructions](docs/service-reference.md#optional-stdio-clients). Use one Kicktipp process per data volume.
+
+</details>
+
+### Allowing submissions
+
+Enable writes for the intended profile in **Connect agent**. Ask your agent to show its proposed tips before submitting. Submission tools support `dry_run=true` for a preview; on a write-enabled profile, a call without dry run can place real tips. Confirmation behavior depends on your client.
+
+A result of `submission_unknown` means the save could not be fully verified. **Read the saved tips before retrying.** The service does not automatically repeat a submission. Spielleiter actions require existing Kicktipp permissions and retain member confirmation safeguards.
+
+## Limitations
+
+- **Unofficial website client:** supports kicktipp.de and kicktipp.com by reading HTML over HTTP. Website changes can break it. Several MCP matchday inputs are limited to 1–34; not every competition format is covered.
+- **Suggestions are estimates:** based on published odds and scoring rules, with generic fallback probabilities when odds are missing. There is no built-in news or injury research. Hidden player scores remain subject to Kicktipp's visibility rules.
+- **Self-hosting needs care:** keep the host online. One service process per volume; shared-volume replicas are unsupported. Credentials in `/data/service.json` are plain text protected by file permissions, not encryption.
+- **Local access by default:** localhost is private to the host. The MCP token covers all profiles; separate profiles do not restrict a client's account access. Keep credentials and backups private.
+
+## Keep it running
 
 ```bash
 docker compose ps
@@ -32,284 +214,30 @@ docker compose logs --tail=50 kicktipp
 docker compose exec kicktipp node dist/service/main.js status
 ```
 
-This fork is not published to npm. The unscoped npm package belongs to the upstream project; build this repository to use this version.
+An unhealthy login or failed delivery can exist even when Docker reports a healthy container. The website's **Overview** shows those separately.
 
-## What it does
+<details>
+<summary>Updates, backups, CLI commands and troubleshooting</summary>
 
-- Runs any number of named profiles in one instance, each with its own account, pools, permissions and reminders.
-- Reads matches, schedules, results, your tips, deadlines and other players' tip-completeness status.
-- Retrieves rankings, season overviews, league tables and community scoring rules.
-- Submits regular and bonus tips when write access is enabled, then verifies the saved values.
-- Keeps Spielleiter tools for listing members and reading or submitting their tips, with the existing member confirmation safeguards.
-- Provides season synchronization, statistics and odds-based suggestions (`safe`, `ev`, `contrarian`, `auto`). Suggestions do not submit anything themselves.
-- Keeps a local cache and submission audit log, with CLI undo for the latest eligible submission.
-- Sends missing-tip reminders independently of MCP clients and reports account/connectivity problems.
-
-No language model is bundled. Your agent connects when needed; reminder checks do not require an LLM.
-
-## Local website
-
-The local website and MCP share port 8787. No additional container, database or hosted frontend is needed. Compose binds the port to this computer's loopback interface.
-
-- **Overview:** upcoming matches and incomplete bonus questions for every added pool in the selected profile, last successful check, next scheduled check and notification delivery problems. “Check again” reads Kicktipp; it does not submit predictions or send reminders.
-- **Notifications:** add, edit, test or remove Discord, Telegram and webhook destinations. Choose your own reminder times, including fractions such as `2.5` hours (`2,5` also works in the form). Use up to ten values greater than zero and at most 168 hours; the times apply to every channel. No preset times are required. With no channels, reminders can stay unconfigured.
-- **Account:** name the selected profile and sign in to discover its existing Kicktipp pools. Click **Add** beside each pool you want to follow; overview and reminders include it immediately. The list also loads automatically when you unlock a configured profile. You can remove pools and choose the default pool for the agent; at least one pool must remain per profile. Adding a pool here does not join it on Kicktipp.
-- **Connect agent:** view the MCP address, explicitly reveal its token and control whether the agent may submit or edit predictions for the selected profile. Read-only is the default.
-
-**Save applies changes immediately.** Active Kicktipp operations finish before account settings change. A stale browser cannot overwrite a newer save: reload the configuration after a conflict. Configurations edited through the terminal still require a service restart.
-
-The website uses a separate **administrator token**, stored at `/data/web-admin-token` with mode `0600`. An MCP token cannot administer the service. Retrieve the administrator token again with:
+Update from the repository directory:
 
 ```bash
-docker compose exec kicktipp node dist/service/main.js web-token
+git pull --ff-only
+docker compose up -d --build
 ```
 
-The browser keeps this token only in memory; reload or sign out to lock the page. Only the chosen interface language is remembered in browser storage. Saved account passwords and notification credentials are never returned to the form; leave their replacement fields empty to retain them. “Send test message” makes a real delivery attempt to the selected destination.
+Configuration, sessions and history live in the named Compose volume. Back up the entire volume privately while the service is stopped. `docker compose down` keeps it; **`docker compose down -v` deletes it**.
 
-For a remote Docker host, use the [SSH tunnel](#agent-on-another-computer) and open localhost through it. An authenticated HTTPS reverse proxy can use an exact origin listed in `server.allowedOrigins`; preserve the Host header. Arbitrary Host values, cross-origin admin requests and embedding in another website are rejected.
+- **Login fails:** check the selected profile's account details in **Account**.
+- **No reminder:** check the profile, added pools, destination, reminder times and known deadline. Use **Send test message** to check delivery independently.
+- **MCP returns 401:** use the MCP token, not the administrator token. Check that your client sends the bearer header.
+- **Profile required:** call `get_profiles` and pass its ID.
+- **Tools missing after enabling writes:** reconnect or refresh the client's tool list.
 
-## Profiles
+See the [service reference](docs/service-reference.md) for CLI commands, undo limits, health endpoints, storage, migration and development. See also the [changelog](CHANGELOG.md) and [architecture notes](docs/CLAUDE.md).
 
-The profile selector applies to **Overview**, **Account**, **Notifications** and the write permission in **Connect agent**. Add a profile with a name, its Kicktipp login and an initial prediction pool, then save. Each profile can follow several pools and has one default pool for agent calls. There is no fixed profile-count limit. Two profiles can also use the same Kicktipp account with different pools.
-
-Each profile has separate sessions, cache, submission history, reminder destinations, reminder times, timezone and write permission. All configured profiles keep running while you view another one. Renaming a profile keeps its stable ID and history. Removing it stops its reminders and removes its configuration; stored history is retained on disk.
-
-One MCP connection can access every configured profile. The web profile selector only controls the page you are viewing; it never silently changes which profile an agent call uses. See [profile selection for agents](#profile-selection-for-agents).
-
-## Notifications
-
-Within a profile, all configured channels and added pools use the same reminder windows and check interval. You can enable several destinations at once. Match reminders require a missing tip and a known, future kickoff. Bonus reminders require at least one unanswered, editable answer slot and a known, future bonus deadline. Completed answers, locked questions and games that have started are skipped.
-
-Bonus deadlines come from the bonus schedule's **Tipptermin**, independently of match kickoffs and event dates. Ambiguous question matches or unreadable deadlines appear as unknown in the overview and that profile's `scheduler.unresolvedBonusQuestions`; no timed reminder is invented for them. A failed pool or bonus read is shown separately, while reminders for readable pools and matches continue.
-
-Select a profile, then use **Notifications** in the local website to edit its channels and times without restarting. The terminal alternative is:
-
-```bash
-docker compose run --rm kicktipp setup --notifications
-docker compose restart kicktipp
-```
-
-With several profiles, the wizard asks which one to edit. It lets you retain that profile's existing channels or replace them. It can send a test before saving a new destination. To test a profile's saved destinations without contacting Kicktipp (omit `--profile` when there is only one):
-
-```bash
-docker compose run --rm kicktipp --profile PROFILE_ID notify --test
-```
-
-### Discord
-
-1. Open the Discord text channel's settings.
-2. Choose **Integrations → Webhooks → New Webhook** and copy its URL. You need permission to manage webhooks in that server.
-3. Choose **discord** in the wizard and paste the URL.
-4. Accept the test message and check the channel.
-
-The service formats the message for Discord automatically. It disables mentions, so a team or community name cannot trigger an `@everyone` ping. No Discord bot or custom message template is needed. Forum channels may require a webhook URL with the appropriate `thread_id` query parameter.
-
-### Telegram
-
-1. Open [@BotFather](https://t.me/BotFather), send `/newbot`, and follow the prompts.
-2. Copy the bot token into the wizard's hidden token prompt.
-3. Open your new bot and send `/start`.
-4. Leave **Chat-ID** empty to discover your chat and select it from the list.
-5. Accept the test message.
-
-For a group, add the bot and send `/start@YourBotUsername` in that group before discovery. You can also enter a known chat ID directly. Existing bots that use a Telegram webhook or have another consumer reading their updates may need manual chat-ID entry; setup does not remove their webhook or consume updates. The bot needs permission to post in the destination.
-
-### Generic webhook
-
-Choose **webhook** and paste your receiver's HTTP(S) URL. It receives a JSON `POST`; the receiver must accept that format. The service does not follow redirects. A normal scheduled reminder looks like this:
-
-```json
-{
-  "event": "missing_tips",
-  "summary": "Kicktipp (my-pool): 1 Tipp fehlen. …",
-  "community": "my-pool",
-  "matchday": null,
-  "timeZone": "Europe/Berlin",
-  "checkedAt": "2026-10-28T12:00:00.000Z",
-  "warnHours": 6,
-  "matches": [
-    {
-      "home": "Home team",
-      "away": "Away team",
-      "kickoff": "2026-10-28T16:00:00.000Z",
-      "bet": null,
-      "needsBet": true,
-      "closed": false,
-      "urgent": true
-    }
-  ]
-}
-```
-
-Scheduled reminders and operational alerts include `profile: { "id": "...", "name": "..." }` and prefix the summary with the profile name, so messages from the same prediction pool remain distinguishable. Bonus reminders have `event: "missing_bonus"` and the same community, timezone, check time and warning-window fields. Their `bonusQuestions` array contains `id`, `question`, `deadline` (ISO timestamp), `missingAnswers` and `editable`; `summary` describes the deadline and missing answers. Each profile and pool has separate reminder history. Test messages have `event: "test"` and `summary`. Operational alerts have `event: "service_error"`, a `code` (`auth_required` or `check_failed`) and `summary`. `matchday` can be `null` when checking the current matchday.
-
-### Delivery behavior
-
-Successful reminders are remembered separately for each profile, match, kickoff, warning window and destination. Restarting normally does not resend them. A failed destination retries with backoff without repeating messages to destinations that succeeded. If the service first starts 30 minutes before kickoff, it sends the most urgent crossed window rather than all three reminders at once.
-
-Login or check failures produce an operational alert, at most once per destination every six hours during the same outage. Check time is approximate: with a 15-minute interval, a reminder can arrive up to about 15 minutes after its configured threshold, plus network time. Changes made in the local website apply immediately; changes made through the terminal require a restart.
-
-External delivery and a local checkpoint cannot be atomic. If a process crashes after a provider accepts a message but before the checkpoint is saved, a later retry can duplicate it. Missing-tip reminders are never permission to submit a tip automatically.
-
-## Connect your agent
-
-Use an MCP client that supports **Streamable HTTP** and a bearer-token header:
-
-| Setting | Value |
-| --- | --- |
-| MCP URL | `http://127.0.0.1:8787/mcp` |
-| Transport | Streamable HTTP |
-| Header name | `Authorization` |
-| Header value | `Bearer YOUR_ACCESS_TOKEN` |
-
-The wizard prints the token. To display it again on your own terminal:
-
-```bash
-docker compose run --rm kicktipp connection
-```
-
-Keep it in your client's secret configuration. Do not put Kicktipp credentials or the access token into agent prompts. Ask your agent to call `get_status` and `get_profiles` first, then try “Which upcoming games still need a tip?”
-
-The MCP URL and token are shared by all profiles. Overview and reminders cover every added pool; MCP and standalone CLI commands use the selected profile's default pool. Add or edit profiles and enable submissions in the local website. The terminal alternative is to rerun setup, select a profile or add one, then restart the service.
-
-### Profile selection for agents
-
-The server supplies these rules in its MCP instructions and tool schemas:
-
-1. Call `get_profiles` to discover profile IDs, names, prediction pools and `read_only` permissions. `get_status` without a profile also provides a service overview.
-2. Pass the selected ID in the `profile` argument on every profile-specific tool call. With exactly one profile, this argument can be omitted for compatibility. With several profiles, an omitted or unknown profile is rejected.
-3. Keep the same profile for reading fixtures, generating suggestions and submitting tips. There is no persistent “active profile” shared between agent calls. Ask the user when their intended profile is unclear; for all profiles, make a separate call for each and label the results.
-
-For example, after discovering an ID, call `get_bets` with:
-
-```json
-{ "profile": "profile-0123456789abcdef", "matchday": 5 }
-```
-
-Use an ID actually returned by `get_profiles`; profile names can change. Credentials and notification destinations are excluded from profile discovery.
-
-Write permission is enforced separately for each profile. If every profile is read-only, submission tools are hidden. If some profiles permit writes, those tools are available but reject submissions for read-only profiles. Profile and notification setup remain local administrator operations; MCP calls cannot change credentials or profile permissions.
-
-### Agent on another computer
-
-Compose publishes port 8787 on the server's loopback interface only. From the computer running your agent, an SSH tunnel can make that endpoint available locally:
-
-```bash
-ssh -N -L 8787:127.0.0.1:8787 your-server
-```
-
-Keep the tunnel open and use the same localhost URL and token. Alternatively, put an authenticated HTTPS reverse proxy in front of the loopback endpoint, preserving the `Authorization` header. Browser-based clients also need their exact origin added to `server.allowedOrigins` in the service configuration; the default allows no browser origins. Forwarding the port alone does not add HTTPS.
-
-### Optional stdio clients
-
-For a client that can only launch an MCP subprocess, run this command from the repository directory:
-
-```bash
-docker compose run --rm -T kicktipp mcp-stdio
-```
-
-This launches a separate stdio process; it does not connect to the running HTTP service. Use one Kicktipp process at a time for that data volume. HTTP MCP is the intended way to share the daemon and its reminder scheduler. Webhook notification URLs are outbound destinations and are unrelated to the MCP endpoint.
-
-## CLI
-
-The scriptable CLI remains available inside the image:
-
-```bash
-docker compose run --rm kicktipp --help
-docker compose run --rm kicktipp today
-docker compose run --rm kicktipp bets --json
-docker compose run --rm kicktipp leaderboard
-docker compose run --rm kicktipp suggest --strategy ev
-docker compose run --rm kicktipp admin members
-docker compose run --rm kicktipp log
-```
-
-List profile IDs with `docker compose run --rm kicktipp profiles`. With multiple profiles, add `--profile PROFILE_ID` before a CLI command, for example `docker compose run --rm kicktipp --profile PROFILE_ID bets --json`. Single-profile commands continue to work without this flag.
-
-Use HTTP MCP while the daemon is running. For standalone Kicktipp CLI work, stop the daemon first and start it afterward, so separate processes cannot race on the same account and files. `notify --test` only tests external destinations and needs no Kicktipp session.
-
-| Area | Commands |
-| --- | --- |
-| Matches and tips | `today`, `schedule`, `bets`, `bet`, `tip-status`, `deadline` |
-| Rankings and rules | `leaderboard`, `overview`, `table`, `rules` |
-| Data and suggestions | `sync`, `stats`, `suggest`, `cache` |
-| History and administration | `log`, `admin members`, `admin bets`, `admin bet` |
-| Setup and help | `setup`, `notify`, `guide`, plus standalone account/profile commands |
-
-`bet` now requires explicit arguments such as `"Home vs Away=2:1"`; there is no terminal grid. Bonus tips use `bet --bonus "Question=Answer"`. Write access must be enabled first. `suggest` previews a slip; `--place` submits it, and `--replace` permits replacing existing tips.
-
-`log --undo` restores replaced tips from the latest successful regular submission by the signed-in account. It does not undo bonus tips, Spielleiter submissions, newly added tips without a previous value, or games whose deadline has passed.
-
-## Operations
-
-### Health and status
-
-- `GET /health` is an unauthenticated liveness check used by Docker. It says that the HTTP process is responding, not that Kicktipp login or notification delivery succeeded.
-- `GET /status`, with the same bearer token as MCP, reports each profile's last check, last successful Kicktipp read, next check, failed channels and error category. With one profile these fields also remain available at the top level. MCP `get_status` includes this service status too.
-- `docker compose logs kicktipp` shows startup and process errors. Channel secrets and provider response bodies are excluded from notification errors.
-
-`auth_required` means the Kicktipp login needs attention; check the Account page or rerun setup. `delivery_failed` means one or more channels need attention or are waiting for retry. `check_failed` can mean connectivity or changed Kicktipp markup. `state_failed` means the reminder history could not be written. Fix the underlying problem before deleting history, since deleting it permits reminders to be sent again.
-
-### Persistent data and backups
-
-Compose creates a named `kicktipp-data` volume mounted at `/data`. It contains:
-
-- `/data/service.json`: all profiles and shared MCP settings, including secrets in **plain text**, restricted to the file owner (`0600`). This is not encrypted storage.
-- `/data/web-admin-token`: the separate local administrator credential (`0600`).
-- Profile/account-scoped session cookies, local cache, audit records and reminder-delivery history under `/data/profiles/`. The migrated `default` profile retains its existing `/data/accounts/` location.
-
-Keep the entire volume private and include it in encrypted backups. Stop the service while taking a consistent backup. Never commit its contents or copy them into your image. Normal `docker compose down` preserves the volume; `docker compose down -v` deletes it.
-
-Use one service process per volume. That process can run multiple profiles; separate containers and ports are not needed for additional accounts. Multiple replicas sharing the same volume remain unsupported.
-
-### Migrating an existing service
-
-A version 1 `service.json` is automatically read as a version 2 configuration containing a profile with ID `default` and name **Default**. Its account, default and tracked pools, write permission, notification settings, MCP token, sessions and history are preserved. No manual JSON conversion is needed. The next settings save writes version 2; reading an old file alone does not rewrite it.
-
-Existing agent calls without `profile` keep working while there is one profile. After adding a second profile, have the agent call `get_profiles` and pass an explicit ID for profile-specific operations. The MCP address and token stay the same.
-
-### Updating
-
-```bash
-git pull
-docker compose build
-docker compose up -d
-```
-
-Your configuration and delivery history remain in the volume. Shutdown allows in-flight work to finish; avoid force-killing a process while it is submitting a tip.
-
-### Submission guarantees
-
-Match, bonus and Spielleiter submissions are marked `submitted` only after a fresh read confirms every requested value. A confirmed refusal or unchanged values after a completed request can be `rejected`; lost responses, partial saves or unreadable forms produce `submission_unknown`.
-
-After `submission_unknown`, read the saved tips before trying again. The client does not automatically repeat a bet POST, including after a 307/308 redirect. Other players' predictions remain hidden until Kicktipp reveals them; tip-completeness checks do not expose their scores.
-
-## Migrating from the desktop version
-
-Use the new local website or terminal setup once to configure the Compose volume. TUI and interactive prediction screens, desktop/command notifications, systemd/cron/ICS generation, the old desktop web setup, Claude Desktop `.mcpb` packaging, and `rival`/`scenario`/`whatif` have been removed. Existing Kicktipp reads, submissions, Spielleiter functions, statistics and suggestions remain.
-
-Standalone CLI profiles still use the INI configuration. Newly saved encrypted CLI passwords use a random `credentials.key` stored alongside it; back up both files. Older machine-bound passwords migrate on a successful read on their original machine. If moved before migration, reconnect on the new machine. The Compose service uses its separate portable `service.json` file instead.
-
-Legacy cache, session and audit files without verified account ownership remain untouched and are not automatically used for the new account scope. Reconnect and run `sync` to populate fresh history. Season synchronization checks the opening fixtures before reusing finished history; a changed opening round archives the old cache, while a failed check preserves it.
-
-## Development
-
-For local development, use a supported Node.js version (the container uses Node.js 24):
-
-```bash
-npm ci
-npm run build
-npm test
-npm run test:container  # requires Docker; builds and checks an isolated fixture stack
-npm start
-# In another terminal, retrieve the local website token:
-node dist/service/main.js web-token
-```
-
-Build before testing: the MCP integration tests execute the compiled server. Tests use fixtures and local HTTP endpoints; they do not prove that your real Kicktipp account, Discord webhook or Telegram bot is configured correctly. The website and setup wizard provide explicit test-message actions for your own notification destinations.
-
-See [CHANGELOG.md](CHANGELOG.md) and [the architecture notes](docs/CLAUDE.md).
+</details>
 
 ## Credits and license
 
-This project is a fork of Christian Heidorn's [kicktipp-agent](https://github.com/christianheidorn/kicktipp-agent), which began as a fork of [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot). Licensed under [MIT](LICENSE).
+Forked from Christian Heidorn's [kicktipp-agent](https://github.com/christianheidorn/kicktipp-agent), originally based on [schwalle/kicktipp-betbot](https://github.com/schwalle/kicktipp-betbot). Licensed under [MIT](LICENSE).
