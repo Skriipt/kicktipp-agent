@@ -30,43 +30,25 @@ import {
 } from './helpers/match-date.js';
 import { appendAudit, submitAudited, type AuditBet, type BetSource } from './audit/log.js';
 import { submitVerified, type SubmissionTarget } from './submission.js';
+import { assertReadable } from './http/response.js';
 
 // ── Errors ─────────────────────────────────────────────────────────
 
 /** The session is gone or was never valid — logging in again may help. */
-export class AuthError extends Error {}
+export { AuthError } from './http/response.js';
 
 /** The page does not exist — usually a wrong community name. */
-export class NotFoundError extends Error {}
+export { NotFoundError } from './http/response.js';
 
 /** The page exists but requires Spielleiter (admin) rights. */
-export class AdminRequiredError extends Error {}
+export { AdminRequiredError } from './http/response.js';
 
 // ── Shared helpers ─────────────────────────────────────────────────
 
 async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   await page.goto(url);
 
-  // Kicktipp answers an invalid session with a redirect to its login page,
-  // and a wrong community with a "not found" page. Keep them apart: only
-  // the first one is worth throwing away the session over.
-  if (page.isAdminRequired()) {
-    throw new AdminRequiredError(
-      `Spielleiter (admin) rights are required for ${url}.`,
-    );
-  }
-  if (page.isAuthRedirect() || page.has('input[type="password"]')) {
-    throw new AuthError(
-      `Kicktipp session is not authenticated (redirected to ${page.url()}). Verify credentials.`,
-    );
-  }
-  if (page.isNotFound()) {
-    throw new NotFoundError(`Kicktipp page not found: ${url}. Check the community name.`);
-  }
-
-  if (page.status() < 200 || page.status() >= 300) {
-    throw new Error(`Kicktipp HTTP ${page.status()} while loading ${url}.`);
-  }
+  assertReadable(page, url);
 
   return cheerio.load(await page.content());
 }
@@ -97,6 +79,14 @@ export async function loadMatchPredictPage(
   community: string,
   matchday?: number,
 ): Promise<cheerio.CheerioAPI> {
+  return page.runExclusive(() => loadMatchPredictPageUnlocked(page, community, matchday));
+}
+
+async function loadMatchPredictPageUnlocked(
+  page: Page,
+  community: string,
+  matchday?: number,
+): Promise<cheerio.CheerioAPI> {
   let $ = await loadPage(page, getPredictUrl(community, matchday));
   if (matchday !== undefined) return $;
   if ($('#kicktipp-content table#tippabgabeSpiele tbody').length) return $;
@@ -108,7 +98,11 @@ export async function loadMatchPredictPage(
 
 /** Kicktipp's "current" matchday: the spieltag the bare predict page opens. */
 export async function fetchCurrentMatchday(page: Page, community: string): Promise<number | null> {
-  const $ = await loadMatchPredictPage(page, community);
+  return page.runExclusive(() => fetchCurrentMatchdayUnlocked(page, community));
+}
+
+async function fetchCurrentMatchdayUnlocked(page: Page, community: string): Promise<number | null> {
+  const $ = await loadMatchPredictPageUnlocked(page, community);
   return spieltagIndexFromPage($) ?? null;
 }
 
@@ -228,7 +222,7 @@ export interface BonusQuestion {
 
 export interface PlayerBets {
   player: string;
-  /** One entry per match, aligned with `matches`. Empty string = no bet shown. */
+  /** Aligned with matches: score = known, empty = missing, -:- = tipped but hidden. */
   bets: string[];
 }
 
@@ -252,7 +246,11 @@ export interface PlacedBonusBet {
 // ── Data functions ─────────────────────────────────────────────────
 
 export async function fetchTodayMatches(page: Page, community: string): Promise<{ title: string; matches: TodayMatch[] }> {
-  const $ = await loadMatchPredictPage(page, community);
+  return page.runExclusive(() => fetchTodayMatchesUnlocked(page, community));
+}
+
+async function fetchTodayMatchesUnlocked(page: Page, community: string): Promise<{ title: string; matches: TodayMatch[] }> {
+  const $ = await loadMatchPredictPageUnlocked(page, community);
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
   const tbody = content.find('table#tippabgabeSpiele tbody');
@@ -304,8 +302,12 @@ export async function fetchTodayMatches(page: Page, community: string): Promise<
 }
 
 export async function fetchBets(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: BetMatch[] }> {
+  return page.runExclusive(() => fetchBetsUnlocked(page, community, matchday, cache));
+}
+
+async function fetchBetsUnlocked(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: BetMatch[] }> {
   return throughCache('bets', matchday, cache, async () => {
-  const $ = await loadMatchPredictPage(page, community, matchday);
+  const $ = await loadMatchPredictPageUnlocked(page, community, matchday);
   const content = $('#kicktipp-content');
   const title = content.find('div.pagetitle').text().trim();
   const tbody = content.find('table#tippabgabeSpiele tbody');
@@ -347,6 +349,10 @@ export async function fetchBets(page: Page, community: string, matchday?: number
 }
 
 export async function fetchSchedule(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: ScheduleMatch[] }> {
+  return page.runExclusive(() => fetchScheduleUnlocked(page, community, matchday, cache));
+}
+
+async function fetchScheduleUnlocked(page: Page, community: string, matchday?: number, cache: CacheOptions = {}): Promise<{ title: string; matches: ScheduleMatch[] }> {
   return throughCache('schedule', matchday, cache, async () => {
   const $ = await loadPage(page, getScheduleUrl(community, matchday));
   const content = $('#kicktipp-content');
@@ -382,6 +388,10 @@ export async function fetchSchedule(page: Page, community: string, matchday?: nu
 }
 
 export async function fetchLeaderboard(page: Page, community: string, matchday?: number, bonus = false, cache: CacheOptions = {}): Promise<LeaderboardData> {
+  return page.runExclusive(() => fetchLeaderboardUnlocked(page, community, matchday, bonus, cache));
+}
+
+async function fetchLeaderboardUnlocked(page: Page, community: string, matchday?: number, bonus = false, cache: CacheOptions = {}): Promise<LeaderboardData> {
   // The bonus view is a different payload under the same URL; it is not
   // cached, so it can neither overwrite the regular leaderboard nor be
   // served offline.
@@ -468,6 +478,10 @@ const OVERVIEW_VIEWS: Record<string, [string, string]> = {
 export const OVERVIEW_VIEW_OPTIONS = Object.keys(OVERVIEW_VIEWS);
 
 export async function fetchOverview(page: Page, community: string, view = 'matchday-points', cache: CacheOptions = {}): Promise<OverviewData> {
+  return page.runExclusive(() => fetchOverviewUnlocked(page, community, view, cache));
+}
+
+async function fetchOverviewUnlocked(page: Page, community: string, view = 'matchday-points', cache: CacheOptions = {}): Promise<OverviewData> {
   // Only the default view is cached — the other views are the same data
   // rearranged, and they would otherwise overwrite each other.
   return throughCache('overview', undefined, view === 'matchday-points' ? cache : { ...cache, store: null }, async () => {
@@ -517,6 +531,10 @@ export async function fetchOverview(page: Page, community: string, view = 'match
 }
 
 export async function fetchTable(page: Page, community: string, option?: 'home' | 'away', cache: CacheOptions = {}): Promise<{ label: string; teams: TableTeam[] }> {
+  return page.runExclusive(() => fetchTableUnlocked(page, community, option, cache));
+}
+
+async function fetchTableUnlocked(page: Page, community: string, option?: 'home' | 'away', cache: CacheOptions = {}): Promise<{ label: string; teams: TableTeam[] }> {
   // Home/away tables are separate payloads; only the full table is cached.
   return throughCache('table', undefined, option === undefined ? cache : { ...cache, store: null }, async () => {
   let label = 'League Table';
@@ -553,6 +571,10 @@ export async function fetchTable(page: Page, community: string, option?: 'home' 
 }
 
 export async function fetchRules(page: Page, community: string, cache: CacheOptions = {}): Promise<RulesSection[]> {
+  return page.runExclusive(() => fetchRulesUnlocked(page, community, cache));
+}
+
+async function fetchRulesUnlocked(page: Page, community: string, cache: CacheOptions = {}): Promise<RulesSection[]> {
   return throughCache('rules', undefined, cache, async () => {
   const $ = await loadPage(page, getRulesUrl(community));
   const pagecontent = $('#kicktipp-content div.pagecontent');
@@ -639,10 +661,21 @@ export async function placeBets(
   submit = true,
   source: BetSource = 'unknown',
 ): Promise<PlacedBet[]> {
+  return page.runExclusive(() => placeBetsUnlocked(page, community, bets, matchday, submit, source));
+}
+
+async function placeBetsUnlocked(
+  page: Page,
+  community: string,
+  bets: string[],
+  matchday?: number,
+  submit = true,
+  source: BetSource = 'unknown',
+): Promise<PlacedBet[]> {
   // Checked here as well as at the entry points: this is the last line before
   // anything reaches Kicktipp.
   if (submit) assertWritable('Placing bets');
-  const $ = await loadMatchPredictPage(page, community, matchday);
+  const $ = await loadMatchPredictPageUnlocked(page, community, matchday);
   const tbody = $('#kicktipp-content table#tippabgabeSpiele tbody');
   if (!tbody.length) throw new Error('No matches found.');
 
@@ -687,6 +720,10 @@ export async function placeBets(
 }
 
 export async function fetchBonusQuestions(page: Page, community: string): Promise<BonusQuestion[]> {
+  return page.runExclusive(() => fetchBonusQuestionsUnlocked(page, community));
+}
+
+async function fetchBonusQuestionsUnlocked(page: Page, community: string): Promise<BonusQuestion[]> {
   const $ = await loadPage(page, getBonusPredictUrl(community));
   const content = $('#kicktipp-content');
   const table = content.find('table#tippabgabeFragen');
@@ -739,6 +776,10 @@ export interface BonusAnswer {
  * "what did I bet?" is answerable after the deadline, not just before it.
  */
 export async function fetchBonusBets(page: Page, community: string): Promise<BonusAnswer[]> {
+  return page.runExclusive(() => fetchBonusBetsUnlocked(page, community));
+}
+
+async function fetchBonusBetsUnlocked(page: Page, community: string): Promise<BonusAnswer[]> {
   const $ = await loadPage(page, getBonusPredictUrl(community));
   const tbody = $('#kicktipp-content table#tippabgabeFragen tbody');
   if (!tbody.length) return [];
@@ -816,8 +857,18 @@ export async function placeBonusBets(
   submit = true,
   source: BetSource = 'unknown',
 ): Promise<PlacedBonusBet[]> {
+  return page.runExclusive(() => placeBonusBetsUnlocked(page, community, bets, submit, source));
+}
+
+async function placeBonusBetsUnlocked(
+  page: Page,
+  community: string,
+  bets: string[],
+  submit = true,
+  source: BetSource = 'unknown',
+): Promise<PlacedBonusBet[]> {
   if (submit) assertWritable('Placing bonus bets');
-  const questions = await fetchBonusQuestions(page, community);
+  const questions = await fetchBonusQuestionsUnlocked(page, community);
   if (!questions.length) throw new Error('No editable bonus questions found.');
 
   const argsByQuestion = new Map<string, string[]>();
@@ -903,6 +954,7 @@ export async function fetchMatchdayBets(
   matchday?: number,
   cache: CacheOptions = {},
 ): Promise<MatchdayBets> {
+  return page.runExclusive(async () => {
   return throughCache('matchdayBets', matchday, cache, async () => {
   const $ = await loadPage(page, getLeaderboardUrl(community, matchday));
   const resolved = matchday ?? spieltagIndexFromPage($);
@@ -984,6 +1036,7 @@ export async function fetchMatchdayBets(
 
   return { matchday: resolved, matches, players };
   });
+  });
 }
 
 /** Kicktipp.com writes 2-1 and tucks the points in <sub class="p">. */
@@ -996,6 +1049,7 @@ function readBetCell(cell: cheerio.Cheerio<AnyNode>): string {
 /** A bet cell holds either a scoreline or a placeholder such as "-" or "–". */
 function normalizeBetCell(raw: string): string {
   const text = raw.replace(/\s+/g, '');
+  if (/^[-–]:[-–]$/.test(text)) return '-:-';
   const match = text.match(/(\d+)[:\-](\d+)/);
   return match ? `${match[1]}:${match[2]}` : '';
 }
@@ -1017,6 +1071,10 @@ export interface Member {
 
 /** Read the community's member list, with the ids the admin pages need. */
 export async function fetchMembers(page: Page, community: string): Promise<Member[]> {
+  return page.runExclusive(() => fetchMembersUnlocked(page, community));
+}
+
+async function fetchMembersUnlocked(page: Page, community: string): Promise<Member[]> {
   const $ = await loadPage(page, getAdminMembersUrl(community));
   const members: Member[] = [];
 
@@ -1121,6 +1179,15 @@ export async function fetchBetsForMember(
   member: Member,
   matchday?: number,
 ): Promise<{ member: Member; matches: BetMatch[] }> {
+  return page.runExclusive(() => fetchBetsForMemberUnlocked(page, community, member, matchday));
+}
+
+async function fetchBetsForMemberUnlocked(
+  page: Page,
+  community: string,
+  member: Member,
+  matchday?: number,
+): Promise<{ member: Member; matches: BetMatch[] }> {
   const $ = await loadPage(
     page,
     getAdminTipsUrl(community, member.tipperId, member.tippsaisonId, matchday),
@@ -1136,6 +1203,18 @@ export async function fetchBetsForMember(
  * member recorded alongside.
  */
 export async function placeBetsForMember(
+  page: Page,
+  community: string,
+  member: Member,
+  bets: string[],
+  matchday?: number,
+  submit = true,
+  source: BetSource = 'unknown',
+): Promise<PlacedBet[]> {
+  return page.runExclusive(() => placeBetsForMemberUnlocked(page, community, member, bets, matchday, submit, source));
+}
+
+async function placeBetsForMemberUnlocked(
   page: Page,
   community: string,
   member: Member,

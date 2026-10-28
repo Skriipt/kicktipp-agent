@@ -1,5 +1,6 @@
 import path from 'path';
 import os from 'os';
+import { accountScope } from '../config.js';
 
 /**
  * Where the season history lives. Follows the XDG data spec on Linux and
@@ -24,7 +25,7 @@ export function dataDir(): string {
 }
 
 export function cacheDir(): string {
-  return path.join(dataDir(), 'cache');
+  return path.join(dataDir(), 'cache', accountScope());
 }
 
 /**

@@ -29,7 +29,7 @@ describe('cronLine', () => {
     const line = cronLine({ everyMinutes: 120, warnHours: 12, binary: '/opt/kicktipp/bin/kicktipp' });
     expect(line).toContain('--warn-hours 12');
     expect(line).toContain('/opt/kicktipp/bin/kicktipp deadline --check');
-    expect(line).toContain('/opt/kicktipp/bin/kicktipp notify');
+    expect(line).toContain('|| /opt/kicktipp/bin/kicktipp notify --warn-hours 12');
   });
 });
 
@@ -40,7 +40,7 @@ describe('systemdUnits', () => {
     expect(units.service).toContain('Type=oneshot');
     expect(units.service).toContain('deadline --check');
     expect(units.service).toContain('--warn-hours 4');
-    expect(units.service).toContain('|| kicktipp notify');
+    expect(units.service).toContain('|| kicktipp notify --warn-hours 4');
   });
 
   it('produces a timer that survives downtime', () => {

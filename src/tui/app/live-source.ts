@@ -73,13 +73,32 @@ export interface SuggestOutcome {
 
 export class LiveDataSource {
   private page: Page | null = null;
+  private opening: Promise<Page> | null = null;
+  private closed = false;
 
   private async ensurePage(): Promise<Page> {
-    if (!this.page) {
-      const page = await launchBrowser();
-      this.page = page;
+    if (this.closed) throw new Error('Kicktipp session is closed.');
+    if (this.page && !this.page.isClosed()) return this.page;
+    if (!this.opening) {
+      this.opening = launchBrowser().then(async page => {
+        if (this.closed) {
+          await page.close();
+          throw new Error('Kicktipp session is closed.');
+        }
+        this.page = page;
+        return page;
+      }).finally(() => { this.opening = null; });
     }
-    return this.page;
+    return this.opening;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    // The caller of the opening request receives its error; shutdown only
+    // waits for the login to finish so no late session escapes disposal.
+    await this.opening?.catch(() => {});
+    await this.page?.close();
+    this.page = null;
   }
 
   private requireCommunity(): string {

@@ -1,5 +1,7 @@
 import { Page } from '../browser.js';
 import { CacheStore, isMatchdayFinished, isMatchdayUpcoming } from './store.js';
+import crypto from 'crypto';
+import { parseMatchDate } from '../helpers/match-date.js';
 import {
   fetchCurrentMatchday,
   fetchSchedule,
@@ -89,9 +91,22 @@ function cachedSchedules(store: CacheStore): Map<number, ScheduleMatch[]> {
   const cached = new Map<number, ScheduleMatch[]>();
   for (const matchday of store.cachedMatchdays()) {
     const envelope = store.read('schedule', matchday);
-    if (envelope) cached.set(matchday, envelope.data.matches);
+    // A schedule alone does not mean the previous sync finished this round.
+    if (envelope && store.has('bets', matchday) && store.has('leaderboard', matchday) &&
+        store.has('matchdayBets', matchday)) cached.set(matchday, envelope.data.matches);
   }
   return cached;
+}
+
+function seasonAnchor(matches: ScheduleMatch[]): string | null {
+  if (!matches.length) return null;
+  const fixtures: string[] = [];
+  for (const match of matches) {
+    const kickoff = parseMatchDate(match.date);
+    if (!kickoff || !match.home || !match.away) return null;
+    fixtures.push(JSON.stringify([match.home, match.away, kickoff.toISOString()]));
+  }
+  return crypto.createHash('sha256').update(JSON.stringify(fixtures.sort())).digest('hex');
 }
 
 /**
@@ -112,6 +127,23 @@ export async function syncSeason(
   const from = opts.from ?? 1;
   const discovered = opts.currentMatchday ?? (await fetchCurrentMatchday(page, community));
   const to = opts.to ?? discovered ?? MAX_MATCHDAY;
+
+  // The slug and matchday numbers can be reused next season. Verify a live
+  // opening round before trusting completed history; never guess from today.
+  // Changed kickoff dates also conservatively start a new cache generation.
+  const opening = await fetchSchedule(page, community, 1);
+  const anchor = seasonAnchor(opening.matches);
+  if (!anchor) throw new Error('Cannot verify the season: opening-round fixtures or kickoff dates are missing.');
+  const previousMeta = store.readMeta();
+  const previousAnchor = previousMeta?.seasonAnchor ??
+    seasonAnchor(store.read('schedule', 1)?.data.matches ?? []);
+  if (store.cachedMatchdays().length && previousAnchor !== anchor) store.archive();
+  const retainedMeta = store.readMeta();
+  store.writeMeta({
+    lastSync: retainedMeta?.lastSync,
+    knownMatchdays: retainedMeta?.knownMatchdays,
+    seasonAnchor: anchor,
+  });
 
   await fetchRules(page, community, cache);
 
@@ -136,7 +168,9 @@ export async function syncSeason(
 
     opts.onProgress?.(step.matchday);
     try {
-      const schedule = await fetchSchedule(page, community, step.matchday, cache);
+      const schedule = step.matchday === 1 ? opening :
+        await fetchSchedule(page, community, step.matchday, cache);
+      if (step.matchday === 1) store.write('schedule', schedule, 1);
       // An empty schedule means we have walked past the end of the season.
       if (!schedule.matches.length) break;
       highest = step.matchday;
@@ -156,6 +190,6 @@ export async function syncSeason(
   }
 
   const knownMatchdays = Math.max(highest, store.readMeta()?.knownMatchdays ?? 0, discovered ?? 0);
-  store.writeMeta({ lastSync: new Date().toISOString(), knownMatchdays });
+  store.writeMeta({ lastSync: new Date().toISOString(), knownMatchdays, seasonAnchor: anchor });
   return { community, fetched, skipped, knownMatchdays, cacheDir: store.dir };
 }

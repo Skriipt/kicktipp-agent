@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { dataDir } from '../cache/paths.js';
 import { SubmissionError } from '../submission.js';
+import { accountScope } from '../config.js';
 
 /** Where a submission came from, so the log can answer "who did this?". */
 export type BetSource =
@@ -22,6 +23,8 @@ export interface AuditBet {
 }
 
 export interface AuditRecord {
+  /** Absent on legacy records, which must never be offered for undo. */
+  accountScope?: string;
   at: string;
   source: BetSource;
   community: string;
@@ -36,9 +39,9 @@ export interface AuditRecord {
   onBehalfOf?: string;
 }
 
-export function auditFile(community: string): string {
+export function auditFile(community: string, scope = accountScope()): string {
   const safe = community.replace(/[^A-Za-z0-9._-]/g, '_');
-  return path.join(dataDir(), 'audit', `${safe}.jsonl`);
+  return path.join(dataDir(), 'audit', scope, `${safe}.jsonl`);
 }
 
 /**
@@ -47,9 +50,10 @@ export function auditFile(community: string): string {
  */
 export function appendAudit(record: AuditRecord): void {
   try {
-    const file = auditFile(record.community);
+    const owned = { ...record, accountScope: record.accountScope ?? accountScope() };
+    const file = auditFile(record.community, owned.accountScope);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    fs.appendFileSync(file, `${JSON.stringify(owned)}\n`, { mode: 0o600 });
     // appendFileSync only applies mode when creating, so make sure an older
     // file is not left world-readable.
     fs.chmodSync(file, 0o600);
@@ -67,6 +71,8 @@ export async function submitAudited(
   record: PendingAuditRecord,
   submit: () => Promise<void>,
 ): Promise<void> {
+  // Keep intent and outcome owned by the same account across the async POST.
+  record = { ...record, accountScope: record.accountScope ?? accountScope() };
   appendAudit({ ...record, outcome: 'intent' });
   try {
     await submit();
@@ -83,7 +89,8 @@ export async function submitAudited(
 }
 
 export function readAudit(community: string): AuditRecord[] {
-  const file = auditFile(community);
+  const scope = accountScope();
+  const file = auditFile(community, scope);
   if (!fs.existsSync(file)) return [];
   return fs
     .readFileSync(file, 'utf-8')
@@ -96,12 +103,14 @@ export function readAudit(community: string): AuditRecord[] {
         return null;
       }
     })
-    .filter((r): r is AuditRecord => r !== null);
+    .filter((r): r is AuditRecord => r !== null &&
+      r.accountScope === scope && r.community === community);
 }
 
 /** Only these records can be restored through the signed-in user's bet form. */
 export function isOwnMatchSubmission(record: AuditRecord): boolean {
-  return record.outcome === 'submitted' && record.kind === 'match' && !record.onBehalfOf;
+  return record.accountScope === accountScope() &&
+    record.outcome === 'submitted' && record.kind === 'match' && !record.onBehalfOf;
 }
 
 /**

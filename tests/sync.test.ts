@@ -140,9 +140,18 @@ describe('syncSeason', () => {
 
   it('stops at the current matchday and does not request later ones', async () => {
     store.write('schedule', { title: 'MD1', matches: finished }, 1);
+    store.write('bets', { title: 'MD1', matches: [] }, 1);
+    store.write('leaderboard', { title: 'MD1', rankings: [] }, 1);
+    store.write('matchdayBets', { matches: [], players: [] }, 1);
 
     const { fetchImpl, calls } = mockFetch((req) => {
       if (req.url.includes('/rules')) return htmlPage('<div id="kicktipp-content"><div class="pagecontent"></div></div>');
+      if (req.url.includes('/schedule') && new URL(req.url).searchParams.get('spieltagIndex') === '1') {
+        return htmlPage(SCHEDULE_HTML.replace('31.08.26 15:30', '21.08.26 20:30')
+          .replace('Mainz', 'FC Bayern').replace('Wolfsburg', 'BVB')
+          .replace('kicktipp-heim">-<', 'kicktipp-heim">2<')
+          .replace('kicktipp-gast">-<', 'kicktipp-gast">1<'));
+      }
       if (req.url.includes('/schedule')) return htmlPage(SCHEDULE_HTML);
       if (req.url.includes('/predict')) return htmlPage(BETS_HTML);
       if (req.url.includes('/leaderboard')) return htmlPage('<div id="kicktipp-content"></div>');
@@ -169,5 +178,97 @@ describe('syncSeason', () => {
       .filter((n): n is number => n !== null);
     expect(requested.every((n) => n <= 2)).toBe(true);
     expect(requested).not.toContain(3);
+  });
+});
+
+describe('sync recovery and season boundaries', () => {
+  let tmp: string;
+  let store: CacheStore;
+  const scheduleHtml = (date: string, result = '2:1') => SCHEDULE_HTML
+    .replace('31.08.26 15:30', date)
+    .replace('kicktipp-heim">-<', `kicktipp-heim">${result.split(':')[0]}<`)
+    .replace('kicktipp-gast">-<', `kicktipp-gast">${result.split(':')[1]}<`);
+  const scheduleData = (date: string) => ({ title: 'Opening round', matches: [
+    { date, home: 'Mainz', away: 'Wolfsburg', result: '2:1' },
+  ] });
+  const fill = (matchday: number, date: string) => {
+    store.write('schedule', scheduleData(date), matchday);
+    store.write('bets', { title: 'Bets', matches: [] }, matchday);
+    store.write('leaderboard', { title: 'Table', rankings: [] }, matchday);
+    store.write('matchdayBets', { matches: [], players: [] }, matchday);
+  };
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-sync-boundary-'));
+    store = new CacheStore('cape', path.join(tmp, 'cape'));
+  });
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('repairs an incomplete finished matchday after the first run fails', async () => {
+    let fail = true;
+    const { fetchImpl } = mockFetch(req => {
+      if (req.url.includes('/schedule')) return htmlPage(scheduleHtml('31.08.26 15:30'));
+      if (req.url.includes('/predict') && fail) throw new Error('temporary upstream failure');
+      return htmlPage('<div id="kicktipp-content"></div>');
+    });
+    const page = new Page(new CookieJar(), fetchImpl);
+    const opts = { store, currentMatchday: 1, delayMs: 0, now };
+    await expect(syncSeason(page, 'cape', opts)).rejects.toThrow('temporary upstream failure');
+    expect(store.has('schedule', 1)).toBe(true);
+    expect(store.has('bets', 1)).toBe(false);
+    fail = false;
+    const retry = await syncSeason(page, 'cape', opts);
+    expect(retry.fetched).toBe(1);
+    expect(store.has('bets', 1)).toBe(true);
+    expect(store.has('leaderboard', 1)).toBe(true);
+    expect(store.has('matchdayBets', 1)).toBe(true);
+  });
+
+  it('archives old completed rounds and resets season length on a verified changed opening round', async () => {
+    fill(1, '31.08.25 15:30');
+    fill(34, '15.05.26 15:30');
+    store.writeMeta({ knownMatchdays: 34, lastSync: '2026-05-16T00:00:00Z' });
+    const oldFile = fs.readFileSync(path.join(store.dir, 'matchday-34', 'schedule.json'), 'utf8');
+    const { fetchImpl } = mockFetch(req => req.url.includes('/schedule')
+      ? htmlPage(scheduleHtml('31.08.26 15:30'))
+      : htmlPage('<div id="kicktipp-content"></div>'));
+    const result = await syncSeason(new Page(new CookieJar(), fetchImpl), 'cape', {
+      store, currentMatchday: 1, delayMs: 0, now,
+    });
+    expect(result.fetched).toBe(1);
+    expect(result.knownMatchdays).toBe(1);
+    expect(store.cachedMatchdays()).toEqual([1]);
+    expect(store.read('schedule', 1)?.data.matches[0].date).toBe('31.08.26 15:30');
+    const archived = fs.readdirSync(tmp).find(name => name.startsWith('cape.archive-'));
+    expect(archived).toBeDefined();
+    expect(fs.readFileSync(path.join(tmp, archived!, 'matchday-34', 'schedule.json'), 'utf8')).toBe(oldFile);
+  });
+
+  it('keeps complete history when opening fixtures stay identical, ignoring results', async () => {
+    fill(1, '31.08.26 15:30');
+    fill(2, '01.09.26 15:30');
+    const { fetchImpl, calls } = mockFetch(req => req.url.includes('/schedule')
+      ? htmlPage(scheduleHtml('31.08.26 15:30', '3:1'))
+      : htmlPage('<div id="kicktipp-content"></div>'));
+    const result = await syncSeason(new Page(new CookieJar(), fetchImpl), 'cape', {
+      store, currentMatchday: 2, delayMs: 0, now,
+    });
+    expect(result.fetched).toBe(0);
+    expect(result.skipped).toBe(2);
+    expect(store.cachedMatchdays()).toEqual([1, 2]);
+    expect(fs.readdirSync(tmp)).toEqual(['cape']);
+    expect(calls.filter(req => req.url.includes('/schedule'))).toHaveLength(1);
+  });
+
+  it('fails without modifying old history if the live opening round cannot be verified', async () => {
+    fill(1, '31.08.25 15:30');
+    const previous = store.read('schedule', 1);
+    const { fetchImpl } = mockFetch(req => {
+      if (req.url.includes('/schedule')) throw new Error('anchor unavailable');
+      return htmlPage('<div id="kicktipp-content"></div>');
+    });
+    await expect(syncSeason(new Page(new CookieJar(), fetchImpl), 'cape', {
+      store, currentMatchday: 1, delayMs: 0, now,
+    })).rejects.toThrow('anchor unavailable');
+    expect(store.read('schedule', 1)).toEqual(previous);
   });
 });

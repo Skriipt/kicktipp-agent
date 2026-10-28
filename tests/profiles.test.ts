@@ -55,14 +55,14 @@ community = family-pool
 player = Papa
 `;
 
-describe('a config with no profiles behaves exactly as before', () => {
+describe('a config with no profiles', () => {
   it('reads the classic sections', async () => {
     const config = await loadConfig(CLASSIC);
     expect(config.loadCommunity()).toBe('default-pool');
     expect(config.loadPlayer()).toBe('Me');
     expect(config.hasCredentials()).toBe(true);
     expect(config.listProfiles()).toEqual([]);
-    expect(config.sessionFile().endsWith('session.json')).toBe(true);
+    expect(config.sessionFile()).toMatch(/session-[a-f0-9]{64}\.json$/);
   });
 });
 
@@ -97,7 +97,7 @@ describe('profiles', () => {
     config.setActiveProfile('family');
     const family = config.sessionFile();
     expect(work).not.toBe(family);
-    expect(work).toMatch(/session-work\.json$/);
+    expect(work).toMatch(/session-[a-f0-9]{64}\.json$/);
   });
 
   it('report a name that does not exist instead of silently using defaults', async () => {

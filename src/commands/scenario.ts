@@ -63,6 +63,8 @@ function render(projection: ScenarioProjection): string {
     lines.push(`  ${rank.padEnd(8)} ${player.player.padEnd(nameWidth)} ${points.padStart(12)}`);
   }
 
+  if (projection.note) lines.push('', projection.note);
+
   return lines.join('\n');
 }
 
@@ -102,6 +104,8 @@ export function registerScenarioCommand(program: Command): void {
             rules.values,
             player,
             opts.target,
+            5,
+            supplied,
           );
           if (opts.json) {
             emitJson({ community, rules, search });
@@ -111,8 +115,8 @@ export function registerScenarioCommand(program: Command): void {
             `Looking for ways ${player} reaches rank ${opts.target} ` +
               `(${search.examined} combination(s) examined)`,
           );
-          if (!search.achievable) {
-            console.log(search.note ?? 'Not achievable.');
+          if (search.achievable !== true) {
+            console.log(search.note ?? (search.achievable === false ? 'Not achievable.' : 'The available data does not establish whether the target is achievable.'));
             return;
           }
           for (const example of search.examples) {
@@ -122,7 +126,7 @@ export function registerScenarioCommand(program: Command): void {
             );
           }
           console.log(
-            '\nResults are representative of the outcome (home win / draw / away win), not exact scores.',
+            '\nResults represent distinct scoring outcomes for the published tips.',
           );
           return;
         }

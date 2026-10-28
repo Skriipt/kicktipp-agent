@@ -1,6 +1,7 @@
 import type { Page } from './http/page.js';
 import * as cheerio from 'cheerio';
 import { getLeaderboardUrl } from './url.js';
+import { assertReadable } from './http/response.js';
 
 export type TipStatusKind = 'complete' | 'partial' | 'missing';
 
@@ -116,6 +117,9 @@ export async function fetchTipStatus(
   community: string,
   matchday?: number,
 ): Promise<TipStatusData> {
+  return page.runExclusive(async () => {
   await page.goto(getLeaderboardUrl(community, matchday));
+  assertReadable(page, getLeaderboardUrl(community, matchday));
   return parseTipStatusHtml(await page.content());
+  });
 }

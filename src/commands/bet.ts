@@ -12,6 +12,7 @@ import {
   type BonusQuestion,
 } from '../core.js';
 import { submitAudited } from '../audit/log.js';
+import { submitVerified, type SubmissionTarget } from '../submission.js';
 import { inheritPrintedDate, localizePrintedDate } from '../helpers/match-date.js';
 import { runTui } from '../tui/app/launch.js';
 import { t } from '../i18n/index.js';
@@ -124,8 +125,8 @@ async function fixtureBets(page: any, community: string, bets: string[], matchda
 async function bonusBetsInteractive(
   page: any,
   questions: BonusQuestion[],
-): Promise<{ question: string; answer: string }[]> {
-  const applied: { question: string; answer: string }[] = [];
+): Promise<({ question: string; answer: string } & SubmissionTarget)[]> {
+  const applied: ({ question: string; answer: string } & SubmissionTarget)[] = [];
   for (const q of questions) {
     console.log(`\n  ${q.question}`);
 
@@ -160,7 +161,7 @@ async function bonusBetsInteractive(
         sel.options[idx].value,
       );
       console.log(`    → ${sel.options[idx].text}`);
-      applied.push({ question: q.question, answer: sel.options[idx].text });
+      applied.push({ question: q.question, answer: sel.options[idx].text, name: sel.name, value: sel.options[idx].value });
     }
   }
   return applied;
@@ -200,7 +201,7 @@ async function bonusBets(page: any, community: string, bets: string[]): Promise<
     dryRun: false,
     bets: applied.map((a) => ({ fixture: a.question, bet: a.answer, previous: null })),
   };
-  await submitAudited(record, () => page.click('button[name="submitbutton"]'));
+  await page.runExclusive(() => submitAudited(record, () => submitVerified(page, applied)));
   console.log('\n' + t('common.bonusSaved'));
 }
 

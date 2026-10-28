@@ -124,6 +124,38 @@ async function startListener(slugs: string[]) {
 }
 
 describe('the localhost setup listener', () => {
+  it('waits for active account operations before reconnect changes configuration', async () => {
+    const { startSetupListener } = await import('../src/setup/listener.js');
+    const { fetchImpl, calls: requests } = mockFetch(kicktipp(['mycomm']));
+    let release!: () => void;
+    let queued!: () => void;
+    const activeOperation = new Promise<void>((resolve) => { release = resolve; });
+    const waiting = new Promise<void>((resolve) => { queued = resolve; });
+    const beforeChange = vi.fn(async () => {
+      expect(requests).toHaveLength(0);
+    });
+    const handle = await startSetupListener({
+      fetchImpl,
+      timeoutMs: 8_000,
+      runExclusive: async (operation) => { queued(); await activeOperation; return operation(); },
+      onChanging: beforeChange,
+    });
+    try {
+      const pending = post(handle.url, { step: 'login', email: EMAIL, password: PASSWORD });
+      await waiting;
+      expect(beforeChange).not.toHaveBeenCalled();
+      expect(requests).toHaveLength(0);
+      expect(fs.existsSync(path.join(home, '.config', 'kicktipp-agent', 'config.ini'))).toBe(false);
+      release();
+      expect((await pending).status).toBe(200);
+      expect(await handle.finished).toBe('saved');
+      expect(beforeChange).toHaveBeenCalledOnce();
+    } finally {
+      release();
+      await handle.close();
+    }
+  });
+
   it('saves a login and shuts down after a successful form submit', async () => {
     const handle = await startListener(['mycomm']);
     const res = await post(handle.url, {
@@ -141,9 +173,8 @@ describe('the localhost setup listener', () => {
     expect(ini).toContain(EMAIL);
     expect(ini).not.toContain(PASSWORD);
     expect(ini).toMatch(/mycomm/);
-    const session = JSON.parse(
-      fs.readFileSync(path.join(home, '.config', 'kicktipp-agent', 'session.json'), 'utf8'),
-    );
+    const { sessionFile } = await import('../src/config.js');
+    const session = JSON.parse(fs.readFileSync(sessionFile(), 'utf8'));
     expect(session.cookies).toContainEqual(expect.objectContaining({ name: 'sid', value: 'valid' }));
   });
 

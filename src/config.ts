@@ -6,6 +6,7 @@ import * as ini from 'ini';
 import readline from 'readline';
 import { t } from './i18n/index.js';
 import type { ScoringRules } from './rules/scoring.js';
+import { urlBase } from './url.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
@@ -26,6 +27,20 @@ export function setActiveProfile(name: string | null): void {
 
 export function getActiveProfile(): string | null {
   return activeProfile ?? process.env.KICKTIPP_PROFILE ?? null;
+}
+
+/** Stable ownership for local data; never put account names in file paths. */
+export function accountScope(): string {
+  const environmentEmail = process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD
+    ? process.env.KICKTIPP_EMAIL : null;
+  const config = readConfig();
+  const profile = environmentEmail ? null : profileSection(config);
+  const email = environmentEmail ?? (profile?.email && (profile.password || profile.store === 'session')
+      ? profile.email
+      : config.auth?.email ?? '');
+  return crypto.createHash('sha256')
+    .update(JSON.stringify([urlBase(), getActiveProfile() || '', String(email).trim().toLowerCase()]))
+    .digest('hex');
 }
 
 /** Community override for a single invocation (the --community flag). */
@@ -66,12 +81,9 @@ function profileSection(config: Record<string, any>): Record<string, any> | null
   return section;
 }
 
-/** Session cookies are per profile so two accounts never share a jar. */
+/** Old profile-only jars remain untouched; their account cannot be verified. */
 export function sessionFile(): string {
-  const name = getActiveProfile();
-  return name
-    ? path.join(CONFIG_DIR, `session-${name.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
-    : path.join(CONFIG_DIR, 'session.json');
+  return path.join(CONFIG_DIR, `session-${accountScope()}.json`);
 }
 
 export function listProfiles(): string[] {

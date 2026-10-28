@@ -23,7 +23,10 @@ export interface SetupHandle {
 export interface StartSetupOptions {
   timeoutMs?: number;
   fetchImpl?: FetchLike;
-  onSaved?: () => void;
+  onSaved?: () => void | Promise<void>;
+  /** Coordinate setup mutations with the caller's active account operations. */
+  runExclusive?: <T>(operation: () => Promise<T>) => Promise<T>;
+  onChanging?: () => void | Promise<void>;
   /**
    * When false, the listener does not keep the Node process alive. MCP stdio
    * needs that so a get_status call cannot pin the process after stdin closes.
@@ -114,7 +117,7 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
   let port = 0;
 
   const server = http.createServer((req, res) => {
-    void handle(req, res);
+    void (opts.runExclusive ? opts.runExclusive(() => handle(req, res)) : handle(req, res));
   });
 
   async function shutdown(outcome: SetupOutcome): Promise<void> {
@@ -175,6 +178,8 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
         return;
       }
 
+      await opts.onChanging?.();
+
       const step = body.get('step');
       if (step === 'community' && phase.kind === 'community') {
         const community = body.get('community') ?? '';
@@ -183,7 +188,7 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
           return;
         }
         saveCommunity(community);
-        opts.onSaved?.();
+        await opts.onSaved?.();
         await send(res, 200, donePage());
         await shutdown('saved');
         return;
@@ -231,14 +236,14 @@ export function startSetupListener(opts: StartSetupOptions = {}): Promise<SetupH
 
       const communities = await getCommunities(page);
       if (communities.length === 0) {
-        opts.onSaved?.();
+        await opts.onSaved?.();
         await send(res, 200, donePage());
         await shutdown('saved');
         return;
       }
       if (communities.length === 1) {
         saveCommunity(communities[0]);
-        opts.onSaved?.();
+        await opts.onSaved?.();
         await send(res, 200, donePage());
         await shutdown('saved');
         return;

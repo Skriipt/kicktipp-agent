@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
+import { McpServer, ResourceTemplate, type CallToolResult } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { localizeMatchDates } from './helpers/match-date.js';
@@ -54,13 +54,21 @@ setUrlBase(resolveBaseUrl({ configSite: readUiSite() }));
 // ── Persistent Kicktipp session ────────────────────────────────────
 
 let pageInstance: Page | null = null;
+// One account/session operation at a time, including reconnect configuration.
+// Failed reads/writes must release the queue without retrying a write.
+let operationTail: Promise<void> = Promise.resolve();
+function runOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = operationTail.then(operation);
+  operationTail = result.then(() => {}, () => {});
+  return result;
+}
 
 async function setupPrompt(kind: 'missing' | 'expired'): Promise<{ url: string; text: string }> {
   const url = await ensureSetupListener({
     keepAlive: false,
-    onSaved: () => {
-      pageInstance = null;
-    },
+    runExclusive: runOperation,
+    onChanging: discardSession,
+    onSaved: discardSession,
   });
   const text =
     kind === 'expired'
@@ -134,7 +142,15 @@ const server = new McpServer(
   { instructions: (readOnly ? 'READ-ONLY CONNECTION: betting and settings tools are not available, and no tool here can change anything on Kicktipp. Do not offer to place bets. ' : '') + 'Kicktipp football prediction game (kicktipp.com and kicktipp.de). If the user asks to set up, connect, or log in to Kicktipp, call connect_account and ask them to open the setup_url in their browser. Do not ask for a password in chat. Otherwise call get_status first. If only the community is missing, call get_communities then set_community.' },
 );
 
-server.registerTool(
+function registerTool<S extends z.ZodRawShape>(
+  name: string,
+  config: { description: string; inputSchema: z.ZodObject<S>; outputSchema: typeof OUTPUT_SCHEMA },
+  handler: (args: z.output<z.ZodObject<S>>) => Promise<CallToolResult>,
+): void {
+  server.registerTool(name, config, (args) => runOperation(() => handler(args)));
+}
+
+registerTool(
   'get_status',
   {
     description: 'Check current configuration. Call this first for a status snapshot. If the user wants to connect or set up Kicktipp, call connect_account instead. If setup_url is set, ask the user to open that localhost page. Most tools require a community.',
@@ -169,7 +185,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'connect_account',
   {
     description:
@@ -206,7 +222,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_today_matches',
   {
     description: "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
@@ -221,7 +237,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_bets',
   {
     description: 'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
@@ -236,7 +252,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_schedule',
   {
     description: 'Get the match schedule with results for a matchday.',
@@ -251,7 +267,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_leaderboard',
   {
     description: 'Get player rankings for a matchday. Includes matches/results and ranking table with points.',
@@ -271,7 +287,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_tip_status',
   {
     description:
@@ -295,7 +311,7 @@ server.registerTool(
     }),
 );
 
-server.registerTool(
+registerTool(
   'get_overview',
   {
     description: 'Get the season overview showing all players and their points across matchdays.',
@@ -310,7 +326,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_table',
   {
     description: 'Get the league table (standings of the actual football teams, not the prediction game).',
@@ -325,7 +341,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_rules',
   {
     description: 'Get the game rules and scoring system.',
@@ -340,7 +356,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_communities',
   {
     description: 'List all kicktipp communities the user belongs to.',
@@ -354,7 +370,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_players',
   {
     description: 'List all players in the saved community.',
@@ -370,7 +386,7 @@ server.registerTool(
 );
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'set_community',
   {
     description: 'Set the active community. Use get_communities first to see available options, then pass the exact name.',
@@ -390,7 +406,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'set_player',
   {
     description: 'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
@@ -411,7 +427,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
     'set_notify',
     {
       description:
@@ -449,7 +465,7 @@ if (!readOnly) {
   );
 }
 
-server.registerTool(
+registerTool(
   'get_bonus_questions',
   {
     description: 'Get available bonus questions with their options and current selections.',
@@ -464,7 +480,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'whatif',
   {
     description: "Replay the cached season as if the player had followed a different strategy, and compare with what they actually scored. Strategies: a fixed scoreline such as '2:1', one of " + REPLAY_STRATEGIES.join(', ') + ", or suggest:safe|ev|contrarian. Needs a synced cache. Treat final_rank as an estimate — other players are compared on recorded totals that include bonus points the replay does not model.",
@@ -498,7 +514,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_standings_scenarios',
   {
     description: "Project the whole leaderboard under hypothetical results, or search for what has to happen for a player to reach a target rank. This answers questions like 'what do I need this weekend to take first?' in one call. Matches left unspecified come back as a rank range rather than a number, and the projection is exact only when every open match is given. Check the note field: before the deadline Kicktipp hides everyone's bets and nothing can be projected.",
@@ -528,7 +544,7 @@ server.registerTool(
     if (target_rank !== undefined) {
       const who = player || loadPlayer();
       if (!who) throw new Error('No player set. Call get_players then set_player, or pass a player.');
-      const search = findTargetCombinations(grid, leaderboard, rules.values, who, target_rank);
+      const search = findTargetCombinations(grid, leaderboard, rules.values, who, target_rank, 5, results ?? []);
       return jsonResult({ rules, search });
     }
 
@@ -537,7 +553,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_bet_log',
   {
     description: 'Show what this agent has actually submitted to Kicktipp, with timestamps and which entry point did it. Use this to answer "what have you placed?" from the record rather than from memory. Records marked dry-run or intent never reached Kicktipp.',
@@ -557,7 +573,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_deadline',
   {
     description: "Show how long is left before kickoff and which matches still need a bet. Use this whenever the user asks what is still open, or before suggesting bets, so you can tell them how urgent it is. Kickoff instants are parsed from Kicktipp's HTML (Central Time on .com, Berlin on .de) and shown in the time_zone field, which is this machine unless KICKTIPP_TZ is set.",
@@ -578,7 +594,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'list_members',
   {
     description:
@@ -593,7 +609,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_bets_for_member',
   {
     description:
@@ -612,7 +628,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'get_stats',
   {
     description: 'Season analytics for a player: form per matchday against the league average, rank history, hit-type breakdown (exact / goal difference / tendency / miss), prediction bias vs. what actually happened, and consistency. Computed from the local cache, so call sync_history first if it is empty. Always quote the data_completeness figures when summarising, so the user knows how many matchdays the numbers rest on.',
@@ -648,7 +664,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'sync_history',
   {
     description: 'Update the local season cache so get_stats has data to work with. Stops at the current matchday, skips finished and still-upcoming ones, and paces requests politely. The first run backfills holes; later runs usually cost one matchday. Pass to=34 to walk the rest of the season.',
@@ -666,7 +682,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerTool(
   'get_rival_analysis',
   {
     description: "Compare the user with another player for one matchday: the points gap, how much each remaining match can still swing it, and what has to happen to overtake them. Check the 'mode' field before answering - 'exact' means both bet sets are known, 'bounds' means the rival's bets are still hidden and the figures are best/worst limits, not predictions. Also report rules.source, since the point values may be assumed defaults rather than this community's real ones.",
@@ -699,7 +715,7 @@ server.registerTool(
   }),
 );
 
-server.registerTool(
+registerTool(
   'suggest_bets',
   {
     description: "Build a suggested bet slip for a matchday from the odds Kicktipp publishes. READ-ONLY: it returns suggestions and never submits anything. Show the slip and its reasoning to the user, and only if they explicitly agree, call place_bets yourself. Matches that already carry a bet are flagged so they are not silently overwritten. Strategies: 'safe' backs the likeliest outcome, 'ev' maximises expected points under the community's scoring rules, 'contrarian' fades the favourite in close matches and is high variance by design.",
@@ -743,7 +759,7 @@ server.registerTool(
 );
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
     'place_bets_for_member',
     {
       description:
@@ -787,7 +803,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'place_bets',
   {
     description: 'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
@@ -808,7 +824,7 @@ if (!readOnly) {
 }
 
 if (!readOnly) {
-  server.registerTool(
+  registerTool(
   'place_bonus_bets',
   {
     description: 'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer". Ranking questions have several dropdowns (selects.length > 1): pass one array entry per slot in the SAME call, in order, repeating the question text. Example: ["Who will be relegated?=FC St. Pauli", "Who will be relegated?=1. FC Heidenheim", "Who will be relegated?=Holstein Kiel"]. A shorter list fills remaining empty slots instead of overwriting the first dropdown. A successful dry run still returns success=true with dry_run=true; nothing is submitted.',
@@ -835,10 +851,16 @@ if (!readOnly) {
 // cache: reading a resource never triggers a login, and it reports an empty
 // cache rather than going to the network behind the user's back.
 
-function cachedResource(kind: 'rules' | 'leaderboard' | 'schedule', matchday?: number) {
+function cachedResource(requestedCommunity: string | string[], kind: 'rules' | 'leaderboard' | 'schedule', matchday?: number) {
   const community = loadCommunity();
   if (!community) {
     return { error: 'no_community', message: 'No community set. Call set_community first.' };
+  }
+  if (requestedCommunity !== community) {
+    return { error: 'community_mismatch', message: 'This resource does not belong to the active community.' };
+  }
+  if (kind !== 'rules' && (!Number.isInteger(matchday) || matchday! < 1 || matchday! > 34)) {
+    return { error: 'invalid_matchday', message: 'Matchday must be an integer from 1 to 34.' };
   }
   const store = new CacheStore(community);
   const cached = store.read(kind, matchday);
@@ -868,7 +890,7 @@ server.registerResource(
     description: "The community's rules page, as cached locally.",
     mimeType: 'application/json',
   },
-  async (uri) => resourceContents(uri, cachedResource('rules')),
+  async (uri, variables) => runOperation(async () => resourceContents(uri, cachedResource(variables.community, 'rules'))),
 );
 
 server.registerResource(
@@ -880,7 +902,7 @@ server.registerResource(
     mimeType: 'application/json',
   },
   async (uri, variables) =>
-    resourceContents(uri, cachedResource('leaderboard', Number(variables.matchday))),
+    runOperation(async () => resourceContents(uri, cachedResource(variables.community, 'leaderboard', Number(variables.matchday)))),
 );
 
 server.registerResource(
@@ -892,7 +914,7 @@ server.registerResource(
     mimeType: 'application/json',
   },
   async (uri, variables) =>
-    resourceContents(uri, cachedResource('schedule', Number(variables.matchday))),
+    runOperation(async () => resourceContents(uri, cachedResource(variables.community, 'schedule', Number(variables.matchday)))),
 );
 
 // ── Start ──────────────────────────────────────────────────────────
