@@ -117,7 +117,14 @@ export async function runSetup(options: SetupOptions = {}): Promise<void> {
       io.log('Prüfe Anmeldung und lade deine Tipprunden …');
       const communities = await (options.communities ?? discoverCommunities)(config.account.email, config.account.password, config.account.site);
       if (!communities.length) throw new Error('Keine Tipprunde gefunden. Tritt zunächst auf Kicktipp einer Tipprunde bei.');
+      const sameAccount = previous?.account.email.trim().toLowerCase() === config.account.email.trim().toLowerCase()
+        && previous?.account.site === config.account.site;
+      if (!sameAccount) config.account.player = undefined;
       config.account.community = await choose(io, 'Tipprunde', communities, config.account.community);
+      config.account.communities = [...new Set([
+        ...(sameAccount ? previous?.account.communities ?? [] : []).filter(group => communities.includes(group)),
+        config.account.community,
+      ])];
       const player = await io.ask('Spielername für Statistiken (optional)', { default: config.account.player });
       config.account.player = player.trim() || undefined;
       config.server.readOnly = !await askYes(io, 'Darf dein Agent Tipps abgeben und ändern?', !config.server.readOnly);

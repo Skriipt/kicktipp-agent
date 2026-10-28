@@ -14,7 +14,17 @@ export interface DeadlineMatch {
   urgent: boolean;
 }
 
+export interface DeadlineBonusQuestion {
+  id: string;
+  question: string;
+  deadline: string | null;
+  missingAnswers: number;
+  editable: boolean;
+}
+
 export interface DeadlineReport {
+  /** A failed group read must never be presented as an empty, completed round. */
+  readError?: 'auth_required' | 'check_failed';
   community: string;
   matchday: number | null;
   timeZone: string;
@@ -23,6 +33,9 @@ export interface DeadlineReport {
   nextKickoff: string | null;
   nextKickoffIn: string | null;
   matches: DeadlineMatch[];
+  bonusQuestions?: DeadlineBonusQuestion[];
+  /** Regular matches remain usable if the separate bonus read fails. */
+  bonusCheckFailed?: boolean;
   openCount: number;
   needsBetCount: number;
   urgentCount: number;

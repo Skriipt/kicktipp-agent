@@ -4,6 +4,8 @@
 
 ### Added
 
+- Web account discovery with one-click pool subscriptions, multiple pools in the overview and scheduler, and a retained default pool for MCP/CLI.
+- Bonus-question reminders for missing answer slots using explicit bonus deadlines, with per-pool/channel deduplication and visible unknown deadlines.
 - Docker Compose service with authenticated HTTP MCP, persistent account data, Docker health checks and graceful shutdown.
 - Terminal setup wizard that verifies Kicktipp login, discovers communities, generates the MCP token and defaults to read-only access.
 - Native Discord, Telegram and generic webhook notifications, multiple destinations, optional test messages and Telegram chat discovery.

@@ -1,4 +1,4 @@
-let fixtureConfig=null, fixtureRevision='0', fixtureConflict=false, fixtureDelay=null, fixtureError=null, fixtureOverviewDelay=null, fixtureReadStatus=null;
+let fixtureConfig=null, fixtureRevision='0', fixtureConflict=false, fixtureDelay=null, fixtureError=null, fixtureOverviewDelay=null, fixtureReadStatus=null, fixtureAccountDelay=null, fixtureReports=null;
 const fixtureRequests=[];
 const fixtureStatus=()=>({version:'1.3.0',startedAt:'2026-10-28T12:00:00Z',community:fixtureConfig?.account.community,readOnly:fixtureConfig?.readOnly??true,read:fixtureReadStatus||{lastCheck:'2026-10-28T14:00:00Z',lastSuccess:'2026-10-28T14:00:00Z',lastError:['auth_required','check_failed'].includes(fixtureError)?fixtureError:null},scheduler:{running:true,lastCheck:'2026-10-28T14:00:00Z',lastSuccess:'2026-10-28T14:00:00Z',nextCheck:'2026-10-28T14:15:00Z',lastError:fixtureError,failedChannels:[],deliveredCount:0}});
 const fixtureEnvelope=()=>({revision:fixtureRevision,configured:!!fixtureConfig,config:structuredClone(fixtureConfig),status:fixtureStatus()});
@@ -13,9 +13,9 @@ else if(path==='/api/admin/config'){
  if('timeZone'in body)fixtureConfig.timeZone=body.timeZone;
  if('readOnly'in body)fixtureConfig.readOnly=body.readOnly;
  fixtureRevision=String(Number(fixtureRevision)+1);data=fixtureEnvelope();
-}else if(path==='/api/admin/account/check')data={communities:['friends']};
+}else if(path==='/api/admin/account/check'){data={communities:['friends','league','new-pool']};if(fixtureAccountDelay)await fixtureAccountDelay;}
 else if(path==='/api/admin/notifications/test')data={ok:true};
-else if(path==='/api/admin/overview'||path==='/api/admin/check')data={status:fixtureStatus(),report:fixtureReport()};
+else if(path==='/api/admin/overview'||path==='/api/admin/check')data={status:fixtureStatus(),report:fixtureReport(),...(fixtureReports?{reports:fixtureReports}:{})};
 else if(path==='/api/admin/connection')data={url:'/mcp',token:'fixture-mcp-token',readOnly:fixtureConfig.readOnly};
 else throw Error('unexpected fixture route '+path);
 if(path==='/api/admin/overview'&&fixtureOverviewDelay)await fixtureOverviewDelay;

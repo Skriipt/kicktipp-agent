@@ -22,12 +22,12 @@ Repository instructions are in [AGENTS.md](../AGENTS.md) and `docs/agents/`.
 
 The file contains:
 
-- `account`: email, password, community, optional player, and `de`/`com` site.
+- `account`: email, password, default `community`, optional tracked `communities`, optional player, and `de`/`com` site. Legacy files without `communities` track only the default; a configured list is nonempty, unique and includes the default.
 - `server`: bearer token, listen host/port, read-only mode and exact allowed browser origins.
 - `notifications`: channel destinations, warning windows and polling interval.
 - `timeZone`: an IANA display timezone.
 
-The service file stores secrets in plain text with mode `0600`; do not describe it as encrypted. Account-specific config and data directories are selected from a hash of site and account identity. Runtime environment variables connect this configuration to the existing core. A service instance has one active account/community; HTTP MCP does not expose tools to change those settings.
+The service file stores secrets in plain text with mode `0600`; do not describe it as encrypted. Account-specific config and data directories are selected from a hash of site and account identity. Runtime environment variables connect this configuration to the existing core. A service instance has one active account and multiple tracked communities. MCP/CLI retain the default community; HTTP MCP does not expose tools to change account/subscription settings. Admin saves verify new subscriptions against fresh account membership. Switching accounts clears inherited subscriptions and player selection.
 
 `src/config.ts` retains standalone INI profiles and session handling. New encrypted passwords use AES-256-GCM with a random persisted `credentials.key`. Legacy machine-derived passwords can be read and migrated on their original machine. Both the key and INI file must be included in CLI backups. Service credentials are read from the service configuration instead.
 
@@ -57,13 +57,15 @@ On shutdown, stop accepting requests and future scheduler runs, allow in-flight 
 
 Generic webhooks receive the structured JSON payload. Discord receives `content`, with mentions disabled and `wait=true`. Telegram uses `sendMessage` with plain text and disabled link previews. Provider failures are sanitized; retry information is carried by `NotificationError`.
 
-`src/service/scheduler.ts` owns `DeadlineScheduler`. Its injected `fetchReport` is queued by the service entry point. It starts immediately, then schedules the next run after the current one finishes; overlapping manual checks reuse the in-flight promise.
+`src/service/scheduler.ts` owns `DeadlineScheduler`. Its injected `fetchReport` accepts a report or report array and is queued by the service entry point. The service reads each tracked community in the same account session, publishes the reports together, and marks per-group failures with `readError`. The scheduler starts immediately, then schedules the next run after the current one finishes; overlapping scheduler checks reuse the in-flight promise. Failed groups do not suppress reminders for healthy groups.
 
 For each untipped future fixture, the scheduler chooses the most urgent crossed warning window. Per-destination hashes include community, fixture, kickoff and window. Successful sends are checkpointed independently; failed destinations retry with backoff while healthy destinations remain deduplicated. State contains hashes and timestamps, not channel credentials. Expired records are pruned.
 
 Authentication/check failures send operational alerts with a persisted six-hour cooldown. Corrupt state fails startup; unwritable state prevents delivery and appears as `state_failed`. A crash between external acceptance and local checkpoint can duplicate a notification: there is no cross-system exactly-once transaction.
 
 Scheduled `missing_tips` payloads contain `summary`, community, matchday, timezone, check time, warning window and matches. `service_error` payloads contain a sanitized code and summary. `test` payloads are sent only when explicitly requested in the web UI, during setup or via `notify --test`. Web manual refresh only reads matches and does not run notification delivery.
+
+`src/bonus-reminders.ts` reads editable bonus answer slots and joins uniquely matching question titles to the bonus schedule's `table#fragen` / `th[name="tipptermin"]` column. Form array indices are not assumed to be schedule question IDs. Duplicate titles, missing dates and invalid dates retain `deadline: null`. `missing_bonus` notifications use a separate identity namespace and include the question, explicit deadline and missing-answer count. Unknown deadlines are exposed as `unresolvedBonusQuestions`; bonus read failures use `bonusCheckFailed` and leave known match reminders available. A complete successful check is required before `lastSuccess` advances.
 
 ## Kicktipp HTTP and parsing
 
@@ -129,5 +131,7 @@ CLI JSON output remains machine-readable. MCP tools return both text and `struct
 `src/service/admin.ts` validates all admin inputs, redacts snapshots and applies HMAC revision checks to prevent stale overwrites. Empty password/channel secrets preserve existing values only for the same identity or destination ID/kind. `web-http.ts` bounds JSON bodies, enforces Host/Origin and CSP, and authenticates the independent `web-admin-token`. Fresh containers can serve the locked UI before `service.json` exists. The token is obtained through the local `web-token` command, not through an unauthenticated HTTP endpoint.
 
 Operational status exposes `read` for the latest scheduled or manual Kicktipp read and `scheduler` for notification runs. The UI uses `read` for login, timestamps and report freshness; a successful manual refresh clears an earlier read failure without hiding unresolved notification delivery failures.
+
+The overview includes `reports` for every tracked group and retains `report` for the default group (null if its read failed). Status includes `communities` and `groupErrors`. Per-group `readError` must render as a failure, never an empty successful round. Membership discovery responses are invalidated on account edits or logout; the Add action persists subscriptions immediately through revision-checked admin saves.
 
 Custom reminders permit 1–10 positive fractional hours up to 168. An empty list is allowed only when no destinations are configured. Saving in the web UI applies configuration without a container restart. Settings changed externally still require a restart. Browser API tests and process/container fixtures must never contact real Kicktipp accounts or real notification destinations.

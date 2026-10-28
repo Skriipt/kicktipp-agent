@@ -9,6 +9,7 @@ import path from 'node:path';
 
 const PASSWORD = 'web-process-password-only-for-local-fixture';
 const COMMUNITY = 'web-process-fixture';
+const OTHER_COMMUNITY = 'other-web-process-fixture';
 const processes = new Set<ChildProcess>();
 let fixture: Server | undefined;
 let directory: string | undefined;
@@ -101,6 +102,7 @@ describe('compiled local web administration', () => {
     const unexpected: string[] = [];
     const logins: string[] = [];
     let rejectReads = false;
+    let failedGroup: string | null = null;
     fixture = createServer(async (request, response) => {
       const pathname = new URL(request.url!, 'http://localhost').pathname;
       const account = request.headers.cookie?.match(/(?:^|;\s*)sid=(first|second)(?:;|$)/)?.[1] ?? null;
@@ -116,16 +118,17 @@ describe('compiled local web administration', () => {
         if (request.method === 'POST') {
           let body = ''; for await (const chunk of request) body += String(chunk);
           const form = new URLSearchParams(body); const name = form.get('kennung')?.split('@')[0];
-          if (!rejectReads && (name === 'first' || name === 'second') && form.get('passwort') === PASSWORD) {
+          if ((name === 'first' || name === 'second') && form.get('passwort') === PASSWORD) {
             logins.push(name); response.writeHead(302, { Location: '/', 'Set-Cookie': `sid=${name}; Path=/; HttpOnly` }); response.end(); return;
           }
           html(loginForm); return;
         }
       }
-      if (request.method === 'GET' && ['/', '/info/profil/meinetipprunden', `/${COMMUNITY}/tippabgabe`, `/${COMMUNITY}/tippspielplan`, `/${COMMUNITY}/tippuebersicht`].includes(pathname)) {
-        if (!account || rejectReads) { response.writeHead(302, { Location: '/info/profil/login' }); response.end(); return; }
+      if (request.method === 'GET' && ['/', '/info/profil/meinetipprunden', `/${COMMUNITY}/tippabgabe`, `/${COMMUNITY}/tippspielplan`, `/${COMMUNITY}/tippuebersicht`, `/${OTHER_COMMUNITY}/tippabgabe`, `/${OTHER_COMMUNITY}/tippspielplan`].includes(pathname)) {
+        if (failedGroup && pathname.startsWith(`/${failedGroup}/`)) { response.writeHead(500); response.end('Synthetic group failure'); return; }
+        if (!account || (rejectReads && pathname !== '/' && pathname !== '/info/profil/meinetipprunden')) { response.writeHead(302, { Location: '/info/profil/login' }); response.end(); return; }
         if (pathname === '/' || pathname === '/info/profil/meinetipprunden') {
-          html(`<div id="kicktipp-content"><a href="/${COMMUNITY}/">${COMMUNITY}</a></div>`);
+          html(`<div id="kicktipp-content"><a href="/${COMMUNITY}/">${COMMUNITY}</a><a href="/${OTHER_COMMUNITY}/">${OTHER_COMMUNITY}</a></div>`);
         } else if (pathname.endsWith('/tippabgabe')) {
           html(`<div id="kicktipp-content"><div class="pagetitle">Spieltag 1</div><table id="tippabgabeSpiele"><tbody><tr><td>${kickoff}</td><td>${account} Home</td><td>Away FC</td><td><input id="spieltipp_1_heimTipp" name="spieltipp[1].heimTipp" value=""><input id="spieltipp_1_gastTipp" name="spieltipp[1].gastTipp" value=""></td></tr></tbody></table></div>`);
         } else if (pathname.endsWith('/tippspielplan')) {
@@ -168,7 +171,7 @@ describe('compiled local web administration', () => {
     expect(empty).toMatchObject({ configured: false, config: null });
     expect(fs.existsSync(configFile)).toBe(false);
     const login = await admin('account/check', { account: { email: 'first@example.invalid', password: PASSWORD, site: 'de' } });
-    expect(await login.json()).toEqual({ communities: [COMMUNITY] });
+    expect(await login.json()).toEqual({ communities: [COMMUNITY, OTHER_COMMUNITY] });
     expect(fs.existsSync(configFile)).toBe(false);
     expect(fs.existsSync(path.join(directory, 'accounts'))).toBe(false);
 
@@ -256,7 +259,7 @@ describe('compiled local web administration', () => {
 
     const beforeCandidate = requests.length;
     const candidate = await admin('account/check', { account: { email: 'second@example.invalid', password: PASSWORD, site: 'de' } });
-    expect(await candidate.json()).toEqual({ communities: [COMMUNITY] });
+    expect(await candidate.json()).toEqual({ communities: [COMMUNITY, OTHER_COMMUNITY] });
     const stillFirst = await admin('check', {});
     expect((await stillFirst.json()).report.matches[0].home).toBe('first Home');
     expect((await getConfig()).config.account.email).toBe('first@example.invalid');
@@ -270,7 +273,7 @@ describe('compiled local web administration', () => {
     fs.writeFileSync(candidateState, 'corrupt-state-private-fixture-content', { mode: 0o600 });
     const configBeforeFailure = fs.readFileSync(configFile, 'utf8');
     const failedChange = await admin('config', { revision: saved.revision,
-      account: { email: 'second@example.invalid', password: PASSWORD } });
+      account: { email: 'second@example.invalid', password: PASSWORD, community: COMMUNITY } });
     expect(failedChange.status).toBe(500);
     expect(await failedChange.json()).toEqual({ error: 'request_failed' });
     expect(fs.readFileSync(configFile, 'utf8')).toBe(configBeforeFailure);
@@ -287,7 +290,7 @@ describe('compiled local web administration', () => {
     // Repair only the synthetic account state, then retry the same revision.
     fs.rmSync(candidateState);
     const changedAt = requests.length;
-    saved = await save({ revision: saved.revision, account: { email: 'second@example.invalid', password: PASSWORD } });
+    saved = await save({ revision: saved.revision, account: { email: 'second@example.invalid', password: PASSWORD, community: COMMUNITY } });
     expect((await settled()).report.matches[0].home).toBe('second Home');
     expect(requests.slice(changedAt).filter(row => row.account === 'first')).toEqual([]);
     expect(fs.readdirSync(path.join(directory, 'accounts'))).toHaveLength(2);
@@ -309,7 +312,29 @@ describe('compiled local web administration', () => {
     expect((await (await admin('connection')).json()).token).toBe(token);
     expect(unexpected).toEqual([]);
     expect(requests.filter(row => row.method === 'POST' && !['/info/profil/login', '/webhook/fixture-secret'].includes(row.pathname))).toEqual([]);
-    expect(logins.filter(name => name === 'second')).toHaveLength(2); // isolated check plus new active account
+    expect(logins.filter(name => name === 'second')).toHaveLength(4); // isolated check, two save validations, and active account login
+    // A discovered second group can be added live without replacing the primary.
+    let multi = await save({ revision: reloaded.revision, account: {
+      community: COMMUNITY, communities: [COMMUNITY, OTHER_COMMUNITY],
+    } });
+    const added = await settled();
+    expect(added.reports.map((group: any) => group.community)).toEqual([COMMUNITY, OTHER_COMMUNITY]);
+    expect(added.status.communities).toEqual([COMMUNITY, OTHER_COMMUNITY]);
+    expect(added.report.community).toBe(COMMUNITY);
+    expect(received.filter(item => item.event === 'missing_tips' && item.community === OTHER_COMMUNITY)).toHaveLength(1);
+    // Failure in the second group must not turn the whole overview into an empty success.
+    failedGroup = OTHER_COMMUNITY;
+    const partial = await admin('check', {});
+    expect(partial.status).toBe(200);
+    const partialReport = await partial.json();
+    expect(partialReport.report.matches[0].home).toBe('second Home');
+    expect(partialReport.reports[1].readError).toBe('check_failed');
+    expect(partialReport.status.groupErrors).toEqual([{ community: OTHER_COMMUNITY, code: 'check_failed' }]);
+    failedGroup = null;
+    multi = await save({ revision: multi.revision, account: { communities: [COMMUNITY] } });
+    expect(multi.config.account.communities).toEqual([COMMUNITY]);
+    expect((await settled()).reports.map((group: any) => group.community)).toEqual([COMMUNITY]);
+    expect(received.filter(item => item.event === 'missing_tips')).toHaveLength(3);
     await restarted.stop();
   }, 30_000);
 });

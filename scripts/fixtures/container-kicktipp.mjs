@@ -13,7 +13,8 @@ const kickoff = `${value('day')}.${value('month')}.${value('year')} ${value('hou
 
 const server = createServer((request, response) => {
   void (async () => {
-    const pathname = new URL(request.url, 'http://localhost').pathname;
+    const url = new URL(request.url, 'http://localhost');
+    const pathname = url.pathname;
     const html = (body) => {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       response.end(body);
@@ -46,13 +47,22 @@ const server = createServer((request, response) => {
       response.end();
       return;
     }
-    if (request.method === 'GET' && ['/', '/info/profil/meinetipprunden', `/${community}/tippabgabe`].includes(pathname)) {
+    if (request.method === 'GET' && ['/', '/info/profil/meinetipprunden', `/${community}/tippabgabe`, `/${community}/tippspielplan`].includes(pathname)) {
       if (!request.headers.cookie?.includes('sid=smoke')) {
         response.writeHead(302, { Location: '/info/profil/login' });
         response.end();
         return;
       }
-      if (pathname.endsWith('/tippabgabe')) {
+      if (pathname.endsWith('/tippabgabe') && url.searchParams.get('bonus') === 'true') {
+        html(`<div id="kicktipp-content"><table id="tippabgabeFragen"><tbody>
+          <tr><td>1</td><td>Wer wird Meister?</td><td>
+          <select name="tippabgabeFragenForms[101].tipp"><option value="-1" selected>---</option><option value="1">Home FC</option></select>
+          </td></tr></tbody></table></div>`);
+      } else if (pathname.endsWith('/tippspielplan')) {
+        html(`<div id="kicktipp-content"><table id="fragen"><thead><tr>
+          <th name="wettbewerb">Wettbewerb</th><th name="termin">Termin</th><th name="tipptermin">Tipptermin</th><th name="frage">Frage</th>
+          </tr></thead><tbody><tr><td>Fixture League</td><td>01.06.27 15:30</td><td>${kickoff}</td><td>Wer wird Meister?</td></tr></tbody></table></div>`);
+      } else if (pathname.endsWith('/tippabgabe')) {
         html(`<div id="kicktipp-content"><div class="pagetitle">Spieltag 1</div>
           <table id="tippabgabeSpiele"><tbody><tr><td>${kickoff}</td><td>Home FC</td><td>Away FC</td><td>
           <input id="spieltipp_1_heimTipp" value=""><input id="spieltipp_1_gastTipp" value="">

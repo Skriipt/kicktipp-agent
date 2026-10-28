@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { applyServiceConfig, readServiceConfig, writeServiceConfig, validateServiceConfig, type ServiceConfig } from '../src/service/settings.js';
+import { applyServiceConfig, configuredCommunities, readServiceConfig, writeServiceConfig, validateServiceConfig, type ServiceConfig } from '../src/service/settings.js';
 
 export function exampleConfig(): ServiceConfig {
   return {
@@ -16,6 +16,31 @@ beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'kicktipp-settin
 afterEach(() => { vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: true }); });
 
 describe('service configuration', () => {
+  it('keeps legacy single-pool files unchanged while exposing their tracked group', () => {
+    const legacy = exampleConfig();
+    const valid = validateServiceConfig(legacy);
+    expect(valid).toEqual(legacy);
+    expect(configuredCommunities(valid)).toEqual(['my-pool']);
+    expect(valid.account).not.toHaveProperty('communities');
+  });
+
+  it('persists normalized tracked groups with a primary and rejects invalid group sets', () => {
+    const config = exampleConfig();
+    config.account.communities = [' my-pool ', 'work'];
+    const valid = validateServiceConfig(config);
+    expect(configuredCommunities(valid)).toEqual(['my-pool', 'work']);
+    const file = path.join(root, 'multiple-groups.json');
+    writeServiceConfig(valid, file);
+    expect(readServiceConfig(file)).toEqual(valid);
+    const copy = configuredCommunities(valid);
+    copy.push('untracked');
+    expect(valid.account.communities).toEqual(['my-pool', 'work']);
+    for (const groups of [[], ['work'], ['my-pool', 'my-pool'], ['my-pool', ' my-pool '], ['my-pool', '../other'], Array.from({ length: 51 }, (_, i) => i ? `pool-${i}` : 'my-pool')]) {
+      config.account.communities = groups;
+      expect(() => validateServiceConfig(config)).toThrow(/account/);
+    }
+  });
+
   it('round trips restricted secret file and reports missing/invalid config without values', () => {
     const file = path.join(root, 'service.json');
     expect(() => readServiceConfig(file)).toThrow(/setup/);

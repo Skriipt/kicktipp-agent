@@ -40,6 +40,56 @@ function setup(initial: ServiceConfig | null = config()) {
 }
 
 describe('local administration controller', () => {
+  it('exposes legacy groups and adds discovered memberships without losing the primary or stored secrets', async () => {
+    const app = setup();
+    expect((await app.read()).config!.account.communities).toEqual(['friends']);
+    await app.save({ account: { communities: ['friends', 'work'] } });
+    expect(app.current()!.account).toEqual({ ...config().account, communities: ['friends', 'work'] });
+    expect(app.checkAccount).toHaveBeenCalledWith({ email: 'owner@example.com', password: PASSWORD, site: 'de' });
+    app.checkAccount.mockResolvedValueOnce(['friends', 'work', 'family']);
+    await app.save({ account: { communities: ['friends', 'work', 'family'] } });
+    expect((await app.read()).config!.account.communities).toEqual(['friends', 'work', 'family']);
+    expect(app.checkAccount).toHaveBeenCalledTimes(2);
+    await app.save({ account: { communities: ['friends', 'work', 'family'] } });
+    expect(app.checkAccount).toHaveBeenCalledTimes(2);
+    await app.save({ account: { community: 'work', communities: ['work', 'family'] } });
+    expect(app.current()!.account.community).toBe('work');
+    expect(app.checkAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects unverified additions and keeps the previous config and revision', async () => {
+    const app = setup();
+    const before = await app.read();
+    await expect(app.save({ account: { communities: ['friends', 'strangers'] } })).rejects.toMatchObject({ code: 'community_not_found', status: 400 });
+    expect(await app.read()).toEqual(before);
+    app.checkAccount.mockRejectedValueOnce(new Error(PASSWORD));
+    await expect(app.save({ account: { communities: ['friends', 'work'] } })).rejects.toMatchObject({ code: 'login_failed', status: 502 });
+    expect(await app.read()).toEqual(before);
+    await expect(app.save({ account: { communities: [] } })).rejects.toMatchObject({ code: 'invalid_config' });
+    expect(app.applyConfig).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale group updates before making a membership request', async () => {
+    const app = setup();
+    const { revision } = await app.read();
+    await app.save({ account: { communities: ['friends', 'work'] } });
+    await expect(app.admin.handle('/api/admin/config', 'POST', { revision, account: { communities: ['friends'] } })).rejects.toMatchObject({ code: 'config_conflict', status: 409 });
+    expect(app.current()!.account.communities).toEqual(['friends', 'work']);
+    expect(app.checkAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not carry tracked groups, primary group or player across account identities', async () => {
+    const initial = config();
+    initial.account.communities = ['friends', 'work'];
+    const app = setup(initial);
+    await expect(app.save({ account: { email: 'other@example.com', password: 'new-password' } })).rejects.toMatchObject({ code: 'invalid_config' });
+    app.checkAccount.mockResolvedValueOnce(['new-pool']);
+    await app.save({ account: { email: 'other@example.com', password: 'new-password', community: 'new-pool' } });
+    expect(app.current()!.account).toEqual({ email: 'other@example.com', password: 'new-password', community: 'new-pool', site: 'de', player: undefined });
+    expect((await app.read()).config!.account.communities).toEqual(['new-pool']);
+    expect(app.checkAccount).toHaveBeenCalledWith({ email: 'other@example.com', password: 'new-password', site: 'de' });
+  });
+
   it('returns only redacted settings and explicitly exposes the MCP token on the connection route', async () => {
     const app = setup();
     const data = await app.read();
@@ -65,6 +115,7 @@ describe('local administration controller', () => {
       await expect(app.admin.handle(route, 'GET')).rejects.toMatchObject({ code: 'setup_required', status: 409 });
     }
     await expect(app.save({ readOnly: false })).rejects.toMatchObject({ code: 'account_required' });
+    app.checkAccount.mockResolvedValueOnce(['new-pool']);
     await app.save({ account: { email: 'new@example.com', password: 'new-password', community: 'new-pool', site: 'com' } });
     expect(app.current()).toMatchObject({
       account: { email: 'new@example.com', password: 'new-password', community: 'new-pool', site: 'com' },
@@ -76,6 +127,7 @@ describe('local administration controller', () => {
 
   it('retains blank secrets only for the same account identity and matching channel ID and kind', async () => {
     const app = setup();
+    app.checkAccount.mockResolvedValueOnce(['friends', 'other-pool']);
     await app.save({ account: { email: 'OWNER@example.com', password: '', community: 'other-pool' },
       notifications: { channels: [
         { id: 'telegram-home', kind: 'telegram', botToken: '', chatId: '5678' },
@@ -102,7 +154,7 @@ describe('local administration controller', () => {
 
   it('replaces credentials explicitly and can clear the optional player without changing server credentials', async () => {
     const app = setup();
-    await app.save({ account: { email: 'other@example.com', password: 'replacement-password', site: 'com', player: '' }, readOnly: false });
+    await app.save({ account: { email: 'other@example.com', password: 'replacement-password', site: 'com', community: 'friends', player: '' }, readOnly: false });
     expect(app.current()!.account).toMatchObject({ email: 'other@example.com', password: 'replacement-password', site: 'com' });
     expect(app.current()!.account.player).toBeUndefined();
     expect(app.current()!.server).toEqual({ ...config().server, readOnly: false });
